@@ -2,7 +2,7 @@
  * single/bulk операции; выбранные picked/pickedEmployees принадлежат settings
  * и переживают смену запроса. searchEpoch и dialogEpoch отменяют старые ответы,
  * bulkEpoch инвалидируется изменением текста. Разрешение списка не пишет в БД;
- * addLocal меняет локальный состав, окончательная проверка выполняется sync.
+ * addLocals меняет локальный состав, окончательная проверка выполняется sync.
  * Ошибка сети сохраняет выбор и текст; DOM обновляется внутри панели подбора. */
 export function installEmployees(ctx) {
     const { settings, overlays } = ctx;
@@ -12,7 +12,6 @@ export function installEmployees(ctx) {
     const currentMembers = (...args) => ctx.currentMembers(...args);
     const esc = (...args) => ctx.esc(...args);
     const renderOverlay = (...args) => ctx.renderOverlay(...args);
-    const addLocal = (...args) => ctx.addLocal(...args);
     const refreshMemberRows = (...args) => ctx.refreshMemberRows(...args);
     async function searchEmployees(q, append = false) {
         settings.singleAbort?.abort();

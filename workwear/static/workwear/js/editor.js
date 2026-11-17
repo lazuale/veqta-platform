@@ -14,7 +14,6 @@ export function installEditor(ctx) {
     const renderOverlay = (...args) => ctx.renderOverlay(...args);
     const fail = (...args) => ctx.fail(...args);
     const currentMembers = (...args) => ctx.currentMembers(...args);
-    const assignments = (...args) => ctx.assignments(...args);
     const notice = (...args) => ctx.notice(...args);
     const norm = (...args) => ctx.norm(...args);
     const byItem = (...args) => ctx.byItem(...args);
@@ -36,7 +35,6 @@ export function installEditor(ctx) {
     const field = (...args) => ctx.field(...args);
     const emptyCount = (...args) => ctx.emptyCount(...args);
     const normalizedDraft = (...args) => ctx.normalizedDraft(...args);
-    const openRegistry = (...args) => ctx.openRegistry(...args);
     function adoptRequest(request, { resetView = true } = {}) {
         if (!request || !Array.isArray(request.members) || !Number.isInteger(request.version))
             throw new Error('Некорректный ответ при загрузке заявки');
@@ -232,9 +230,9 @@ export function installEditor(ctx) {
         const items = new Map(byItem().map(it => [it.id, it]));
         return `<div class="vq-tablewrap"><table><thead><tr><th class="select-col">${locked ? '' : `<input type="checkbox" data-check="all" aria-label="Выбрать сотрудников показанной страницы" ${rows.length && rows.every(m => settings.selected.has(m.employee_id)) ? 'checked' : ''}>`}</th><th>Сотрудник</th><th class="dept-col">Подразделение</th><th>Назначено</th><th>Контроль</th><th></th></tr></thead><tbody>${rows.map(m => `<tr data-row="${m.employee_id}" class="${settings.selected.has(m.employee_id) ? 'selected' : ''}"><td class="select-col">${locked ? '' : `<input type="checkbox" data-check="${m.employee_id}" aria-label="Выбрать ${esc(m.full_name)}" ${settings.selected.has(m.employee_id) ? 'checked' : ''}>`}</td><td><button type="button" class="vq-name-action" data-person="${m.employee_id}">${esc(m.full_name)}</button><div class="secondary">${esc(m.personnel_number)}<span class="small-dept"> · ${esc(m.department_name || '')}</span></div></td><td class="dept-col">${esc(m.department_name || '—')}</td><td><div class="vq-assignment-tags">${rowTags(m, items)}</div></td><td class="vq-repeat-status">${rowWarning(m)}</td><td class="quiet">›</td></tr>`).join('')}</tbody></table></div>`;
     }
-    function groups(activeOnly = false) {
+    function groups() {
         const map = new Map();
-        for (const it of byItem().filter(item => !activeOnly || item.is_active)) {
+        for (const it of byItem()) {
             const key = it.category || 'Прочее';
             if (!map.has(key))
                 map.set(key, []);
@@ -242,16 +240,26 @@ export function installEditor(ctx) {
         }
         return [...map.entries()];
     }
+    function cellAvailable(member, item) {
+        return editable() &&
+            (item.is_active || member.assignments.some(a => a.item_id === item.id)) &&
+            !settings.pendingAssignments.has(ctx.assignmentKey(member.employee_id, item.id));
+    }
     function cell(m, it, locked) {
         const assigned = m.assignments.some(a => a.item_id === it.id), w = warning(m.employee_id, it.id);
         const tab = settings.matrixFocus?.employeeId === m.employee_id && settings.matrixFocus?.itemId === it.id ? 0 : -1;
-        const pending = settings.pendingAssignments.has(ctx.assignmentKey(m.employee_id, it.id));
-        return `<td><button type="button" class="gridpick ${assigned ? 'on' : ''} ${assigned && w ? 'warn' : ''}" data-cell="${m.employee_id}:${it.id}" tabindex="${tab}" aria-pressed="${assigned}" aria-label="${esc(it.name)}: ${assigned ? 'назначено' : 'не назначено'} — ${esc(m.full_name)}${w ? ' — повтор' : ''}" ${locked || pending || (!it.is_active && !assigned) ? 'disabled aria-disabled="true"' : ''}>${assigned ? (settings.repeatState === 'pending' || settings.repeatState === 'failed' ? '<span aria-hidden="true">…</span>' : '<span class="vq-cell-check" aria-hidden="true"></span>') : ''}${assigned && w ? '<sup aria-hidden="true">!</sup>' : ''}${!assigned ? '<span aria-hidden="true">—</span>' : ''}</button></td>`;
+        return `<td><button type="button" class="gridpick ${assigned ? 'on' : ''} ${assigned && w ? 'warn' : ''}" data-cell="${m.employee_id}:${it.id}" tabindex="${tab}" aria-pressed="${assigned}" aria-label="${esc(it.name)}: ${assigned ? 'назначено' : 'не назначено'} — ${esc(m.full_name)}${w ? ' — повтор' : ''}" ${locked || !cellAvailable(m, it) ? 'disabled aria-disabled="true"' : ''}>${assigned ? (settings.repeatState === 'pending' || settings.repeatState === 'failed' ? '<span aria-hidden="true">…</span>' : '<span class="vq-cell-check" aria-hidden="true"></span>') : ''}${assigned && w ? '<sup aria-hidden="true">!</sup>' : ''}${!assigned ? '<span aria-hidden="true">—</span>' : ''}</button></td>`;
     }
     function matrix(rows, locked) {
-        const visibleItems = ctx.matrixItems(), wanted = new Set(visibleItems.map(it => it.id));
-        const gg = groups().map(([name, items]) => [name, items.filter(it => wanted.has(it.id))]).filter(([, items]) => items.length);
-        return `<div class="vq-matrix-legend">✓ Назначено · ✓! Назначено с повтором · — Не назначено · … Проверяется история.</div><div class="vq-tablewrap" tabindex="0" role="region" aria-label="Матрица назначений. Горизонтальная прокрутка для всех столбцов."><table class="matrix"><thead><tr><th class="sticky" rowspan="2" style="text-align:left"><span style="display:inline-flex;align-items:center;gap:10px">${locked ? '' : `<input type="checkbox" data-check="all" aria-label="Выбрать сотрудников показанной страницы" ${rows.length && rows.every(m => settings.selected.has(m.employee_id)) ? 'checked' : ''}>`} Сотрудник</span></th>${gg.map(([name, items]) => `<th class="matrix-group" colspan="${items.length}">${esc(name)}</th>`).join('')}<th rowspan="2" class="sumcol">Всего</th></tr><tr>${visibleItems.map(it => `<th class="matrix-leaf" title="${esc(it.name)}">${esc(it.name)}<small>${it.validity_days} дн.</small></th>`).join('')}</tr></thead><tbody>${rows.map(m => `<tr data-row="${m.employee_id}" class="${settings.selected.has(m.employee_id) ? 'selected' : ''}"><td class="sticky"><span style="display:flex;align-items:center;gap:9px">${locked ? '' : `<input type="checkbox" data-check="${m.employee_id}" aria-label="Выбрать ${esc(m.full_name)}" ${settings.selected.has(m.employee_id) ? 'checked' : ''}>`}<span><button type="button" class="vq-name-action" data-person="${m.employee_id}">${esc(m.full_name)}</button><span class="secondary" style="display:block">${esc(m.personnel_number)}</span></span></span></td>${visibleItems.map(it => cell(m, it, locked)).join('')}<td class="sumcol">${m.assignments.length}</td></tr>`).join('')}</tbody></table></div>`;
+        const visibleItems = ctx.matrixItems(), gg = [];
+        // Каталог может чередовать категории. Каждый заголовок покрывает только
+        // соседние колонки, сохраняя заданный администратором порядок позиций.
+        for (const item of visibleItems) {
+            const category = item.category || 'Прочее', last = gg.at(-1);
+            if (last?.[0] === category) last[1].push(item);
+            else gg.push([category, [item]]);
+        }
+        return `<div class="vq-matrix-legend">✓ Назначено · ✓! Назначено с повтором · — Не назначено · … Проверяется история.</div><div class="vq-tablewrap" tabindex="0" role="region" aria-label="Матрица назначений. Горизонтальная прокрутка для всех столбцов."><table class="matrix"><thead><tr><th class="sticky" rowspan="2" style="text-align:left"><span style="display:inline-flex;align-items:center;gap:10px">${locked ? '' : `<input type="checkbox" data-check="all" aria-label="Выбрать сотрудников показанной страницы" ${rows.length && rows.every(m => settings.selected.has(m.employee_id)) ? 'checked' : ''}>`} Сотрудник</span></th>${gg.map(([name, items]) => `<th class="matrix-group" scope="colgroup" colspan="${items.length}">${esc(name)}</th>`).join('')}<th rowspan="2" class="sumcol">Всего</th></tr><tr>${visibleItems.map(it => `<th class="matrix-leaf" scope="col" title="${esc(it.name)}">${esc(it.name)}<small>${it.validity_days} дн.</small></th>`).join('')}</tr></thead><tbody>${rows.map(m => `<tr data-row="${m.employee_id}" class="${settings.selected.has(m.employee_id) ? 'selected' : ''}"><td class="sticky"><span style="display:flex;align-items:center;gap:9px">${locked ? '' : `<input type="checkbox" data-check="${m.employee_id}" aria-label="Выбрать ${esc(m.full_name)}" ${settings.selected.has(m.employee_id) ? 'checked' : ''}>`}<span><button type="button" class="vq-name-action" data-person="${m.employee_id}">${esc(m.full_name)}</button><span class="secondary" style="display:block">${esc(m.personnel_number)}</span></span></span></td>${visibleItems.map(it => cell(m, it, locked)).join('')}<td class="sumcol">${m.assignments.length}</td></tr>`).join('')}</tbody></table></div>`;
     }
     function selectionBar() {
         if (!settings.selected.size || !editable())
@@ -286,10 +294,21 @@ export function installEditor(ctx) {
             footer.textContent = `${ctx.pageFooter()}${settings.selected.size ? ' · Выбрано ' + settings.selected.size : ''}`;
     }
     function renderMemberBody(rows, locked) {
-        if (settings.tableMode === 'matrix' && rows.length && byItem().length &&
-                (!rows.some(m => m.employee_id === settings.matrixFocus?.employeeId) ||
-                 !ctx.matrixItems().some(it => it.id === settings.matrixFocus?.itemId)))
-            settings.matrixFocus = { employeeId: rows[0].employee_id, itemId: ctx.matrixItems()[0].id };
+        if (settings.tableMode === 'matrix') {
+            const items = ctx.matrixItems();
+            const focusedMember = rows.find(m => m.employee_id === settings.matrixFocus?.employeeId);
+            const focusedItem = items.find(item => item.id === settings.matrixFocus?.itemId);
+            if (!focusedMember || !focusedItem || !cellAvailable(focusedMember, focusedItem)) {
+                settings.matrixFocus = null;
+                for (const member of rows) {
+                    const item = items.find(item => cellAvailable(member, item));
+                    if (item) {
+                        settings.matrixFocus = { employeeId: member.employee_id, itemId: item.id };
+                        break;
+                    }
+                }
+            }
+        }
         if (!currentMembers().length)
             return locked
                 ? `<div class="vq-empty"><div class="symbol">${icon('people')}</div><h3>В заявке нет сотрудников</h3><p>Заявка доступна только для просмотра.</p></div>`
@@ -411,8 +430,22 @@ export function installEditor(ctx) {
             }
         }
         updateEditorSummary();
+        if (settings.tableMode === 'matrix' && !$('#editorTable [data-cell][tabindex="0"]:not(:disabled)')) {
+            // Снятая неактивная позиция становится недоступной. Оставляем
+            // точку входа с клавиатуры в той же строке, затем в соседних.
+            const next = $(`[data-row="${employeeId}"] [data-cell]:not(:disabled)`) || $('#editorTable [data-cell]:not(:disabled)');
+            $$('#editorTable [data-cell][tabindex="0"]').forEach(el => { el.tabIndex = -1; });
+            settings.matrixFocus = null;
+            if (next) {
+                const [employeeId, itemId] = next.dataset.cell.split(':').map(Number);
+                settings.matrixFocus = { employeeId, itemId };
+                next.tabIndex = 0;
+            }
+        }
         const restore = focus && $(focus);
         if (restore && !restore.disabled) restore.focus({ preventScroll: true });
+        else if (focus?.startsWith('[data-cell='))
+            $('#editorTable [data-cell][tabindex="0"]:not(:disabled)')?.focus({ preventScroll: true });
     }
     function assignmentPending(employeeId, itemId, value) {
         const selectors = [`[data-cell="${employeeId}:${itemId}"]`];
@@ -420,7 +453,9 @@ export function installEditor(ctx) {
         for (const selector of selectors) {
             const control = $(selector);
             if (control) {
-                control.disabled = value || !editable() || settings.saving;
+                const member = currentMembers().find(m => m.employee_id === employeeId);
+                const item = byItem().find(item => item.id === itemId);
+                control.disabled = value || !member || !item || !cellAvailable(member, item);
                 control.setAttribute('aria-busy', String(value));
             }
         }
@@ -502,8 +537,7 @@ export function installEditor(ctx) {
         settings.memberQuery = ''; settings.memberFilter = 'all';
         return members.length;
     }
-    function addLocal(e) { return !!addLocals([e]); }
-    async function save({ finish = false, leave = false } = {}) {
+    async function save({ finish = false } = {}) {
         if (!editable() || settings.saving) return false;
         if (settings.pendingAssignments.size) {
             notice('Дождитесь проверки выбранных позиций.', true);
@@ -568,7 +602,6 @@ export function installEditor(ctx) {
                 renderOverlay();
                 notice('Сохранение подтверждено. Обновление сведений не удалось: ' + err.message, true);
             }
-            if (leave && !dirty()) await openRegistry();
             return true;
         } catch (err) {
             if (!inContext()) return false;
@@ -592,6 +625,6 @@ export function installEditor(ctx) {
         await openRequest(data.request.id);
     }
     Object.assign(ctx, {
-        openRequest, scanRepeats, warning, warningsCount, memberVisible, rowTags, rowWarning, memberList, groups, cell, matrix, selectionBar, patchSelection, renderEditor, renderDigest, refreshMemberRows, patchOneEmployee, chooseAssignment, addLocal, addLocals, save, create
+        openRequest, scanRepeats, warning, warningsCount, memberVisible, rowTags, rowWarning, memberList, groups, cell, cellAvailable, matrix, selectionBar, patchSelection, renderEditor, renderDigest, refreshMemberRows, patchOneEmployee, chooseAssignment, addLocals, save, create
     });
 }

@@ -1720,9 +1720,24 @@
 /* Короткое окно / настоящий browser zoom: данные сохраняют читаемую область.
  * Весь редактор прокручивается по вертикали, таблица — внутри своей области.
  * Широкие экраны обычной высоты сохраняют исходную гибкую компоновку. */
-@media (max-height:760px) {
+@media (max-height:760px), (max-width:760px) {
+  #veq-app > #main[data-screen] {overflow-y:auto}
+  #veq-app > #main[data-screen].vq-short-content > .vq-card {max-height:none}
   #veq-app > #main[data-screen] > .vq-card {flex:0 0 auto}
   #veq-app .vq-card > #editorTable {flex:0 0 auto;min-height:180px}
   #veq-app .vq-card > #editorTable > .vq-tablewrap,
   #veq-app #registryRegion {flex:0 0 auto;height:clamp(180px,55dvh,360px);min-height:180px}
+}
+
+/* Закреплённые имя и итог оставляют место хотя бы одной позиции на телефоне. */
+@media (max-width:760px) {
+  #veq-app .matrix {--vq-matrix-name-width:clamp(132px,38vw,200px)}
+  #veq-app .matrix thead th.sticky,
+  #veq-app .matrix tbody td.sticky {
+    width:var(--vq-matrix-name-width);
+    min-width:var(--vq-matrix-name-width);
+    max-width:var(--vq-matrix-name-width);
+    padding-inline:var(--vq-space-2);
+  }
+  #veq-app .matrix .sumcol {width:48px;min-width:48px;max-width:48px;padding-inline:4px}
 }

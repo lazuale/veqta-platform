@@ -13,7 +13,6 @@ export function installController(ctx) {
     const openDrawer = (...args) => ctx.openDrawer(...args);
     const renderOverlay = (...args) => ctx.renderOverlay(...args);
     const renderEditor = (...args) => ctx.renderEditor(...args);
-    const cell = (...args) => ctx.cell(...args);
     const chooseAssignment = (...args) => ctx.chooseAssignment(...args);
     const $ = (...args) => ctx.$(...args);
     const loadRegistry = (...args) => ctx.loadRegistry(...args);
@@ -25,7 +24,6 @@ export function installController(ctx) {
     const notice = (...args) => ctx.notice(...args);
     const resolveBulk = (...args) => ctx.resolveBulk(...args);
     const addBulk = (...args) => ctx.addBulk(...args);
-    const addLocal = (...args) => ctx.addLocal(...args);
     const scanBatchBeforeAdd = (...args) => ctx.scanBatchBeforeAdd(...args);
     const batchChange = (...args) => ctx.batchChange(...args);
     const newSelection = (...args) => ctx.newSelection(...args);
@@ -78,6 +76,16 @@ export function installController(ctx) {
             main.innerHTML = `<section class="vq-head"><h1>Не удалось загрузить заявки</h1></section><div class="vq-notice error">${esc(err.message)} <a href="/login/">Войти</a></div>`;
         }
     }
+    function rememberMatrixFocus(button) {
+        $$('[data-cell][tabindex="0"]').forEach(el => { if (el !== button) el.tabIndex = -1; });
+        const [employeeId, itemId] = button.dataset.cell.split(':').map(Number);
+        settings.matrixFocus = { employeeId, itemId };
+        button.tabIndex = 0;
+    }
+    root.addEventListener('focusin', event => {
+        const button = event.target.closest('[data-cell]');
+        if (button && !button.disabled) rememberMatrixFocus(button);
+    });
     // Делегирование сохраняет обработчики при адресной замене компонента.
     root.addEventListener('click', async (e) => {
         const target = e.target.closest('button,[data-open],[data-person],[data-prior]');
@@ -123,7 +131,7 @@ export function installController(ctx) {
             if (target.dataset.cell) {
                 if (!editable()) return;
                 const [employee, item] = target.dataset.cell.split(':').map(Number);
-                settings.matrixFocus = { employeeId: employee, itemId: item };
+                rememberMatrixFocus(target);
                 setBusy(true);
                 await chooseAssignment(employee, item);
                 return;
@@ -482,9 +490,14 @@ export function installController(ctx) {
         }
         if (target.dataset.resolve && editable() && can('view_employee')) {
             settings.resolved[Number(target.dataset.resolve)].chosen = target.value ? Number(target.value) : null;
+            const ready = ctx.bulkCandidates().length;
             const apply = $('[data-action="apply-bulk"]', overlays);
-            if (apply)
-                apply.disabled = false;
+            if (apply) {
+                apply.disabled = !ready;
+                apply.textContent = `Добавить найденных (${ready})`;
+            }
+            const note = $('#bulkReadyNote', overlays);
+            if (note) note.textContent = `Готовы к добавлению: ${ready}`;
         }
         if (target.dataset.item && editable()) {
             void chooseAssignment(settings.drawer, Number(target.dataset.item), target.checked).catch(fail);
@@ -557,6 +570,14 @@ export function installController(ctx) {
             if (e.key === 'PageDown') row = Math.min(rows.length - 1, row + ctx.pageRowSize);
             if (e.key === 'Home') { column = 0; if (e.ctrlKey) row = 0; }
             if (e.key === 'End') { column = items.length - 1; if (e.ctrlKey) row = rows.length - 1; }
+            const available = () => ctx.cellAvailable(rows[row], items[column]);
+            const vertical = ['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown'].includes(e.key);
+            const step = ['ArrowLeft', 'ArrowUp', 'PageUp', 'End'].includes(e.key) ? -1 : 1;
+            while (row >= 0 && row < rows.length && column >= 0 && column < items.length && !available()) {
+                if (vertical) row += step;
+                else column += step;
+            }
+            if (row < 0 || row >= rows.length || column < 0 || column >= items.length) return;
             const rowPage = Math.floor(row / ctx.pageRowSize), colPage = Math.floor(column / ctx.pageColumnSize);
             if (rowPage !== settings.memberPageIndex || colPage !== settings.columnPageIndex) {
                 settings.memberPageIndex = rowPage; settings.columnPageIndex = colPage;
@@ -565,9 +586,7 @@ export function installController(ctx) {
             }
             const next = $(`[data-cell="${rows[row].employee_id}:${items[column].id}"]`);
             if (next && !next.disabled) {
-                $$('[data-cell][tabindex="0"]').forEach(el => { el.tabIndex = -1; });
-                settings.matrixFocus = { employeeId: rows[row].employee_id, itemId: items[column].id };
-                next.tabIndex = 0;
+                rememberMatrixFocus(next);
                 next.focus({ preventScroll: true });
                 next.scrollIntoView({ block: 'nearest', inline: 'nearest' });
                 // Закреплённые колонки имени и итогов не должны закрывать активную ячейку.
