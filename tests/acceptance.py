@@ -16,6 +16,7 @@ import tempfile
 from threading import Barrier
 import time
 import urllib.request
+from uuid import uuid4
 
 
 def check_race(actor, people, items):
@@ -23,9 +24,9 @@ def check_race(actor, people, items):
     from django.db import connections
     from django.contrib.auth import get_user_model
     from workwear import services
-    from workwear.models import Organization, WorkwearEvent
+    from workwear.models import WorkwearEvent
     from workwear.sync import save_draft
-    req = services.create_request(organization_name=Organization.ALMAZ, actor=actor)
+    req = services.create_request(organization_id=people[0].organization_id, actor=actor)
     barrier = Barrier(2)
 
     def worker(person):
@@ -123,9 +124,63 @@ def check_browser(actor, people, executable):
                 page.reload()
                 expect(page.locator('h1')).to_have_text("Состав заявки")
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Горизонтальный выход страницы за экран"
+                # Добавляем справочники нативными формами и используем новую позицию в UI.
+                page.set_viewport_size({"width": 1440, "height": 1000})
+                page.goto(base + "/admin/workwear/organization/add/")
+                page.locator('[name="name"]').fill("Организация из браузерного теста")
+                page.locator('[name="external_id"]').fill(str(uuid4()))
+                page.locator('[name="requests_enabled"]').check()
+                page.locator('[name="_save"]').click()
+                expect(page.locator('#changelist')).to_be_visible()
+                page.goto(base + "/admin/workwear/workwearitem/add/")
+                page.locator('[name="code"]').fill("BROWSER-90")
+                page.locator('[name="name"]').fill("Позиция из браузерного теста")
+                page.locator('[name="category"]').fill("Новая категория из Admin")
+                page.locator('[name="validity_days"]').fill("90")
+                page.locator('[name="sort_order"]').fill("0")
+                page.locator('[name="is_active"]').check()
+                page.locator('[name="_save"]').click()
+                expect(page.locator('#changelist')).to_be_visible()
+                metadata = page.request.get(base + "/workwear/api/ui/metadata/").json()
+                item = next(item for item in metadata["items"] if item["code"] == "BROWSER-90")
+                added_org = next(org for org in metadata["organizations"]
+                    if org["label"] == "Организация из браузерного теста")
+                page.goto(base + "/workwear/")
+                page.locator('[data-action="create"]').click()
+                expect(page.locator(f'#newOrg option[value="{added_org["value"]}"]')).to_have_text(added_org["label"])
+                page.locator('#newOrg').select_option(str(people[0].organization_id))
+                page.locator('[data-action="create-now"]').click()
+                expect(page.locator('h1')).to_have_text("Состав заявки")
+                page.locator('[data-action="add"]').first.click()
+                page.locator('#bulkText').fill(people[0].personnel_number)
+                page.locator('[data-action="check-bulk"]').click()
+                page.locator('[data-action="apply-bulk"]').click()
+                page.locator('[data-check="all"]').check()
+                page.locator('[data-action="batch-add"]').click()
+                page.locator(f'input[data-choice="{item["id"]}"]').check()
+                page.locator('[data-action="apply-batch"]').click()
+                page.locator('[data-action="save"]').click()
+                expect(page.locator('[data-action="save"]')).to_be_disabled()
+                page.locator('[data-action="finish"]').click()
+                page.locator('#finishAck').check()
+                page.locator('[data-action="apply-finish"]').click()
+                expect(page.locator('[data-action="reopen"]')).to_be_visible()
+                closed_url = page.url
+                page.goto(base + f"/admin/workwear/workwearitem/{item["id"]}/change/")
+                page.locator('[name="name"]').fill("Изменённое название после завершения")
+                page.locator('[name="validity_days"]').fill("1095")
+                page.locator('[name="is_active"]').uncheck()
+                page.locator('[name="_save"]').click()
+                expect(page.locator('#changelist')).to_be_visible()
+                page.goto(closed_url)
+                expect(page.locator('.vq-assignment-tags .vitem')).to_have_text("Позиция из браузерного теста")
+                page.locator('[data-mode="matrix"]').click()
+                expect(page.locator('.matrix-leaf')).to_contain_text("Позиция из браузерного теста")
+                expect(page.locator('.matrix-leaf')).to_contain_text("90 дн.")
                 assert not errors, errors
                 assert not failures, failures
                 print(f"Браузер {browser.version}: вход, Portal, подбор, назначение, сохранение, матрица, завершение, возврат, ширина 390 px — успешно")
+                print("Django Admin и интерфейс: новая организация, новая позиция со сроком 90 дней, переименование/отключение и сохранение истории — успешно")
                 browser.close()
         finally:
             server.terminate()

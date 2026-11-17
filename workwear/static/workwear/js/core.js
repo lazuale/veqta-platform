@@ -28,7 +28,7 @@ export function installCore(ctx) {
     const field = (placeholder, value, id) => `<label class="vq-field">${icon('search')}<input data-input="${id}" autocomplete="off" value="${esc(value)}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}"></label>`;
     const settings = {
         screen: 'registry', session: null, meta: null, request: null, base: null,
-        registry: { q: '', status: '', organization_name: '', date_basis: 'created', date_from: '', date_to: '', sort: 'newest', offset: 0, limit: 30 },
+        registry: { q: '', status: '', organization_id: '', date_basis: 'created', date_from: '', date_to: '', sort: 'newest', offset: 0, limit: 30 },
         registryOpen: false, registryData: null, pageEpoch: 0, searchEpoch: 0, refreshEpoch: 0,
         bulkEpoch: 0, dialogEpoch: 0, historyEpoch: 0, matrixFocus: null, pendingAssignments: new Map(),
         memberQuery: '', memberFilter: 'all', tableMode: 'list', memberPageIndex: 0, columnPageIndex: 0, actionEpoch: 0, selected: new Set(),
@@ -68,27 +68,36 @@ export function installCore(ctx) {
             busyFocus = null;
         }
     }
-    // Только подписи UI; состав и порядок каталога задаёт Django.
-    const shortLabels = new Map([
-        ['Костюм летний', 'Летний'], ['Костюм зимний', 'Зимний'],
-        ['Костюм специальный', 'Специальный'],
-        ['Обувь летняя', 'Летняя'], ['Обувь зимняя', 'Зимняя'],
-        ['Обувь специальная', 'Специальная'],
-        ['Сапоги резиновые', 'Резиновые'],
-        ['Головной убор летний', 'Летний'],
-        ['Головной убор зимний', 'Зимний'],
-        ['Жилет сигнальный', 'Сигнальный'],
-        ['Плащ влагозащитный', 'Влагозащитный'],
-    ]);
-    const shortItem = name => shortLabels.get(name) || name;
-    const byItem = () => (settings.meta?.items || []).slice();
+    const shortItem = name => name;
+    let catalogCache = null;
+    const byItem = () => {
+        const catalog = settings.meta?.items || [];
+        // Снимок сервера меняется при загрузке/сохранении. Индекс строится один раз,
+        // чтобы отрисовка каждой строки не сканировала до 30 000 назначений.
+        if (catalogCache?.catalog === catalog && catalogCache?.base === settings.base)
+            return catalogCache.items.slice();
+        const assigned = new Map();
+        for (const member of settings.base?.members || []) for (const a of member.assignments) {
+            if (a.name && !assigned.has(a.item_id)) assigned.set(a.item_id, a);
+        }
+        const items = catalog.filter(it => (isDraft() && it.is_active) || assigned.has(it.id)).map(it => {
+            const snapshot = assigned.get(it.id);
+            return snapshot ? { ...it, name: snapshot.name, category: snapshot.category,
+                validity_days: snapshot.validity_days, code: snapshot.code } : it;
+        });
+        const known = new Set(items.map(it => it.id));
+        for (const [id, snapshot] of assigned) if (!known.has(id))
+            items.push({ ...snapshot, id, is_active: false });
+        catalogCache = { catalog, base: settings.base, items };
+        return items.slice();
+    };
     const currentMembers = () => settings.request?.members || [];
     const importSummary = () => {
         const data = settings.meta?.import;
         if (!data?.accepted_at) return 'Справочник 1С не загружен';
         return `Принят: ${fmt(data.accepted_at)}`;
     };
-    const allOrgOptions = (value, all = false) => (all ? `<option value="" ${!value ? 'selected' : ''}>Все организации</option>` : '') + (settings.meta?.organizations || []).map(o => `<option value="${esc(o.value)}" ${o.value === value ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
+    const allOrgOptions = (value, all = false) => (all ? `<option value="" ${!value ? 'selected' : ''}>Все организации</option>` : '') + (settings.meta?.registry_organizations || []).map(o => `<option value="${esc(o.value)}" ${String(o.value) === String(value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
     const tone = (n) => n === 'closed' ? 'Завершена' : 'Черновик';
     const isDraft = () => settings.request?.status === 'draft';
     const editable = () => isDraft() && can('change_request');
@@ -150,7 +159,7 @@ export function installCore(ctx) {
                     : err.message || 'Ошибка операции', true);
     }
     Object.assign(ctx, {
-        root, main, overlays, feedback, API, $, $$, esc, copy, plural, fmt, fmtTime, norm, icon, btn, field, settings, can, historyKey, assignmentKey, controlSelector, setBusy, shortLabels, shortItem, byItem, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable, newSelection, itemNames, assignments, assignedCount, emptyCount, normalizedDraft, dirty, notice, api, fail
+        root, main, overlays, feedback, API, $, $$, esc, copy, plural, fmt, fmtTime, norm, icon, btn, field, settings, can, historyKey, assignmentKey, controlSelector, setBusy, shortItem, byItem, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable, newSelection, itemNames, assignments, assignedCount, emptyCount, normalizedDraft, dirty, notice, api, fail
     });
     return true;
 }

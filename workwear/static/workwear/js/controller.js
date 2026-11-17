@@ -168,7 +168,7 @@ export function installController(ctx) {
                     await loadRegistry();
                     break;
                 case 'reset-filters':
-                    settings.registry = { q: '', status: '', organization_name: '', date_basis: 'created', date_from: '', date_to: '', sort: 'newest', offset: 0, limit: 30 };
+                    settings.registry = { q: '', status: '', organization_id: '', date_basis: 'created', date_from: '', date_to: '', sort: 'newest', offset: 0, limit: 30 };
                     renderRegistry();
                     await loadRegistry();
                     break;
@@ -285,7 +285,7 @@ export function installController(ctx) {
                     const existing = new Set(settings.request.members.map(m => m.employee_id));
                     for (const e of settings.singleResults) {
                         if (existing.has(e.id) || e.is_current === false ||
-                                e.organization_name !== settings.request.organization_name)
+                                e.organization_id !== settings.request.organization_id)
                             continue;
                         settings.picked.add(e.id);
                         settings.pickedEmployees.set(e.id, e);
@@ -469,7 +469,7 @@ export function installController(ctx) {
                 const person = settings.singleResults.find(e => e.id === id);
                 const exists = settings.request.members.some(m => m.employee_id === id);
                 if (person && !exists && person.is_current !== false &&
-                        person.organization_name === settings.request.organization_name) {
+                        person.organization_id === settings.request.organization_id) {
                     settings.picked.add(id);
                     settings.pickedEmployees.set(id, person);
                 }

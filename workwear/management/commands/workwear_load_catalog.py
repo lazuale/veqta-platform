@@ -25,7 +25,7 @@ class Command(BaseCommand):
         parser.add_argument("--apply", action="store_true")
         parser.add_argument("--database-name", required=True,
                             help="Точное ожидаемое имя базы выбранного контура")
-        parser.add_argument("--expected-count", type=int, default=11)
+        parser.add_argument("--expected-count", type=int, required=True)
 
     def handle(self, *args, **options):
         """Проверить параметры и целевую БД, разобрать источник и выполнить выбранный режим.
@@ -60,7 +60,7 @@ class Command(BaseCommand):
             if row["is_active"] not in ("1", "0"):
                 raise CommandError(f"is_active must be 0 or 1 on row {idx}")
             if (not code or len(code) > 32 or not name or len(name) > 120 or
-                    not category or len(category) > 64 or validity not in (365, 730) or
+                    not category or len(category) > 64 or not 1 <= validity <= 32767 or
                     sort_order < 0 or code in codes):
                 raise CommandError(f"Invalid or duplicated catalog row {idx}")
             codes.add(code)

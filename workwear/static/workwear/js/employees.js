@@ -30,7 +30,7 @@ export function installEmployees(ctx) {
         settings.singleLoading = true;
         patchSearchResults();
         try {
-            const data = await api('ui/employees/?' + new URLSearchParams({ q, organization_name: settings.request.organization_name, offset, limit: 40 }), { signal: controller.signal });
+            const data = await api('ui/employees/?' + new URLSearchParams({ q, organization_id: settings.request.organization_id, offset, limit: 40 }), { signal: controller.signal });
             if (epoch !== settings.searchEpoch || settings.modal !== 'add' || settings.singleQuery !== q)
                 return;
             settings.singleResults = append ? [...settings.singleResults, ...data.results] : data.results;
@@ -112,8 +112,8 @@ export function installEmployees(ctx) {
         settings.bulkChecked = false;
         const apply = $('[data-action="apply-bulk"]'); if (apply) apply.disabled = true;
         try {
-            const present = currentMembers().map(m => m.employee_id), org = settings.request.organization_name;
-            const responses = await ctx.readChunks('ui/resolve/', lines, rows => ({ organization_name: org, lines: rows,
+            const present = currentMembers().map(m => m.employee_id), org = settings.request.organization_id;
+            const responses = await ctx.readChunks('ui/resolve/', lines, rows => ({ organization_id: org, lines: rows,
                 request_id: requestId, present_employee_ids: present }), { maxItems: 100, signal: controller.signal, valid, progress });
             if (!valid()) return;
             if (responses.some(r => !Array.isArray(r.results) || !Object.hasOwn(r, 'import_id')) ||

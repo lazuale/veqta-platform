@@ -1095,7 +1095,7 @@
   max-width: none;
 }
 
-#veq-app .vq-registry-tools>select[data-filter="organization_name"] {
+#veq-app .vq-registry-tools>select[data-filter="organization_id"] {
   grid-column: 3;
   grid-row: 1;
   width: 100%;
@@ -1633,7 +1633,7 @@
   flex: none;
 }
 
-#veq-app .vq-registry-tools > select[data-filter="organization_name"] {
+#veq-app .vq-registry-tools > select[data-filter="organization_id"] {
   width: 100%;
   max-width: none;
 }
@@ -1683,7 +1683,7 @@
   #veq-app .vq-toolbar.vq-registry-tools { grid-template-columns:minmax(0,1fr) minmax(0,1fr); }
   #veq-app .vq-registry-tools > .vq-field { grid-column:1/-1; grid-row:1; }
   #veq-app .vq-registry-tools > select[data-filter="status"] { grid-column:1; grid-row:2; min-width:0; }
-  #veq-app .vq-registry-tools > select[data-filter="organization_name"] { grid-column:2; grid-row:2; min-width:0; }
+  #veq-app .vq-registry-tools > select[data-filter="organization_id"] { grid-column:2; grid-row:2; min-width:0; }
   #veq-app .vq-filter-toggle { grid-column:1; grid-row:3; }
   #veq-app .vq-registry-tools > .vq-countnote { grid-column:2; grid-row:3; }
   #veq-app .vq-advanced-fields { grid-row:4; }

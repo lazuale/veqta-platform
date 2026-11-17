@@ -23,11 +23,20 @@ def make_import():
     )
 
 
-def make_employees(snapshot, count=2, organization=Organization.ALMAZ):
+def make_organization(name="Тестовая организация А", *, enabled=True, external_id=None):
+    """Организации теста живут в БД, как и любые рабочие записи справочника."""
+    return Organization.objects.get_or_create(name=name, defaults={
+        "external_id": external_id or str(uuid4()), "requests_enabled": enabled,
+    })[0]
+
+
+def make_employees(snapshot, count=2, organization=None):
     """Создать сотрудников с явно тестовыми именами и случайными GUID."""
+    organization = organization or make_organization()
     return Employee.objects.bulk_create([
         Employee(employee_guid=uuid4(), personnel_number=f"TEST-{i:05d}",
-                 full_name=f"Тестовый сотрудник {i:05d}", organization_name=organization,
+                 full_name=f"Тестовый сотрудник {i:05d}", organization=organization,
+                 organization_name=organization.source_name or organization.name,
                  last_seen_import=snapshot) for i in range(count)
     ])
 

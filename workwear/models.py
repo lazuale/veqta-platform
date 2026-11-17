@@ -1,12 +1,43 @@
 """Предметные модели Workwear и декларативные ограничения Django.
 
-Триггеры и составные FK заданы начальной миграцией; они не заменены
+Триггеры и составные FK заданы миграциями; они не заменены
 методом save(). Запись через ORM напрямую не подменяет сервисную авторизацию.
 Карта полей и полный каталог ограничений: docs/architecture.md."""
 from django.conf import settings
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.db.models import F, Q
 from django.utils import timezone
+
+
+class Organization(models.Model):
+    """Постоянная организация; имя для интерфейса отделено от имени источника."""
+    name = models.CharField("Наименование", max_length=255)
+    external_id = models.CharField("Идентификатор 1С (orgExtId)", max_length=255,
+                                   unique=True, null=True, blank=True)
+    source_name = models.CharField("Последнее название из 1С", max_length=255,
+                                   blank=True, editable=False)
+    requests_enabled = models.BooleanField("Разрешено создавать заявки", default=False)
+
+    class Meta:
+        verbose_name = "Организация"
+        verbose_name_plural = "Организации"
+        ordering = ["name", "pk"]
+        constraints = [
+            models.CheckConstraint(condition=Q(name__regex=r"\S"), name="ww_org_name_ck"),
+            models.CheckConstraint(
+                condition=Q(external_id__isnull=True) | (
+                    Q(external_id__regex=r"^[^\s]+$") & Q(external_id=models.functions.Lower("external_id"))
+                ), name="ww_org_external_id_ck",
+            ),
+        ]
+
+    def clean(self):
+        super().clean()
+        self.external_id = self.external_id.strip().casefold() if self.external_id else None
+
+    def __str__(self):
+        return self.name
 
 
 class EmployeeImport(models.Model):
@@ -66,7 +97,7 @@ class EmployeeImport(models.Model):
 class Employee(models.Model):
     """Постоянный GUID сотрудника и актуальные атрибуты справочника.
 
-    Разрешена коррекция personnel_number, но id, GUID и организация неизменны.
+    Разрешена коррекция атрибутов источника, но id, GUID и организация неизменны.
     Исторические поля RequestEmployee от обновления Employee не меняются."""
     employee_guid = models.UUIDField(unique=True)
     personnel_number = models.CharField(max_length=64)
@@ -80,6 +111,8 @@ class Employee(models.Model):
         blank=True,
     )
     organization_name = models.CharField(max_length=255)
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT,
+                                     related_name="employees", verbose_name="Организация")
     last_seen_import = models.ForeignKey(
         EmployeeImport,
         null=True,
@@ -94,17 +127,17 @@ class Employee(models.Model):
         ordering = ["full_name", "pk"]
         indexes = [
             models.Index(
-                fields=["organization_name", "full_name"],
+                fields=["organization", "full_name"],
                 name="ww_emp_org_name_idx",
             ),
             models.Index(
-                fields=["organization_name", "personnel_number"],
+                fields=["organization", "personnel_number"],
                 name="ww_emp_org_number_idx",
             ),
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["id", "organization_name"],
+                fields=["id", "organization"],
                 name="ww_emp_id_org_uniq",
             ),
             models.CheckConstraint(
@@ -123,13 +156,14 @@ class Employee(models.Model):
 
 
 class WorkwearItem(models.Model):
-    """Отдельно утверждённая позиция каталога с нормативом 365/730 дней и активностью."""
-    code = models.CharField(max_length=32, unique=True)
-    name = models.CharField(max_length=120)
-    category = models.CharField(max_length=64)
-    validity_days = models.SmallIntegerField()
-    is_active = models.BooleanField(default=True)
-    sort_order = models.PositiveIntegerField(default=0)
+    """Управляемая позиция. Атрибуты каждого назначения фиксируются отдельно."""
+    code = models.CharField("Код", max_length=32, unique=True)
+    name = models.CharField("Наименование", max_length=120)
+    category = models.CharField("Категория", max_length=64)
+    validity_days = models.SmallIntegerField("Срок действия, дней",
+        validators=[MinValueValidator(1), MaxValueValidator(32767)])
+    is_active = models.BooleanField("Активна", default=True)
+    sort_order = models.PositiveIntegerField("Порядок отображения", default=0)
 
     class Meta:
         verbose_name = "Позиция спецодежды"
@@ -137,7 +171,7 @@ class WorkwearItem(models.Model):
         ordering = ["sort_order", "pk"]
         constraints = [
             models.CheckConstraint(
-                condition=Q(validity_days__in=[365, 730]),
+                condition=Q(validity_days__gte=1, validity_days__lte=32767),
                 name="ww_item_validity_ck",
             ),
             models.CheckConstraint(
@@ -154,16 +188,6 @@ class WorkwearItem(models.Model):
         return self.name
 
 
-class Organization(models.TextChoices):
-    """Три допустимые организации заявок; справочник Employee может содержать другие."""
-    ALMAZ = "АЛМАЗ ООО", "АЛМАЗ"
-    AVM = "АВМ ООО", "АВМ"
-    QUARRIES = (
-        "УПРАВЛЕНИЕ КАРЬЕРАМИ ООО",
-        "УПРАВЛЕНИЕ КАРЬЕРАМИ",
-    )
-
-
 class RequestStatus(models.TextChoices):
     """Допустимые состояния жизненного цикла заявки: draft и closed."""
     DRAFT = "draft", "Черновик"
@@ -175,10 +199,10 @@ class Request(models.Model):
 
     Нативное дополнительное permission reopen_request отделено от change_request.
     SQL guard требует начальный draft и защищает переходы/завершённые записи."""
-    organization_name = models.CharField(
-        max_length=255,
-        choices=Organization.choices,
-    )
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT,
+                                     related_name="requests", verbose_name="Организация")
+    # Название на момент создания, независимое от последующих правок справочника.
+    organization_name = models.CharField(max_length=255)
     status = models.CharField(
         max_length=12,
         choices=RequestStatus.choices,
@@ -210,7 +234,7 @@ class Request(models.Model):
         indexes = [
             models.Index(
                 fields=[
-                    "organization_name",
+                    "organization",
                     "status",
                     "-created_at",
                 ],
@@ -219,14 +243,8 @@ class Request(models.Model):
         ]
         constraints = [
             models.UniqueConstraint(
-                fields=["id", "organization_name"],
+                fields=["id", "organization"],
                 name="ww_req_id_org_uniq",
-            ),
-            models.CheckConstraint(
-                condition=Q(
-                    organization_name__in=Organization.values
-                ),
-                name="ww_req_org_ck",
             ),
             models.CheckConstraint(
                 condition=Q(status__in=RequestStatus.values),
@@ -276,6 +294,8 @@ class RequestEmployee(models.Model):
         related_name="workwear_memberships",
     )
     organization_name = models.CharField(max_length=255)
+    organization = models.ForeignKey(Organization, on_delete=models.PROTECT,
+                                     related_name="memberships", verbose_name="Организация")
 
     snapshot_full_name = models.CharField(
         max_length=255,
@@ -321,11 +341,24 @@ class RequestAssignment(models.Model):
         on_delete=models.PROTECT,
         related_name="assignments",
     )
+    # PostgreSQL заполняет снимок при INSERT, включая bulk_create и прямой SQL.
+    snapshot_item_code = models.CharField(max_length=32, editable=False)
+    snapshot_item_name = models.CharField(max_length=120, editable=False)
+    snapshot_item_category = models.CharField(max_length=64, editable=False)
+    snapshot_validity_days = models.SmallIntegerField(editable=False)
 
     class Meta:
         verbose_name = "Назначение спецодежды"
         verbose_name_plural = "Назначения спецодежды"
         constraints = [
+            models.CheckConstraint(
+                condition=Q(snapshot_validity_days__gte=1, snapshot_validity_days__lte=32767),
+                name="ww_assignment_validity_ck",
+            ),
+            models.CheckConstraint(
+                condition=~Q(snapshot_item_code="") & ~Q(snapshot_item_name="") & ~Q(snapshot_item_category=""),
+                name="ww_assignment_snapshot_ck",
+            ),
             models.UniqueConstraint(
                 fields=["request_employee", "item"],
                 name="ww_assignment_member_item_uniq",

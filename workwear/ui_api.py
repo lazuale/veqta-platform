@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from .limits import MAX_REQUEST_MEMBERS, MAX_ITEMS_PER_MEMBER, MAX_REPEAT_PAIRS, MAX_JSON_BYTES, MAX_SYNC_JSON_BYTES
 from . import services
-from .api import endpoint, payload, positive_int, require_permission, respond, version
+from .api import endpoint, payload, positive_int, require_permission, respond, version, query_organization_id
 from .models import (
     Employee, Organization, Request, RequestEmployee,
     RequestStatus, WorkwearEvent, WorkwearItem,
@@ -57,11 +57,14 @@ def metadata(request):
     if request.user.has_perm("workwear.view_workwearitem"):
         items = [
             {"id": item.pk, "code": item.code, "name": item.name,
-             "category": item.category, "validity_days": item.validity_days}
-            for item in WorkwearItem.objects.filter(is_active=True).order_by("sort_order", "pk")
+             "category": item.category, "validity_days": item.validity_days, "is_active": item.is_active}
+            for item in WorkwearItem.objects.all().order_by("sort_order", "pk")
         ]
     return respond({
-        "organizations": [{"value": code, "label": label} for code, label in Organization.choices],
+        "organizations": [{"value": org.pk, "label": org.name}
+                          for org in Organization.objects.filter(requests_enabled=True)],
+        "registry_organizations": [{"value": org.pk, "label": org.name}
+                                   for org in Organization.objects.all()],
         "items": items,
         "import": {
             "accepted_at": latest.accepted_at.isoformat() if latest else None,
@@ -90,11 +93,11 @@ def registry(request):
 
     Все организации доступны читателю; ограничения изменения проверяются отдельно."""
     require_permission(request, "view_request")
-    org = _query_text(request, "organization_name", limit=255)
+    org = _query_text(request, "organization_id", limit=19)
     status = _query_text(request, "status", limit=12)
     q = _query_text(request, "q", limit=120)
-    if org and org not in Organization.values:
-        raise ValidationError("Недопустимая организация")
+    if org:
+        org = query_organization_id(org)
     if status and status not in RequestStatus.values:
         raise ValidationError("Недопустимый статус")
     offset = _query_num(request, "offset", default=0, maximum=1_000_000)
@@ -126,7 +129,7 @@ def registry(request):
     if until:
         qs = qs.filter(**{f"{field}__date__lte": until})
     if org:
-        qs = qs.filter(organization_name=org)
+        qs = qs.filter(organization_id=org)
     if status:
         qs = qs.filter(status=status)
     if q:
@@ -151,7 +154,7 @@ def registry(request):
         "offset": offset,
         "limit": limit,
         "results": [
-            {"id": r.pk, "organization_name": r.organization_name,
+            {"id": r.pk, "organization_id": r.organization_id, "organization_name": r.organization_name,
              "status": r.status, "version": r.version,
              "created_at": r.created_at.isoformat(),
              "completed_at": r.completed_at.isoformat() if r.completed_at else None,
@@ -167,9 +170,8 @@ def employees(request):
 
     Ранжирование выполняется SQL до LIMIT/OFFSET; страница до 40 записей."""
     require_permission(request, "view_employee")
-    org = _query_text(request, "organization_name", limit=255)
-    if org not in Organization.values:
-        raise ValidationError("Выберите организацию")
+    org = _query_text(request, "organization_id", limit=19)
+    org = query_organization_id(org)
     q = _query_text(request, "q", limit=120)
     offset = _query_num(request, "offset", default=0, maximum=1_000_000)
     limit = _query_num(request, "limit", default=40, maximum=40)
@@ -191,7 +193,7 @@ def employees(request):
     patronymic = Func(F("full_name"), Value(" "), Value(3),
                       function="split_part", output_field=CharField())
     qs = (Employee.objects
-          .filter(organization_name=org, last_seen_import_id=latest.pk)
+          .filter(organization_id=org, last_seen_import_id=latest.pk)
           .filter(Q(full_name__icontains=q) | Q(personnel_number__icontains=q))
           .annotate(_sr_surname=surname, _sr_given=given_name,
                     _sr_patronymic=patronymic)
@@ -224,12 +226,12 @@ def resolve(request):
     Для request_id дополнительно требуются view_request и совпадение организации.
     present_employee_ids учитывает локально добавленных участников, не разрешая запись."""
     require_permission(request, "view_employee")
-    obj = payload(request, "organization_name", "lines",
+    obj = payload(request, "organization_id", "lines",
                   optional_fields=("request_id", "present_employee_ids"))
     if hasattr(obj, "status_code"):
         return obj
-    org, lines = obj["organization_name"], obj["lines"]
-    if org not in Organization.values:
+    org, lines = positive_int(obj["organization_id"], "organization_id"), obj["lines"]
+    if not Organization.objects.filter(pk=org).exists():
         raise ValidationError("Недопустимая организация")
     if not isinstance(lines, list) or not 1 <= len(lines) <= 100:
         raise ValidationError("Список должен содержать от 1 до 100 строк")
@@ -242,7 +244,7 @@ def resolve(request):
     if "request_id" in obj:
         request_id = positive_int(obj["request_id"], "request_id")
         parent = Request.objects.get(pk=request_id)
-        if parent.organization_name != org:
+        if parent.organization_id != org:
             raise ValidationError("Организация заявки не совпадает с запросом")
         already.update(RequestEmployee.objects.filter(request_id=request_id).values_list("employee_id", flat=True))
     staged = obj.get("present_employee_ids", [])
@@ -251,7 +253,7 @@ def resolve(request):
     already.update(staged)
     return respond({"import_id": latest.pk if latest else None, "results": resolve_many(
         lines=lines,
-        organization_name=org,
+        organization_id=org,
         latest=latest,
         already=already,
     )})
@@ -334,14 +336,14 @@ def employee_history(request, request_id, employee_id):
     # История нужна до сохранения, поэтому наличие RequestEmployee
     # не обязательно; организация проверяется сервером независимо.
     req = Request.objects.get(pk=request_id)
-    Employee.objects.get(pk=employee_id, organization_name=req.organization_name)
+    Employee.objects.get(pk=employee_id, organization_id=req.organization_id)
     rows = list(
         RequestEmployee.objects.filter(
             employee_id=employee_id,
             request__status=RequestStatus.CLOSED,
         ).exclude(request_id=request_id)
         .select_related("request")
-        .prefetch_related("assignments__item")
+        .prefetch_related("assignments")
         .order_by("-request__completed_at", "-request_id")[:100]
     )
     return respond({"results": [{
@@ -352,8 +354,9 @@ def employee_history(request, request_id, employee_id):
         "personnel_number": m.snapshot_personnel_number,
         "department_name": m.snapshot_department_name,
         "items": [{
-            "id": a.item_id, "name": a.item.name,
-            "validity_days": a.item.validity_days,
+            "id": a.item_id, "name": a.snapshot_item_name,
+            "category": a.snapshot_item_category, "code": a.snapshot_item_code,
+            "validity_days": a.snapshot_validity_days,
         } for a in m.assignments.all()],
     } for m in rows], "limit": 100})
 
@@ -399,8 +402,8 @@ def repeat_scan(request, request_id):
     if len(wanted) != len(normalized):
         raise ValidationError("Дублирующиеся пары")
     req = Request.objects.get(pk=request_id)
-    people = dict(Employee.objects.filter(pk__in={x[0] for x in wanted}).values_list("pk", "organization_name"))
-    if len(people) != len({x[0] for x in wanted}) or any(org != req.organization_name for org in people.values()):
+    people = dict(Employee.objects.filter(pk__in={x[0] for x in wanted}).values_list("pk", "organization_id"))
+    if len(people) != len({x[0] for x in wanted}) or any(org != req.organization_id for org in people.values()):
         raise ValidationError("Недопустимая организация сотрудника")
     # Проверяем ID до расчёта; календарные правила принадлежат общему
     # сервису одиночных и пакетных предупреждений.

@@ -4,9 +4,9 @@ from django.db import connection, IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 from workwear import services
-from workwear.models import Employee, Organization, Request, RequestAssignment, RequestEmployee, WorkwearEvent
+from workwear.models import Employee, Request, RequestAssignment, RequestEmployee, WorkwearEvent
 from workwear.sync import save_draft
-from .factories import make_user, make_import, make_employees, make_items
+from .factories import make_user, make_import, make_employees, make_items, make_organization
 
 
 class DatabaseGuardsTests(TestCase):
@@ -15,7 +15,7 @@ class DatabaseGuardsTests(TestCase):
         self.actor, self.snapshot = make_user(), make_import()
         self.people = make_employees(self.snapshot)
         self.items = make_items()
-        self.req = services.create_request(organization_name=Organization.ALMAZ, actor=self.actor)
+        self.req = services.create_request(organization_id=make_organization().pk, actor=self.actor)
         save_draft(request_id=self.req.pk, actor=self.actor, expected_version=1,
                    members=[{"employee_id": self.people[0].pk, "item_ids": [self.items[0].pk]}])
         self.req.refresh_from_db()
@@ -41,7 +41,7 @@ class DatabaseGuardsTests(TestCase):
         self.req.refresh_from_db()
 
     def test_employee_guid_and_organization_immutable(self):
-        for change in ({"employee_guid": uuid4()}, {"organization_name": Organization.AVM}):
+        for change in ({"employee_guid": uuid4()}, {"organization_id": make_organization("Тестовая организация Б").pk}):
             self.rejected(lambda: Employee.objects.filter(pk=self.people[0].pk).update(**change), "ww_employee_identity_immutable")
 
     def test_personnel_number_is_editable(self):
@@ -49,14 +49,14 @@ class DatabaseGuardsTests(TestCase):
         self.assertEqual(Employee.objects.get(pk=self.people[0].pk).personnel_number, "TEST-UPDATED")
 
     def test_composite_employee_organization_fk(self):
-        other = make_employees(self.snapshot, 1, Organization.AVM)[0]
+        other = make_employees(self.snapshot, 1, make_organization("Тестовая организация Б"))[0]
         self.rejected(lambda: RequestEmployee.objects.create(request=self.req, employee=other,
-                      organization_name=Organization.ALMAZ), "ww_member_emp_org_fk")
+                      organization_id=make_organization().pk), "ww_member_emp_org_fk")
 
     def test_composite_request_organization_fk(self):
-        other = make_employees(self.snapshot, 1, Organization.AVM)[0]
+        other = make_employees(self.snapshot, 1, make_organization("Тестовая организация Б"))[0]
         self.rejected(lambda: RequestEmployee.objects.create(request=self.req, employee=other,
-                      organization_name=Organization.AVM), "ww_member_req_org_fk")
+                      organization_id=make_organization("Тестовая организация Б").pk), "ww_member_req_org_fk")
 
     def test_request_identity_immutable(self):
         self.rejected(lambda: Request.objects.filter(pk=self.req.pk).update(created_by=make_user()), "ww_request_identity_immutable")
@@ -81,7 +81,7 @@ class DatabaseGuardsTests(TestCase):
                               "ww_event_append_only" if table.endswith("workwearevent") else "ww_structure_no_truncate")
 
     def test_initial_closed_request_forbidden(self):
-        self.rejected(lambda: Request.objects.create(organization_name=Organization.ALMAZ, status="closed",
+        self.rejected(lambda: Request.objects.create(organization_id=make_organization().pk, status="closed",
                       created_by=self.actor, completed_by=self.actor, completed_at=timezone.now()), "ww_request_initial_draft_guard")
 
     def test_status_change_requires_version_increment(self):
@@ -94,12 +94,12 @@ class DatabaseGuardsTests(TestCase):
                       completed_at=timezone.now(), completed_by=self.actor), "ww_request_member_completeness_guard")
 
     def test_close_requires_assignments_for_every_member(self):
-        RequestEmployee.objects.create(request=self.req, employee=self.people[1], organization_name=Organization.ALMAZ)
+        RequestEmployee.objects.create(request=self.req, employee=self.people[1], organization_id=make_organization().pk)
         self.rejected(lambda: Request.objects.filter(pk=self.req.pk).update(status="closed", version=self.req.version+1,
                       completed_at=timezone.now(), completed_by=self.actor), "ww_request_member_completeness_guard")
 
     def test_close_empty_request_forbidden(self):
-        empty = services.create_request(organization_name=Organization.ALMAZ, actor=self.actor)
+        empty = services.create_request(organization_id=make_organization().pk, actor=self.actor)
         self.rejected(lambda: Request.objects.filter(pk=empty.pk).update(status="closed", version=2,
                       completed_at=timezone.now(), completed_by=self.actor), "ww_request_nonempty_guard")
 
@@ -109,7 +109,7 @@ class DatabaseGuardsTests(TestCase):
             lambda: Request.objects.filter(pk=self.req.pk).update(version=self.req.version+1),
             lambda: Request.objects.filter(pk=self.req.pk).delete(),
             lambda: RequestEmployee.objects.filter(pk=self.member.pk).update(snapshot_full_name="Тестовая правка"),
-            lambda: RequestEmployee.objects.create(request=self.req, employee=self.people[1], organization_name=Organization.ALMAZ),
+            lambda: RequestEmployee.objects.create(request=self.req, employee=self.people[1], organization_id=make_organization().pk),
             lambda: RequestEmployee.objects.filter(pk=self.member.pk).delete(),
             lambda: RequestAssignment.objects.create(request_employee=self.member, item=self.items[1]),
             lambda: RequestAssignment.objects.filter(pk=self.assignment.pk).delete(),
@@ -118,6 +118,6 @@ class DatabaseGuardsTests(TestCase):
 
     def test_unique_members_and_assignments(self):
         self.rejected(lambda: RequestEmployee.objects.create(request=self.req, employee=self.people[0],
-                      organization_name=Organization.ALMAZ), "ww_member_request_emp_uniq")
+                      organization_id=make_organization().pk), "ww_member_request_emp_uniq")
         self.rejected(lambda: RequestAssignment.objects.create(request_employee=self.member,
                       item=self.items[0]), "ww_assignment_member_item_uniq")

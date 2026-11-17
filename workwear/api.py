@@ -101,9 +101,19 @@ def payload(request, *fields, optional_fields=(), max_bytes=MAX_JSON_BYTES):
 
 def positive_int(value, field):
     """Проверить положительный int, исключая bool; ошибка входа — ValidationError."""
-    if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+    if isinstance(value, bool) or not isinstance(value, int) or value <= 0 or value > 9223372036854775807:
         raise ValidationError(f"Поле {field} должно быть положительным целым числом")
     return value
+
+
+def query_organization_id(value):
+    """Разобрать ID организации из строки URL; название не служит ключом."""
+    if not value or not value.isascii() or not value.isdecimal() or len(value) > 19:
+        raise ValidationError("Недопустимая организация")
+    number = int(value)
+    if number <= 0 or number > 9223372036854775807 or not Organization.objects.filter(pk=number).exists():
+        raise ValidationError("Недопустимая организация")
+    return number
 
 
 def version(obj):
@@ -116,7 +126,7 @@ def as_request(req):
 
     Участников с snapshot-полями добавляет request_detail; записи в БД нет."""
     return {
-        "id": req.pk, "organization_name": req.organization_name,
+        "id": req.pk, "organization_id": req.organization_id, "organization_name": req.organization_name,
         "status": req.status, "version": req.version,
         "created_at": req.created_at.isoformat(),
         "completed_at": req.completed_at.isoformat() if req.completed_at else None,
@@ -137,22 +147,20 @@ def request_collection(request):
 
     Контракт, фильтры и пределы ответа: docs/workwear.md; запись выполняет сервис."""
     if request.method == "POST":
-        obj = payload(request, "organization_name")
+        obj = payload(request, "organization_id")
         if isinstance(obj, JsonResponse):
             return obj
-        if not isinstance(obj["organization_name"], str):
-            raise ValidationError("Недопустимая организация")
-        req = services.create_request(organization_name=obj["organization_name"], actor=request.user)
+        req = services.create_request(organization_id=positive_int(obj["organization_id"], "organization_id"), actor=request.user)
         return respond({"request": as_request(req)}, 201)
     require_permission(request, "view_request")
-    organization, status = request.GET.get("organization_name"), request.GET.get("status")
-    if organization is not None and organization not in Organization.values:
-        raise ValidationError("Недопустимая организация")
+    organization, status = request.GET.get("organization_id"), request.GET.get("status")
+    if organization is not None:
+        organization = query_organization_id(organization)
     if status is not None and status not in RequestStatus.values:
         raise ValidationError("Недопустимый статус")
     qs = Request.objects.order_by("-created_at", "-pk")
     if organization:
-        qs = qs.filter(organization_name=organization)
+        qs = qs.filter(organization_id=organization)
     if status:
         qs = qs.filter(status=status)
     return respond({"results": [as_request(r) for r in qs[:50]], "limit": 50})
@@ -175,10 +183,12 @@ def request_detail(request, request_id):
         {"id": m.pk, "employee_id": m.employee_id,
          "full_name": m.snapshot_full_name,
          "personnel_number": m.snapshot_personnel_number,
-         "organization_name": m.snapshot_organization_name,
+         "organization_name": m.snapshot_organization_name, "organization_id": m.organization_id,
          "position_name": m.snapshot_position_name,
          "department_name": m.snapshot_department_name,
-         "assignments": [{"id": a.pk, "item_id": a.item_id}
+         "assignments": [{"id": a.pk, "item_id": a.item_id,
+                          "code": a.snapshot_item_code, "name": a.snapshot_item_name,
+                          "category": a.snapshot_item_category, "validity_days": a.snapshot_validity_days}
                          for a in sorted(m.assignments.all(), key=lambda x: x.pk)]}
         for m in members
     ]

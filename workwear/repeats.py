@@ -1,7 +1,7 @@
 """Единый расчёт предупреждений по завершённым заявкам.
 
 Сравниваются календарные даты в активном часовом поясе Django, точная позиция
-и последнее нефутурное завершение; 365/730 дней определяются каталогом.
+и последнее нефутурное завершение; срок берётся из снимка прошлого назначения.
 Предупреждение информирует пользователя и не запрещает повторную выдачу."""
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
@@ -46,11 +46,8 @@ def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
 
     people = {employee for employee, _ in wanted}
     items = {item for _, item in wanted}
-    validities = dict(
-        WorkwearItem.objects.filter(pk__in=items)
-        .values_list("pk", "validity_days")
-    )
-    if set(validities) != items:
+    known_items = set(WorkwearItem.objects.filter(pk__in=items).values_list("pk", flat=True))
+    if known_items != items:
         raise ValidationError("Неизвестная позиция спецодежды")
 
     history = (
@@ -78,10 +75,10 @@ def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
         "-request_employee__request__completed_at", "-pk",
     ).distinct("request_employee__employee_id", "item_id").values_list(
         "request_employee__employee_id", "item_id",
-        "request_employee__request_id", "request_employee__request__completed_at",
+        "request_employee__request_id", "request_employee__request__completed_at", "snapshot_validity_days",
     )
     warnings = {}
-    for employee_id, item_id, request_id, completed_at in history.iterator(chunk_size=1000):
+    for employee_id, item_id, request_id, completed_at, validity in history.iterator(chunk_size=1000):
         key = (employee_id, item_id)
         if key not in wanted:
             continue
@@ -91,7 +88,6 @@ def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
         elapsed = (reference - completion_date).days
         if elapsed < 0:
             continue
-        validity = validities[item_id]
         if elapsed < validity:
             warnings[key] = RepeatWarning(
                 previous_request_id=request_id,

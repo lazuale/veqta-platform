@@ -8,11 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime
 import hashlib
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import models, transaction
 from django.utils import timezone
 from .directories_1c import ParsedBatch
 from ..ingest_lock import lock_for_acceptance, lock_for_membership
-from ..models import Employee, EmployeeImport
+from ..models import Employee, EmployeeImport, Organization
 
 @dataclass(frozen=True)
 class AcceptanceResult:
@@ -118,14 +118,29 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
         raise ValidationError("Повтор GUID в подготовленном наборе")
     stored = {e.employee_guid: e for e in
               Employee.objects.select_for_update().filter(employee_guid__in=by_guid)}
+    organizations = {}
+    for external_id, source_name in sorted(batch.organizations.items()):
+        organization = Organization.objects.select_for_update().filter(external_id=external_id).first()
+        if organization is None:
+            # Имя не доказывает идентичность. Старую запись сначала связывает администратор.
+            if Organization.objects.filter(external_id__isnull=True).filter(
+                    models.Q(name=source_name) | models.Q(source_name=source_name)).exists():
+                raise ValidationError(
+                    f"Укажите orgExtId {external_id} у существующей организации через Django Admin")
+            organization = Organization.objects.create(
+                external_id=external_id, name=source_name, source_name=source_name,
+            )
+        elif organization.source_name != source_name:
+            organization.source_name = source_name
+            organization.save(update_fields=["source_name"])
+        organizations[external_id] = organization
     for uid, person in by_guid.items():
         org = person.organization_name
-        # Справочник 1С может содержать другие юрлица; только Request ограничен
-        # тремя организациями. Сохранение справочника не разрешает
-        # включение сотрудников чужой организации.
         if not isinstance(org, str) or not org.strip() or len(org) > 255 or org.strip().upper() == "NULL":
             raise ValidationError(f"Недопустимая организация сотрудника {uid}: {org!r}")
-        if uid in stored and stored[uid].organization_name != person.organization_name:
+        if person.organization_external_id not in organizations:
+            raise ValidationError("Отсутствует организация подготовленного сотрудника")
+        if uid in stored and stored[uid].organization_id != organizations[person.organization_external_id].pk:
             raise ValidationError(f"Смена организации без нового GUID: {uid}")
     snapshot = EmployeeImport.objects.create(
         **signatures, source_row_count=batch.source_row_count,
@@ -138,6 +153,7 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
             create.append(Employee(
                 employee_guid=uid, personnel_number=p.personnel_number,
                 full_name=p.full_name, organization_name=p.organization_name,
+                organization=organizations[p.organization_external_id],
                 position_name=p.position_name, department_name=p.department_name,
                 last_seen_import=snapshot,
             ))
@@ -145,6 +161,7 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
             employee = stored[uid]
             employee.personnel_number = p.personnel_number
             employee.full_name = p.full_name
+            employee.organization_name = p.organization_name
             employee.position_name = p.position_name
             employee.department_name = p.department_name
             employee.last_seen_import = snapshot
@@ -153,7 +170,7 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
         Employee.objects.bulk_create(chunk, batch_size=500)
     for chunk in _chunks(update):
         Employee.objects.bulk_update(chunk,
-            ['personnel_number', 'full_name', 'position_name',
+            ['personnel_number', 'full_name', 'organization_name', 'position_name',
              'department_name', 'last_seen_import'], batch_size=500)
     count = Employee.objects.filter(last_seen_import=snapshot).count()
     if count != len(batch.people):

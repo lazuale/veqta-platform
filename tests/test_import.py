@@ -12,18 +12,20 @@ from django.test import TestCase
 from django.utils import timezone
 from workwear.importers.directories_1c import parse, ImportRejected
 from workwear.importers.acceptance import accept, review
-from workwear.models import Employee, EmployeeImport, Organization
+from workwear.models import Employee, EmployeeImport
 
 
-def make_sources(directory, *, people=None):
+def make_sources(directory, *, people=None,
+                 organization_id="00000000-0000-0000-0000-000000000123",
+                 organization_name="Тестовая организация источника"):
     """Записать только вымышленные строки с новым набором случайных GUID."""
-    position, unit, organization = str(uuid4()), str(uuid4()), str(uuid4())
+    position, unit, organization = str(uuid4()), str(uuid4()), organization_id
     people = people or [(str(uuid4()), "TEST-00001", "Тестовый сотрудник 00001")]
     records = {
         "Positions.csv": [["extId", "name"], [position, "Тестовая должность"]],
-        "Units.csv": [["extId", "name", "orgExtId", "orgName"], [unit, "Тестовое подразделение", organization, Organization.ALMAZ]],
+        "Units.csv": [["extId", "name", "orgExtId", "orgName"], [unit, "Тестовое подразделение", organization, organization_name]],
         "Employees.csv": [["extId", "tabNumber", "name", "positionExtId", "unitExtId", "orgExtId", "orgName"]]+
-            [[uid, number, name, position, unit, organization, Organization.ALMAZ] for uid, number, name in people],
+            [[uid, number, name, position, unit, organization, organization_name] for uid, number, name in people],
     }
     for name, rows in records.items():
         with (Path(directory)/name).open("w", encoding="utf-8", newline="") as stream:

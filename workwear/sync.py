@@ -67,8 +67,6 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
     items = dict(WorkwearItem.objects.filter(pk__in=item_ids).values_list("pk", "is_active"))
     if set(items) != item_ids:
         raise ValidationError("Неизвестная позиция спецодежды")
-    if not all(items.values()):
-        raise ValidationError("Нельзя назначить неактивную позицию")
     existing = list(RequestEmployee.objects.filter(request_id=req.pk).prefetch_related("assignments"))
     existing_by_employee = {m.employee_id: m for m in existing}
     latest = latest_import()
@@ -77,14 +75,18 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         # Исторический состав остаётся доступен; новое включение проходит
         # ту же проверку, что services.add_employee.
         if employee_id not in existing_by_employee:
-            require_current(employee, organization_name=req.organization_name, latest=latest)
-        elif employee.organization_name != req.organization_name:
+            require_current(employee, organization_id=req.organization_id, latest=latest)
+        elif employee.organization_id != req.organization_id:
             # Смена организации одного GUID требует отдельного решения
             # о составных FK; текущий контракт её не разрешает.
             raise ValidationError("Организация сотрудника не совпадает с заявкой")
     # Полная детерминированная delta вычисляется до записи. Снимки
     # исключаемых участников сохраняются в событии до удаления их строк.
     old_items = {m.employee_id: {a.item_id for a in m.assignments.all()} for m in existing}
+    # Отключённые позиции можно сохранить в прежнем составе, но нельзя назначить заново.
+    if any(not items[item_id] for employee_id in desired
+           for item_id in desired[employee_id] - old_items.get(employee_id, set())):
+        raise ValidationError("Нельзя назначить неактивную позицию")
     old_people = {m.employee_id: {
         "employee_id": m.employee_id,
         "full_name": m.snapshot_full_name,
@@ -123,7 +125,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         if employee_id not in existing_by_employee:
             e = employees[employee_id]
             new_members.append(RequestEmployee(
-                request=req, employee=e, organization_name=req.organization_name,
+                request=req, employee=e, organization_id=req.organization_id, organization_name=req.organization_name,
                 snapshot_full_name=e.full_name, snapshot_personnel_number=e.personnel_number,
                 snapshot_organization_name=e.organization_name,
                 snapshot_position_name=e.position_name, snapshot_department_name=e.department_name,

@@ -1,9 +1,8 @@
 """Штатная авторизация, права, CSRF и контракты HTTP."""
 from django.contrib.auth.models import Permission
 from django.test import Client, TestCase, override_settings
-from workwear.models import Organization
 from workwear import services
-from .factories import make_user, make_import, make_employees, make_items
+from .factories import make_user, make_import, make_employees, make_items, make_organization
 
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
@@ -31,34 +30,34 @@ class HttpTests(TestCase):
             self.assertIn(f'name="{name}"', body)
 
     def test_reader_sees_all_organizations(self):
-        for org in Organization.values:
-            services.create_request(organization_name=org, actor=self.actor)
+        for name in ("Тестовая организация А", "Тестовая организация Б", "Тестовая организация В"):
+            services.create_request(organization_id=make_organization(name).pk, actor=self.actor)
         reader = make_user(administrator=False)
         reader.user_permissions.add(Permission.objects.get(content_type__app_label="workwear", codename="view_request"))
         self.client.force_login(reader)
         self.assertEqual(self.client.get("/workwear/api/ui/requests/").json()["count"], 3)
-        result = self.client.post("/workwear/api/requests/", {"organization_name": Organization.ALMAZ}, content_type="application/json")
+        result = self.client.post("/workwear/api/requests/", {"organization_id": make_organization().pk}, content_type="application/json")
         self.assertEqual(result.status_code, 403)
 
     def test_csrf_required_for_writes(self):
         client = Client(enforce_csrf_checks=True)
         client.force_login(self.actor)
-        result = client.post("/workwear/api/requests/", {"organization_name": Organization.ALMAZ}, content_type="application/json")
+        result = client.post("/workwear/api/requests/", {"organization_id": make_organization().pk}, content_type="application/json")
         self.assertEqual(result.status_code, 403)
 
     def test_search_by_partial_current_personnel_number(self):
-        result = self.client.get("/workwear/api/ui/employees/", {"q": "00000", "organization_name": Organization.ALMAZ})
+        result = self.client.get("/workwear/api/ui/employees/", {"q": "00000", "organization_id": make_organization().pk})
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.json()["results"][0]["id"], self.people[0].pk)
 
     def test_wrong_methods_and_json_rejected(self):
         self.assertEqual(self.client.post("/workwear/api/session/").status_code, 405)
-        for payload in ('{"organization_name":NaN}', '{"organization_name":"x","extra":1}', '[]'):
+        for payload in ('{"organization_id":NaN}', '{"organization_id":"x","extra":1}', '[]'):
             with self.subTest(payload=payload):
                 self.assertEqual(self.client.post("/workwear/api/requests/", payload, content_type="application/json").status_code, 400)
 
     def test_http_stale_version_returns_conflict(self):
-        created = self.client.post("/workwear/api/requests/", {"organization_name": Organization.ALMAZ}, content_type="application/json").json()["request"]
+        created = self.client.post("/workwear/api/requests/", {"organization_id": make_organization().pk}, content_type="application/json").json()["request"]
         path = f"/workwear/api/ui/requests/{created['id']}/sync/"
         payload = {"expected_version": 1, "finish": False, "members": [{"employee_id": self.people[0].pk, "item_ids": [self.items[0].pk]}]}
         self.assertEqual(self.client.post(path, payload, content_type="application/json").status_code, 200)

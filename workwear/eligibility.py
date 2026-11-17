@@ -14,18 +14,18 @@ def latest_import():
     return EmployeeImport.objects.order_by("-accepted_at", "-pk").first()
 
 
-def is_current(employee, *, organization_name, latest):
+def is_current(employee, *, organization_id, latest):
     """Проверить точную организацию и last_seen_import относительно переданного latest.
 
     Чистый предикат; отсутствие последней выгрузки означает False."""
     return (
         latest is not None
-        and employee.organization_name == organization_name
+        and employee.organization_id == organization_id
         and employee.last_seen_import_id == latest.pk
     )
 
 
-def require_current(employee, *, organization_name, latest=None):
+def require_current(employee, *, organization_id, latest=None):
     # Вызывающий сервис явно передаёт snapshot из своей транзакции.
     # None означает отсутствие принятой выгрузки, а не команду перечитать БД.
     """Проверить допуск нового включения к переданной организации и latest.
@@ -34,7 +34,7 @@ def require_current(employee, *, organization_name, latest=None):
     Вызывающий сервис удерживает shared advisory lock; здесь записи нет."""
     if latest is None:
         raise ValidationError("Нет успешно принятой выгрузки сотрудников 1С")
-    if employee.organization_name != organization_name:
+    if employee.organization_id != organization_id:
         raise ValidationError("Организация сотрудника не совпадает с организацией заявки")
     if employee.last_seen_import_id != latest.pk:
         raise ValidationError("Сотрудник отсутствует в последней принятой выгрузке 1С")

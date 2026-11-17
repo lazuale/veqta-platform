@@ -22,6 +22,7 @@ def employee_data(employee, latest_id=None):
         "position_name": employee.position_name,
         "department_name": employee.department_name,
         "organization_name": employee.organization_name,
+        "organization_id": employee.organization_id,
         "is_current": latest_id is not None and employee.last_seen_import_id == latest_id,
     }
 
@@ -37,10 +38,10 @@ def normalize_number(value):
     return re.sub(r"^([А-ЯA-Z]{2})00(?=\d)", r"\1", code)
 
 
-def resolve_many(*, lines, organization_name, latest, already):
+def resolve_many(*, lines, organization_id, latest, already):
     """Разрешить строки в исходном порядке без записи; результат содержит статусы и кандидатов.
 
-    lines — уже проверенные API строки (до 100), organization_name — организация
+    lines — уже проверенные API строки (до 100), organization_id — организация
     заявки, latest — принятая выгрузка, already — ранее включённые employee_id.
     Неоднозначность, дубли и старая/чужая организация явно помечаются. Сервисы
     независимо перепроверяют допустимость нового включения."""
@@ -55,7 +56,7 @@ def resolve_many(*, lines, organization_name, latest, already):
     number_map = defaultdict(list)
     suffix_map = defaultdict(list)
     queryset = Employee.objects.only(
-        "id", "full_name", "personnel_number", "organization_name",
+        "id", "full_name", "personnel_number", "organization_name", "organization_id",
         "last_seen_import_id", "position_name", "department_name",
     )
     for employee in queryset.iterator(chunk_size=2000):
@@ -73,9 +74,9 @@ def resolve_many(*, lines, organization_name, latest, already):
         candidates = name_map.get(normalize_name(text), []) or number_map.get(number, [])
         if not candidates and number.isascii() and number.isdecimal() and len(number) == 4:
             candidates = suffix_map.get(number, [])
-        relevant = [x for x in candidates if x.organization_name == organization_name]
+        relevant = [x for x in candidates if x.organization_id == organization_id]
         current = list({x.pk: x for x in relevant if is_current(
-            x, organization_name=organization_name, latest=latest
+            x, organization_id=organization_id, latest=latest
         )}.values())
         if len(current) > 1:
             state = "ambiguous"

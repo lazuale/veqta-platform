@@ -45,6 +45,10 @@ def _guid(v, where):
 
 
 def _register_organization(names, identifier, name, where):
+    if identifier and (len(identifier) > 255 or any(c.isspace() for c in identifier)):
+        raise ImportRejected(f"{where}: invalid orgExtId")
+    if len(name) > 255:
+        raise ImportRejected(f"{where}: orgName exceeds DB limit")
     if identifier and name:
         previous = names.setdefault(identifier, name)
         if previous != name:
@@ -111,6 +115,7 @@ class Person:
     organization_name: str
     position_name: str
     department_name: str
+    organization_external_id: str
     current: bool = True
 
 
@@ -122,6 +127,7 @@ class ParsedBatch:
     source_row_count: int
     current_count: int
     anomalies: dict[str, int]
+    organizations: dict[str, str]
 
 
 def parse(path, **_obsolete):
@@ -239,9 +245,10 @@ def parse(path, **_obsolete):
                 department = units[ukey]
         else:
             anomalies["employees_without_unit"] += 1
-        people.append(Person(uid, number, full_name, org_name, position, department))
+        people.append(Person(uid, number, full_name, org_name, position, department, org_id.casefold()))
     return ParsedBatch(
         people=tuple(sorted(people, key=lambda x: x.guid.hex)),
         sha256=hashes, source_row_count=employee_rows,
         current_count=len(people), anomalies=anomalies,
+        organizations=organization_names,
     )

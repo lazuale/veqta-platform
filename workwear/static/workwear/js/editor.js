@@ -212,7 +212,7 @@ export function installEditor(ctx) {
         });
     }
     function rowTags(m, items = new Map(byItem().map(it => [it.id, it]))) {
-        return m.assignments.length ? m.assignments.map(a => { const item = items.get(a.item_id); return `<span class="vitem ${warning(m.employee_id, a.item_id) ? 'warn' : ''}" title="${esc(item?.name || '')}">${esc(item?.name || 'Позиция')}</span>`; }).join('') : '<span class="quiet">Не назначены</span>';
+        return m.assignments.length ? m.assignments.map(a => { const item = a.name ? a : items.get(a.item_id); return `<span class="vitem ${warning(m.employee_id, a.item_id) ? 'warn' : ''}" title="${esc(item?.name || '')}">${esc(item?.name || 'Позиция')}</span>`; }).join('') : '<span class="quiet">Не назначены</span>';
     }
     function rowWarning(m) {
         const ws = m.assignments.filter(a => warning(m.employee_id, a.item_id));
@@ -233,9 +233,9 @@ export function installEditor(ctx) {
         const items = new Map(byItem().map(it => [it.id, it]));
         return `<div class="vq-tablewrap"><table><thead><tr><th class="select-col">${locked ? '' : `<input type="checkbox" data-check="all" aria-label="Выбрать сотрудников показанной страницы" ${rows.length && rows.every(m => settings.selected.has(m.employee_id)) ? 'checked' : ''}>`}</th><th>Сотрудник</th><th class="dept-col">Подразделение</th><th>Назначено</th><th>Контроль</th><th></th></tr></thead><tbody>${rows.map(m => `<tr data-row="${m.employee_id}" class="${settings.selected.has(m.employee_id) ? 'selected' : ''}"><td class="select-col">${locked ? '' : `<input type="checkbox" data-check="${m.employee_id}" aria-label="Выбрать ${esc(m.full_name)}" ${settings.selected.has(m.employee_id) ? 'checked' : ''}>`}</td><td><button type="button" class="vq-name-action" data-person="${m.employee_id}">${esc(m.full_name)}</button><div class="secondary">${esc(m.personnel_number)}<span class="small-dept"> · ${esc(m.department_name || '')}</span></div></td><td class="dept-col">${esc(m.department_name || '—')}</td><td><div class="vq-assignment-tags">${rowTags(m, items)}</div></td><td class="vq-repeat-status">${rowWarning(m)}</td><td class="quiet">›</td></tr>`).join('')}</tbody></table></div>`;
     }
-    function groups() {
+    function groups(activeOnly = false) {
         const map = new Map();
-        for (const it of byItem()) {
+        for (const it of byItem().filter(item => !activeOnly || item.is_active)) {
             const key = it.category || 'Прочее';
             if (!map.has(key))
                 map.set(key, []);
@@ -247,7 +247,7 @@ export function installEditor(ctx) {
         const assigned = m.assignments.some(a => a.item_id === it.id), w = warning(m.employee_id, it.id);
         const tab = settings.matrixFocus?.employeeId === m.employee_id && settings.matrixFocus?.itemId === it.id ? 0 : -1;
         const pending = settings.pendingAssignments.has(ctx.assignmentKey(m.employee_id, it.id));
-        return `<td><button type="button" class="gridpick ${assigned ? 'on' : ''} ${assigned && w ? 'warn' : ''}" data-cell="${m.employee_id}:${it.id}" tabindex="${tab}" aria-pressed="${assigned}" aria-label="${esc(it.name)}: ${assigned ? 'назначено' : 'не назначено'} — ${esc(m.full_name)}${w ? ' — повтор' : ''}" ${locked || pending ? 'disabled aria-disabled="true"' : ''}>${assigned ? (settings.repeatState === 'pending' || settings.repeatState === 'failed' ? '<span aria-hidden="true">…</span>' : '<span class="vq-cell-check" aria-hidden="true"></span>') : ''}${assigned && w ? '<sup aria-hidden="true">!</sup>' : ''}${!assigned ? '<span aria-hidden="true">—</span>' : ''}</button></td>`;
+        return `<td><button type="button" class="gridpick ${assigned ? 'on' : ''} ${assigned && w ? 'warn' : ''}" data-cell="${m.employee_id}:${it.id}" tabindex="${tab}" aria-pressed="${assigned}" aria-label="${esc(it.name)}: ${assigned ? 'назначено' : 'не назначено'} — ${esc(m.full_name)}${w ? ' — повтор' : ''}" ${locked || pending || (!it.is_active && !assigned) ? 'disabled aria-disabled="true"' : ''}>${assigned ? (settings.repeatState === 'pending' || settings.repeatState === 'failed' ? '<span aria-hidden="true">…</span>' : '<span class="vq-cell-check" aria-hidden="true"></span>') : ''}${assigned && w ? '<sup aria-hidden="true">!</sup>' : ''}${!assigned ? '<span aria-hidden="true">—</span>' : ''}</button></td>`;
     }
     function matrix(rows, locked) {
         const visibleItems = ctx.matrixItems(), wanted = new Set(visibleItems.map(it => it.id));
@@ -437,6 +437,7 @@ export function installEditor(ctx) {
             return current.promise;
         }
         if (assigned === wanted) return true;
+        if (wanted && !settings.meta?.items.some(item => item.id === itemId && item.is_active)) return false;
         if (wanted && member.assignments.length >= ctx.limits().items_per_member) {
             notice('У сотрудника уже назначено максимальное число позиций.', true); return false;
         }
@@ -487,13 +488,13 @@ export function installEditor(ctx) {
         const existing = new Set(currentMembers().map(m => m.employee_id)), pending = [];
         for (const e of people) {
             if (existing.has(e.id)) continue;
-            if (e.organization_name !== settings.request.organization_name || e.is_current === false)
+            if (e.organization_id !== settings.request.organization_id || e.is_current === false)
                 throw new Error('Сотрудник не соответствует организации или актуальной выгрузке');
             existing.add(e.id); pending.push(e);
         }
         if (existing.size > ctx.limits().request_members) throw new Error('В заявке допускается до1000 сотрудников. Состав не изменён.');
         const members = pending.map(e => ({ id: null, employee_id: e.id, full_name: e.full_name,
-            personnel_number: e.personnel_number, organization_name: e.organization_name,
+            personnel_number: e.personnel_number, organization_name: e.organization_name, organization_id: e.organization_id,
             position_name: e.position_name, department_name: e.department_name, assignments: [] }));
         settings.request.members.push(...members);
         for (const e of pending) settings.selected.add(e.id);
@@ -585,7 +586,7 @@ export function installEditor(ctx) {
         const org = $('#newOrg', overlays)?.value;
         if (!org)
             return;
-        const data = await api('requests/', { method: 'POST', data: { organization_name: org } });
+        const data = await api('requests/', { method: 'POST', data: { organization_id: Number(org) } });
         settings.modal = null;
         await openRequest(data.request.id);
     }

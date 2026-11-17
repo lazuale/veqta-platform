@@ -8,9 +8,9 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from workwear import services
-from workwear.models import Employee, Organization, Request, RequestAssignment, RequestEmployee, WorkwearEvent
+from workwear.models import Employee, Request, RequestAssignment, RequestEmployee, WorkwearEvent
 from workwear.sync import save_draft
-from .factories import make_user, make_import, make_employees, make_items
+from .factories import make_user, make_import, make_employees, make_items, make_organization
 
 
 class LifecycleTests(TestCase):
@@ -20,7 +20,7 @@ class LifecycleTests(TestCase):
         self.snapshot = make_import()
         self.people = make_employees(self.snapshot)
         self.items = make_items()
-        self.req = services.create_request(organization_name=Organization.ALMAZ, actor=self.actor)
+        self.req = services.create_request(organization_id=make_organization().pk, actor=self.actor)
 
     def save(self, *, finish=False, people=None, items=None):
         """Сохранить явно заданный синтетический состав текущей версии."""
@@ -35,14 +35,14 @@ class LifecycleTests(TestCase):
 
     def test_create_requires_permission(self):
         with self.assertRaises(PermissionDenied):
-            services.create_request(organization_name=Organization.ALMAZ, actor=make_user(administrator=False))
+            services.create_request(organization_id=make_organization().pk, actor=make_user(administrator=False))
 
     def test_invalid_organization(self):
         with self.assertRaises(ValidationError):
-            services.create_request(organization_name="Тестовая чужая организация", actor=self.actor)
+            services.create_request(organization_id=999999, actor=self.actor)
 
     def test_wrong_organization_rolls_back_whole_batch(self):
-        other = make_employees(self.snapshot, 1, Organization.AVM)[0]
+        other = make_employees(self.snapshot, 1, make_organization("Тестовая организация Б"))[0]
         with self.assertRaises(ValidationError):
             services.add_employees(request_id=self.req.pk, employee_ids=[self.people[0].pk, other.pk],
                                    actor=self.actor, expected_version=1)
@@ -147,14 +147,14 @@ class LifecycleTests(TestCase):
 
     def test_repeat_warning_does_not_block_new_assignment(self):
         self.save(finish=True)
-        other = services.create_request(organization_name=Organization.ALMAZ, actor=self.actor)
+        other = services.create_request(organization_id=make_organization().pk, actor=self.actor)
         result = save_draft(request_id=other.pk, actor=self.actor, expected_version=1,
                             members=[{"employee_id": self.people[0].pk, "item_ids": [self.items[0].pk]}], finish=True)
         self.assertEqual(result.completion["final_assignments"], 1)
 
     def test_future_local_date_does_not_hide_previous_issue(self):
         self.save(finish=True)
-        other = services.create_request(organization_name=Organization.ALMAZ, actor=self.actor)
+        other = services.create_request(organization_id=make_organization().pk, actor=self.actor)
         future = timezone.now()+timedelta(days=2)
         with patch("workwear.services.timezone.now", return_value=future):
             save_draft(request_id=other.pk, actor=self.actor, expected_version=1,
@@ -168,7 +168,7 @@ class ScaleTests(TestCase):
     def test_thousand_employees_thirty_thousand_assignments(self):
         actor, snapshot = make_user(), make_import()
         people, items = make_employees(snapshot, 1000), make_items(30)
-        req = services.create_request(organization_name=Organization.ALMAZ, actor=actor)
+        req = services.create_request(organization_id=make_organization().pk, actor=actor)
         members = [{"employee_id": e.pk, "item_ids": [i.pk for i in items]} for e in people]
         started = perf_counter()
         with CaptureQueriesContext(connection) as queries:

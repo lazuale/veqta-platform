@@ -94,18 +94,22 @@ def _bump_draft_version(req, step=1):
 
 
 @transaction.atomic
-def create_request(*, organization_name, actor):
+def create_request(*, organization_id, actor):
     """Создать черновик допустимой организации и событие created в одной транзакции.
 
     actor должен иметь add_request; возвращается Request с исходной версией 1.
     Недопустимая организация вызывает ValidationError; чужие права — PermissionDenied."""
     _authorize(actor, "add_request")
-    if organization_name not in Organization.values:
+    if type(organization_id) is not int or not 0 < organization_id <= 9223372036854775807:
         raise ValidationError("Недопустимая организация")
+    organization = Organization.objects.select_for_update().filter(
+        pk=organization_id, requests_enabled=True).first()
+    if organization is None:
+        raise ValidationError("Создание заявок для организации не разрешено")
     req = Request.objects.create(
-        organization_name=organization_name, created_by=actor,
+        organization=organization, organization_name=organization.name, created_by=actor,
     )
-    _audit(req.pk, actor, "created", organization_name=organization_name)
+    _audit(req.pk, actor, "created", organization_id=organization.pk, organization_name=organization.name)
     return req
 
 
@@ -128,7 +132,7 @@ def add_employees(*, request_id, employee_ids, actor, expected_version):
         raise Employee.DoesNotExist("Сотрудник отсутствует в справочнике")
     latest = latest_import()
     for employee_id in employee_ids:
-        require_current(people[employee_id], organization_name=req.organization_name, latest=latest)
+        require_current(people[employee_id], organization_id=req.organization_id, latest=latest)
     existing_ids = set(RequestEmployee.objects.filter(request_id=req.pk).values_list("employee_id", flat=True))
     if existing_ids.intersection(employee_ids):
         raise ValidationError("Сотрудник уже включён в заявку")
@@ -137,7 +141,7 @@ def add_employees(*, request_id, employee_ids, actor, expected_version):
     members = RequestEmployee.objects.bulk_create([RequestEmployee(
         request=req,
         employee=people[employee_id],
-        organization_name=req.organization_name,
+        organization_id=req.organization_id, organization_name=req.organization_name,
         snapshot_full_name=people[employee_id].full_name,
         snapshot_personnel_number=people[employee_id].personnel_number,
         snapshot_organization_name=people[employee_id].organization_name,
@@ -195,6 +199,7 @@ def add_assignment(*, request_id, member_id, item_id, actor, expected_version):
     if member.assignments.count() >= MAX_ITEMS_PER_MEMBER:
         raise ValidationError("У сотрудника уже назначено максимальное число позиций")
     assignment = RequestAssignment.objects.create(request_employee=member, item=item)
+    assignment.refresh_from_db()
     _bump_draft_version(req)
     _audit(
         req.pk, actor, "assignment_added",
