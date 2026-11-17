@@ -11,6 +11,8 @@ class ConfigurationTests(SimpleTestCase):
     def settings_process(self, **changes):
         """Импортировать настройки с синтетическим ключом и явным набором переменных."""
         env = os.environ.copy()
+        # Не наследуем HTTPS-настройку сервера: проверяем defaults для DEV и PROD.
+        env.pop("DJANGO_SECURE_COOKIES", None)
         env.update(VEQTA_ENV="dev", DB_NAME="veqta_dev", DB_USER="veqta_dev",
                    DB_PASSWORD=secrets.token_urlsafe(32), DB_HOST="127.0.0.1", DB_PORT="5432",
                    DJANGO_SECRET_KEY=secrets.token_urlsafe(64), DJANGO_ALLOWED_HOSTS="localhost",
