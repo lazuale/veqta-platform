@@ -68,7 +68,6 @@ export function installCore(ctx) {
             busyFocus = null;
         }
     }
-    const shortItem = name => name;
     let catalogCache = null;
     const byItem = () => {
         const catalog = settings.meta?.items || [];
@@ -159,7 +158,7 @@ export function installCore(ctx) {
                     : err.message || 'Ошибка операции', true);
     }
     Object.assign(ctx, {
-        root, main, overlays, feedback, API, $, $$, esc, copy, plural, fmt, fmtTime, norm, icon, btn, field, settings, can, historyKey, assignmentKey, controlSelector, setBusy, shortItem, byItem, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable, newSelection, itemNames, assignments, assignedCount, emptyCount, normalizedDraft, dirty, notice, api, fail
+        root, main, overlays, feedback, API, $, $$, esc, copy, plural, fmt, fmtTime, norm, icon, btn, field, settings, can, historyKey, assignmentKey, controlSelector, setBusy, byItem, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable, newSelection, itemNames, assignments, assignedCount, emptyCount, normalizedDraft, dirty, notice, api, fail
     });
     return true;
 }

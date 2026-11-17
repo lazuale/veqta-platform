@@ -55,7 +55,7 @@ export function installBatching(ctx) {
             else { waiting.add(entry); signal.addEventListener('abort', cancel, { once: true }); }
         });
     }
-    const limits = () => ({ request_members: 1000, items_per_member: 30, repeat_pairs: 1200, json_bytes: 65536, ...ctx.settings.meta?.limits });
+    const limits = () => ctx.settings.meta.limits;
     async function readChunks(path, rows, buildData, { maxItems, signal, valid = () => true, progress = () => {} } = {}) {
         if (path !== 'ui/resolve/' && !/^ui\/requests\/\d+\/repeat-scan\/$/.test(path))
             throw new Error('Пакетная обработка разрешена только для чтения');

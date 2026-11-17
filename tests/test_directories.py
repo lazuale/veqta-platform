@@ -18,6 +18,7 @@ from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from workwear import services
+from workwear.repeats import scan_repeats
 from workwear.importers.acceptance import accept
 from workwear.importers.directories_1c import parse
 from workwear.models import (
@@ -73,17 +74,17 @@ class DirectoryTests(TestCase):
             {"organization_id": self.organization.pk}).json()["count"], 1)
 
     def test_rename_preserves_request_and_membership_names(self):
-        original = self.req.organization_name
+        original = self.req.snapshot_organization_name
         self.save(finish=True)
         self.organization.name = "Новое отображаемое название"
         self.organization.save()
         self.req.refresh_from_db()
         member = self.req.members.get()
-        self.assertEqual(self.req.organization_name, original)
+        self.assertEqual(self.req.snapshot_organization_name, original)
         self.assertEqual(member.snapshot_organization_name, original)
         new = services.create_request(organization_id=self.organization.pk, actor=self.actor)
         self.save(request=new, finish=True)
-        self.assertEqual(new.organization_name, self.organization.name)
+        self.assertEqual(new.snapshot_organization_name, self.organization.name)
         self.assertEqual(new.members.get().organization_id, member.organization_id)
 
     def test_same_name_does_not_make_two_organizations_equivalent(self):
@@ -94,7 +95,7 @@ class DirectoryTests(TestCase):
             services.add_employee(request_id=self.req.pk, employee_id=outsider.pk,
                 actor=self.actor, expected_version=1)
         self.rejects(lambda: RequestEmployee.objects.create(request=self.req, employee=outsider,
-            organization=self.organization, organization_name=self.req.organization_name), "ww_member_emp_org_fk")
+            organization=self.organization), "ww_member_emp_org_fk")
 
     def test_organization_binding_is_immutable_after_initial_assignment(self):
         self.rejects(lambda: Organization.objects.filter(pk=self.organization.pk).update(external_id=str(uuid4())),
@@ -103,7 +104,7 @@ class DirectoryTests(TestCase):
     def test_direct_sql_cannot_include_employee_from_old_import(self):
         make_import()
         self.rejects(lambda: RequestEmployee.objects.create(request=self.req, employee=self.people[0],
-            organization=self.organization, organization_name=self.organization.name),
+            organization=self.organization),
             "ww_member_current_import_guard")
 
     def test_used_organization_and_item_are_protected(self):
@@ -124,8 +125,8 @@ class DirectoryTests(TestCase):
                           assignment.snapshot_validity_days), (original_name, original_category, 365))
         data = self.client.get(f"/workwear/api/requests/{self.req.pk}/").json()["request"]
         self.assertEqual(data["members"][0]["assignments"][0]["name"], original_name)
-        warning = services.repeat_warnings_for(employee_id=self.people[0].pk, item_id=item.pk,
-            as_of_date=timezone.localdate() + timedelta(days=100))[0]
+        warning = scan_repeats(pairs={(self.people[0].pk, item.pk)},
+            as_of_date=timezone.localdate() + timedelta(days=100))[(self.people[0].pk, item.pk)]
         self.assertEqual((warning.validity_days, warning.remaining_days), (365, 265))
         other = services.create_request(organization_id=self.organization.pk, actor=self.actor)
         history = self.client.get(f"/workwear/api/ui/requests/{other.pk}/employees/{self.people[0].pk}/history/")
@@ -175,9 +176,9 @@ class DirectoryTests(TestCase):
             req = services.create_request(organization_id=self.organization.pk, actor=self.actor)
             self.save(request=req, item=item, finish=True)
             pair = (self.people[0].pk, item.pk)
-            self.assertIn(pair, services.repeat_warnings_for_pairs(pairs={pair},
+            self.assertIn(pair, scan_repeats(pairs={pair},
                 as_of_date=timezone.localdate() + timedelta(days=days - 1)))
-            self.assertNotIn(pair, services.repeat_warnings_for_pairs(pairs={pair},
+            self.assertNotIn(pair, scan_repeats(pairs={pair},
                 as_of_date=timezone.localdate() + timedelta(days=days)))
         self.rejects(lambda: WorkwearItem.objects.create(code="BAD", name="Тест", category="Тест", validity_days=0),
                      "ww_item_validity_ck")
@@ -324,7 +325,7 @@ class OrganizationImportTests(TestCase):
         self.assertEqual((result.created, Organization.objects.count(), Employee.objects.count()), (0, 1, 1))
         self.assertEqual(organization.name, "Отображаемое название администратора")
         self.assertEqual(organization.source_name, "Новое название источника")
-        self.assertEqual(employee.organization_name, "Новое название источника")
+        self.assertEqual(employee.organization.source_name, "Новое название источника")
         self.assertEqual(req.members.get().snapshot_organization_name, original_name)
 
     def test_different_external_id_cannot_move_existing_guid(self):
@@ -335,7 +336,7 @@ class OrganizationImportTests(TestCase):
         self.assertEqual(Organization.objects.count(), 1)
         self.assertEqual(EmployeeImport.objects.count(), 1)
 
-    def test_legacy_name_requires_explicit_admin_binding(self):
+    def test_manual_name_requires_explicit_admin_binding(self):
         organization = Organization.objects.create(name="Тестовая организация источника")
         with self.assertRaises(ValidationError):
             self.publish()

@@ -65,9 +65,10 @@ class HttpTests(TestCase):
         self.assertEqual(result.status_code, 409)
         self.assertEqual(result.json()["error"]["code"], "stale_version")
 
-    def test_metadata_reports_empty_period_without_inventing_dates(self):
+    def test_metadata_reports_source_date_without_inventing_period(self):
         data = self.client.get("/workwear/api/ui/metadata/").json()
-        self.assertIsNone(data["import"]["coverage_start"])
+        self.assertNotIn("coverage_start", data["import"])
+        self.assertIsNotNone(data["import"]["source_exported_at"])
         self.assertEqual(data["limits"]["request_members"], 1000)
         self.assertEqual(data["limits"]["items_per_member"], 30)
 

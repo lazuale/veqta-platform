@@ -61,7 +61,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         raise ValidationError("Некорректный признак завершения")
     desired, employee_ids, item_ids = _validate(members)
     req = services._lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
-    employees = {e.pk: e for e in Employee.objects.filter(pk__in=employee_ids)}
+    employees = {e.pk: e for e in Employee.objects.select_related("organization").filter(pk__in=employee_ids)}
     if set(employees) != set(employee_ids):
         raise ValidationError("Некоторые сотрудники отсутствуют в справочнике")
     items = dict(WorkwearItem.objects.filter(pk__in=item_ids).values_list("pk", "is_active"))
@@ -91,7 +91,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         "employee_id": m.employee_id,
         "full_name": m.snapshot_full_name,
         "personnel_number": m.snapshot_personnel_number,
-        "organization_name": m.snapshot_organization_name,
+        "snapshot_organization_name": m.snapshot_organization_name,
         "item_ids": sorted(old_items[m.employee_id]),
     } for m in existing}
     additions = sorted(set(desired) - set(old_people))
@@ -110,7 +110,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         "employee_id": employee_id,
         "full_name": employees[employee_id].full_name,
         "personnel_number": employees[employee_id].personnel_number,
-        "organization_name": employees[employee_id].organization_name,
+        "snapshot_organization_name": employees[employee_id].organization.name,
     } for employee_id in additions]
     removed_people = [old_people[employee_id] for employee_id in removals]
     changed = False
@@ -125,10 +125,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         if employee_id not in existing_by_employee:
             e = employees[employee_id]
             new_members.append(RequestEmployee(
-                request=req, employee=e, organization_id=req.organization_id, organization_name=req.organization_name,
-                snapshot_full_name=e.full_name, snapshot_personnel_number=e.personnel_number,
-                snapshot_organization_name=e.organization_name,
-                snapshot_position_name=e.position_name, snapshot_department_name=e.department_name,
+                request=req, employee=e, organization_id=req.organization_id,
             ))
     if new_members:
         RequestEmployee.objects.bulk_create(new_members, batch_size=WRITE_BATCH_SIZE)

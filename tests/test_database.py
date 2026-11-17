@@ -88,10 +88,34 @@ class DatabaseGuardsTests(TestCase):
         self.rejected(lambda: Request.objects.filter(pk=self.req.pk).update(status="closed", completed_at=timezone.now(),
                       completed_by=self.actor), "ww_request_transition_version_guard")
 
-    def test_close_requires_complete_snapshot(self):
-        RequestEmployee.objects.filter(pk=self.member.pk).update(snapshot_personnel_number="")
-        self.rejected(lambda: Request.objects.filter(pk=self.req.pk).update(status="closed", version=self.req.version+1,
-                      completed_at=timezone.now(), completed_by=self.actor), "ww_request_member_completeness_guard")
+    def test_member_snapshot_is_filled_and_cannot_be_rewritten(self):
+        self.assertEqual(self.member.snapshot_full_name, self.people[0].full_name)
+        self.rejected(lambda: RequestEmployee.objects.filter(pk=self.member.pk).update(snapshot_personnel_number=""),
+                      "ww_member_identity_immutable")
+
+    def test_member_insert_does_not_trust_client_snapshot(self):
+        member = RequestEmployee.objects.create(request=self.req, employee=self.people[1],
+            organization_id=self.req.organization_id, snapshot_full_name="Подменённое имя",
+            snapshot_personnel_number="Подменённый номер", snapshot_organization_name="Подменённое название")
+        member.refresh_from_db()
+        self.assertEqual(member.snapshot_full_name, self.people[1].full_name)
+        self.assertEqual(member.snapshot_personnel_number, self.people[1].personnel_number)
+        self.assertEqual(member.snapshot_organization_name, self.people[1].organization.name)
+
+    def test_employee_requires_a_source_import(self):
+        with self.assertRaises(IntegrityError) as caught:
+            with transaction.atomic():
+                Employee.objects.create(employee_guid=uuid4(), full_name="Тестовый сотрудник без источника",
+                    personnel_number="TEST-NO-SOURCE", organization_id=self.req.organization_id)
+        self.assertEqual(caught.exception.__cause__.diag.column_name, "last_seen_import_id")
+
+    def test_version_cannot_decrease(self):
+        self.rejected(lambda: Request.objects.filter(pk=self.req.pk).update(version=1),
+                      "ww_request_version_monotonic_guard")
+
+    def test_initial_version_must_be_one(self):
+        self.rejected(lambda: Request.objects.create(organization_id=self.req.organization_id,
+            created_by=self.actor, version=9), "ww_request_initial_version_guard")
 
     def test_close_requires_assignments_for_every_member(self):
         RequestEmployee.objects.create(request=self.req, employee=self.people[1], organization_id=make_organization().pk)

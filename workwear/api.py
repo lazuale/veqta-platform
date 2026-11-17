@@ -126,7 +126,7 @@ def as_request(req):
 
     Участников с snapshot-полями добавляет request_detail; записи в БД нет."""
     return {
-        "id": req.pk, "organization_id": req.organization_id, "organization_name": req.organization_name,
+        "id": req.pk, "organization_id": req.organization_id, "snapshot_organization_name": req.snapshot_organization_name,
         "status": req.status, "version": req.version,
         "created_at": req.created_at.isoformat(),
         "completed_at": req.completed_at.isoformat() if req.completed_at else None,
@@ -183,7 +183,7 @@ def request_detail(request, request_id):
         {"id": m.pk, "employee_id": m.employee_id,
          "full_name": m.snapshot_full_name,
          "personnel_number": m.snapshot_personnel_number,
-         "organization_name": m.snapshot_organization_name, "organization_id": m.organization_id,
+         "snapshot_organization_name": m.snapshot_organization_name, "organization_id": m.organization_id,
          "position_name": m.snapshot_position_name,
          "department_name": m.snapshot_department_name,
          "assignments": [{"id": a.pk, "item_id": a.item_id,

@@ -35,7 +35,6 @@ class Command(BaseCommand):
         parser.add_argument('--expected-employee-count', type=int)
         parser.add_argument('--expected-previous-import-id', type=int)
         parser.add_argument('--confirm-missing-current-sha256')
-        parser.add_argument('--acknowledge-undated-previous', action='store_true')
 
     def handle(self, *args, **options):
         """Проверить параметры и целевую БД, разобрать источник и выполнить выбранный режим.
@@ -62,9 +61,8 @@ class Command(BaseCommand):
             'database': connection.settings_dict['NAME'],
             'contract': ['Employees.csv', 'Positions.csv', 'Units.csv'],
             'source_employees_rows': batch.source_row_count,
-            'unique_current_employees': batch.current_count,
+            'unique_current_employees': len(batch.people),
             'source_exported_at': exported.isoformat() if exported else None,
-            'coverage_period': None,
             'sha256': batch.sha256, 'anomalies': batch.anomalies,
         }
         if options['apply']:
@@ -72,8 +70,7 @@ class Command(BaseCommand):
                 result['acceptance'] = asdict(accept(batch, source_exported_at=exported,
                     expected_employee_count=options['expected_employee_count'],
                     expected_previous_import_id=options['expected_previous_import_id'],
-                    confirmed_missing_sha256=options['confirm_missing_current_sha256'],
-                    acknowledge_undated_previous=options['acknowledge_undated_previous']))
+                    confirmed_missing_sha256=options['confirm_missing_current_sha256']))
             except ValidationError as exc:
                 raise CommandError('; '.join(exc.messages)) from exc
             except IntegrityError as exc:

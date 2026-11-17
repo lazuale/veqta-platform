@@ -65,20 +65,19 @@ def _chunks(items, size=500):
 
 
 @transaction.atomic
-def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
+def accept(batch: ParsedBatch, *, source_exported_at: datetime,
            expected_employee_count=None, expected_previous_import_id=None,
-           confirmed_missing_sha256=None, acknowledge_undated_previous=False) -> AcceptanceResult:
+           confirmed_missing_sha256=None) -> AcceptanceResult:
     """Опубликовать ParsedBatch атомарно под exclusive advisory lock.
 
     Нужны достоверная source_exported_at с зоной, точный employee_count,
-    expected_previous_import_id (0 для первого), подтверждение digest выпадений
-    и явное acknowledge для прежней недатированной выгрузки при необходимости.
+    expected_previous_import_id (0 для первого), подтверждение digest выпадений.
     Возвращает AcceptanceResult; ValidationError/IntegrityError отменяют всё.
     Повтор последней тройки хешей с той же датой идемпотентен. Snapshot-поля
     заявок не изменяются; отсутствующие GUID остаются в историческом справочнике."""
-    if source_exported_at is not None and (not isinstance(source_exported_at, datetime) or timezone.is_naive(source_exported_at)):
+    if not isinstance(source_exported_at, datetime) or timezone.is_naive(source_exported_at):
         raise ValidationError("Дата выгрузки должна содержать часовой пояс")
-    if len(batch.people) < 1 or batch.current_count != len(batch.people):
+    if not batch.people:
         raise ValidationError("Неверное количество актуальных сотрудников")
     lock_for_acceptance()
     signatures = {
@@ -95,23 +94,16 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
             raise ValidationError("Дата повторного принятия не совпадает с исходной")
         return AcceptanceResult(existing.pk, 0, 0, len(batch.people),
                                 Employee.objects.exclude(last_seen_import_id=existing.pk).count(), True)
-    if source_exported_at is None:
-        raise ValidationError("Для публикации требуется проверенная дата выгрузки с часовым поясом")
     if source_exported_at > timezone.now():
         raise ValidationError("Дата выгрузки не может находиться в будущем")
     if type(expected_employee_count) is not int or expected_employee_count != len(batch.people):
         raise ValidationError("Не подтверждено точное количество сотрудников подготовленного пакета")
     if type(expected_previous_import_id) is not int or expected_previous_import_id != getattr(previous, 'pk', 0):
         raise ValidationError("Изменился принятый справочник. Повторите DRY_RUN и проверку публикации")
-    if type(acknowledge_undated_previous) is not bool:
-        raise ValidationError("Некорректное подтверждение предыдущей недатированной выгрузки")
-    if previous and previous.source_exported_at is None and not acknowledge_undated_previous:
-        raise ValidationError("У предыдущей выгрузки нет даты источника; требуется явное подтверждение перехода")
     checked = _review(batch, previous)
     if checked.missing_current_count and confirmed_missing_sha256 != checked.missing_current_sha256:
         raise ValidationError("Сотрудники исчезают из текущего справочника. Проверьте DRY_RUN и подтвердите точный SHA-256 списка GUID")
-    if (previous and previous.source_exported_at and source_exported_at and
-            source_exported_at <= previous.source_exported_at):
+    if previous and source_exported_at <= previous.source_exported_at:
         raise ValidationError("Дата выгрузки не новее последней принятой")
     by_guid = {p.guid: p for p in batch.people}
     if len(by_guid) != len(batch.people):
@@ -122,7 +114,7 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
     for external_id, source_name in sorted(batch.organizations.items()):
         organization = Organization.objects.select_for_update().filter(external_id=external_id).first()
         if organization is None:
-            # Имя не доказывает идентичность. Старую запись сначала связывает администратор.
+            # Имя не доказывает идентичность. Ручную запись сначала связывает администратор.
             if Organization.objects.filter(external_id__isnull=True).filter(
                     models.Q(name=source_name) | models.Q(source_name=source_name)).exists():
                 raise ValidationError(
@@ -135,9 +127,6 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
             organization.save(update_fields=["source_name"])
         organizations[external_id] = organization
     for uid, person in by_guid.items():
-        org = person.organization_name
-        if not isinstance(org, str) or not org.strip() or len(org) > 255 or org.strip().upper() == "NULL":
-            raise ValidationError(f"Недопустимая организация сотрудника {uid}: {org!r}")
         if person.organization_external_id not in organizations:
             raise ValidationError("Отсутствует организация подготовленного сотрудника")
         if uid in stored and stored[uid].organization_id != organizations[person.organization_external_id].pk:
@@ -145,14 +134,13 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
     snapshot = EmployeeImport.objects.create(
         **signatures, source_row_count=batch.source_row_count,
         employee_count=len(by_guid), source_exported_at=source_exported_at,
-        coverage_start=None, coverage_end=None,
     )
     create, update = [], []
     for uid, p in by_guid.items():
         if uid not in stored:
             create.append(Employee(
                 employee_guid=uid, personnel_number=p.personnel_number,
-                full_name=p.full_name, organization_name=p.organization_name,
+                full_name=p.full_name,
                 organization=organizations[p.organization_external_id],
                 position_name=p.position_name, department_name=p.department_name,
                 last_seen_import=snapshot,
@@ -161,7 +149,6 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
             employee = stored[uid]
             employee.personnel_number = p.personnel_number
             employee.full_name = p.full_name
-            employee.organization_name = p.organization_name
             employee.position_name = p.position_name
             employee.department_name = p.department_name
             employee.last_seen_import = snapshot
@@ -170,7 +157,7 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime | None = None,
         Employee.objects.bulk_create(chunk, batch_size=500)
     for chunk in _chunks(update):
         Employee.objects.bulk_update(chunk,
-            ['personnel_number', 'full_name', 'organization_name', 'position_name',
+            ['personnel_number', 'full_name', 'position_name',
              'department_name', 'last_seen_import'], batch_size=500)
     count = Employee.objects.filter(last_seen_import=snapshot).count()
     if count != len(batch.people):

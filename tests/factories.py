@@ -36,7 +36,6 @@ def make_employees(snapshot, count=2, organization=None):
     return Employee.objects.bulk_create([
         Employee(employee_guid=uuid4(), personnel_number=f"TEST-{i:05d}",
                  full_name=f"Тестовый сотрудник {i:05d}", organization=organization,
-                 organization_name=organization.source_name or organization.name,
                  last_seen_import=snapshot) for i in range(count)
     ])
 

@@ -52,9 +52,7 @@ class EmployeeImport(models.Model):
     source_row_count = models.PositiveIntegerField()
     employee_count = models.PositiveIntegerField()
     # Поля задаёт источник; accepted_at не является датой выгрузки.
-    source_exported_at = models.DateTimeField(null=True, blank=True)
-    coverage_start = models.DateField(null=True, blank=True)
-    coverage_end = models.DateField(null=True, blank=True)
+    source_exported_at = models.DateTimeField()
 
     class Meta:
         verbose_name = "Принятая выгрузка сотрудников"
@@ -83,14 +81,6 @@ class EmployeeImport(models.Model):
                 ),
                 name="ww_import_counts_ck",
             ),
-            models.CheckConstraint(
-                condition=(
-                    Q(coverage_start__isnull=True, coverage_end__isnull=True)
-                    | Q(coverage_start__isnull=False, coverage_end__isnull=False,
-                        coverage_start__lte=F("coverage_end"))
-                ),
-                name="ww_import_coverage_pair_ck",
-            ),
         ]
 
 
@@ -110,13 +100,10 @@ class Employee(models.Model):
         max_length=255,
         blank=True,
     )
-    organization_name = models.CharField(max_length=255)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT,
                                      related_name="employees", verbose_name="Организация")
     last_seen_import = models.ForeignKey(
         EmployeeImport,
-        null=True,
-        blank=True,
         on_delete=models.PROTECT,
         related_name="last_seen_employees",
     )
@@ -144,8 +131,6 @@ class Employee(models.Model):
                 condition=(
                     ~Q(personnel_number="")
                     & ~Q(full_name="")
-                    & ~Q(organization_name="")
-                    & ~Q(organization_name="NULL")
                 ),
                 name="ww_employee_required_ck",
             ),
@@ -201,8 +186,7 @@ class Request(models.Model):
     SQL guard требует начальный draft и защищает переходы/завершённые записи."""
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT,
                                      related_name="requests", verbose_name="Организация")
-    # Название на момент создания, независимое от последующих правок справочника.
-    organization_name = models.CharField(max_length=255)
+    snapshot_organization_name = models.CharField(max_length=255, editable=False)
     status = models.CharField(
         max_length=12,
         choices=RequestStatus.choices,
@@ -293,29 +277,28 @@ class RequestEmployee(models.Model):
         on_delete=models.PROTECT,
         related_name="workwear_memberships",
     )
-    organization_name = models.CharField(max_length=255)
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT,
                                      related_name="memberships", verbose_name="Организация")
 
     snapshot_full_name = models.CharField(
         max_length=255,
-        blank=True,
+        editable=False,
     )
     snapshot_personnel_number = models.CharField(
         max_length=64,
-        blank=True,
+        editable=False,
     )
     snapshot_organization_name = models.CharField(
         max_length=255,
-        blank=True,
+        editable=False,
     )
     snapshot_position_name = models.CharField(
         max_length=255,
-        blank=True,
+        editable=False,
     )
     snapshot_department_name = models.CharField(
         max_length=255,
-        blank=True,
+        editable=False,
     )
 
     class Meta:
@@ -326,6 +309,8 @@ class RequestEmployee(models.Model):
                 fields=["request", "employee"],
                 name="ww_member_request_emp_uniq",
             ),
+            models.CheckConstraint(condition=~Q(snapshot_full_name="") & ~Q(snapshot_personnel_number="")
+                & ~Q(snapshot_organization_name=""), name="ww_member_snapshot_ck"),
         ]
 
 

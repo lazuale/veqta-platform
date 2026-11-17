@@ -101,7 +101,7 @@ export function installEmployees(ctx) {
         const text = settings.bulkText, requestId = settings.request.id;
         const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
         if (!lines.length || lines.length > ctx.limits().request_members) {
-            notice('Вставьте от1 до1000 строк', true); return;
+            notice(`Вставьте от 1 до ${ctx.limits().request_members} строк`, true); return;
         }
         const valid = () => settings.request?.id === requestId && settings.modal === 'add' && settings.tab === 'bulk' &&
             settings.bulkEpoch === epoch && settings.dialogEpoch === dialog && settings.bulkText === text;

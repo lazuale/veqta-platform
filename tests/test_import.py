@@ -54,7 +54,7 @@ class ImportTests(TestCase):
         result = self.publish(batch)
         self.assertEqual((result.created, result.current), (1, 1))
         self.assertEqual(Employee.objects.get().personnel_number, "TEST-00001")
-        self.assertIsNone(EmployeeImport.objects.get().coverage_start)
+        self.assertEqual(EmployeeImport.objects.get().source_exported_at, self.date)
 
     def test_tar_and_directory_have_same_hashes(self):
         target = self.path/"source.tar.gz"
@@ -120,8 +120,8 @@ class ImportTests(TestCase):
         with self.assertRaises(ImportRejected):
             parse(target)
 
-    def test_old_timesheet_arguments_rejected(self):
-        with self.assertRaises(ImportRejected):
+    def test_parser_rejects_arguments_outside_its_contract(self):
+        with self.assertRaises(TypeError):
             parse(self.path, timesheets="unsupported")
 
     def test_commands_refuse_wrong_environment_before_parsing_sources(self):

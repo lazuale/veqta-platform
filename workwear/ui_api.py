@@ -5,8 +5,8 @@
 Транспортные лимиты, права и ошибки описаны в docs/workwear.md. Здесь нет копии
 алгоритма повторов: оба маршрута обращаются к одному серверному расчёту."""
 from .eligibility import latest_import
+from .repeats import scan_repeats
 from .employee_lookup import employee_data, resolve_many
-from dataclasses import asdict
 from datetime import date
 
 from django.core.exceptions import ValidationError
@@ -42,17 +42,13 @@ def _query_num(request, key, *, default, maximum):
     return number
 
 
-def _latest_import():
-    return latest_import()
-
-
 @endpoint("GET")
 def metadata(request):
     """GET view_request: организации, доступный каталог, 8 флагов native permissions и дата импорта.
 
     Каталог выдаётся только с view_workwearitem; период не выводится из accepted_at."""
     require_permission(request, "view_request")
-    latest = _latest_import()
+    latest = latest_import()
     items = []
     if request.user.has_perm("workwear.view_workwearitem"):
         items = [
@@ -71,8 +67,6 @@ def metadata(request):
             "employee_count": latest.employee_count if latest else None,
             # accepted_at не доказывает период источника; отсутствующие даты не выдумываются.
             "source_exported_at": latest.source_exported_at.isoformat() if latest and latest.source_exported_at else None,
-            "coverage_start": latest.coverage_start.isoformat() if latest and latest.coverage_start else None,
-            "coverage_end": latest.coverage_end.isoformat() if latest and latest.coverage_end else None,
         },
         "limits": {"request_members": MAX_REQUEST_MEMBERS, "items_per_member": MAX_ITEMS_PER_MEMBER,
                    "repeat_pairs": MAX_REPEAT_PAIRS, "json_bytes": MAX_JSON_BYTES, "sync_bytes": MAX_SYNC_JSON_BYTES},
@@ -133,7 +127,7 @@ def registry(request):
     if status:
         qs = qs.filter(status=status)
     if q:
-        query = Q(organization_name__icontains=q) | Q(members__snapshot_full_name__icontains=q) | Q(
+        query = Q(snapshot_organization_name__icontains=q) | Q(members__snapshot_full_name__icontains=q) | Q(
             members__snapshot_personnel_number__icontains=q
         )
         if q.isascii() and q.isdecimal() and len(q) <= 19:
@@ -154,7 +148,7 @@ def registry(request):
         "offset": offset,
         "limit": limit,
         "results": [
-            {"id": r.pk, "organization_id": r.organization_id, "organization_name": r.organization_name,
+            {"id": r.pk, "organization_id": r.organization_id, "snapshot_organization_name": r.snapshot_organization_name,
              "status": r.status, "version": r.version,
              "created_at": r.created_at.isoformat(),
              "completed_at": r.completed_at.isoformat() if r.completed_at else None,
@@ -177,7 +171,7 @@ def employees(request):
     limit = _query_num(request, "limit", default=40, maximum=40)
     if limit == 0:
         raise ValidationError("Лимит должен быть положительным")
-    latest = _latest_import()
+    latest = latest_import()
     if len(q) < 2 or latest is None:
         return respond({"results": [], "min_query_length": 2,
                         "count": 0, "offset": offset, "limit": limit, "has_more": False,
@@ -192,7 +186,7 @@ def employees(request):
                       function="split_part", output_field=CharField())
     patronymic = Func(F("full_name"), Value(" "), Value(3),
                       function="split_part", output_field=CharField())
-    qs = (Employee.objects
+    qs = (Employee.objects.select_related("organization")
           .filter(organization_id=org, last_seen_import_id=latest.pk)
           .filter(Q(full_name__icontains=q) | Q(personnel_number__icontains=q))
           .annotate(_sr_surname=surname, _sr_given=given_name,
@@ -239,7 +233,7 @@ def resolve(request):
         raise ValidationError("Каждая строка должна содержать ФИО или табельный номер")
     if "request_id" in obj:
         require_permission(request, "view_request")
-    latest = _latest_import()
+    latest = latest_import()
     already = set()
     if "request_id" in obj:
         request_id = positive_int(obj["request_id"], "request_id")
@@ -306,25 +300,6 @@ def events(request, request_id):
 
 
 @endpoint("GET")
-def repeat(request, request_id):
-    """GET view_request + view_employee: предупреждение для существующего участника заявки."""
-    require_permission(request, "view_request")
-    require_permission(request, "view_employee")
-    e = _query_num(request, "employee_id", default=0, maximum=9223372036854775807)
-    i = _query_num(request, "item_id", default=0, maximum=9223372036854775807)
-    if not e or not i:
-        raise ValidationError("Требуются employee_id и item_id")
-    RequestEmployee.objects.get(request_id=request_id, employee_id=e)
-    alerts = services.repeat_warnings_for(
-        employee_id=e, item_id=i, as_of_date=timezone.localdate(), exclude_request_id=request_id,
-    )
-    return respond({"warnings": [
-        {**asdict(w), "previous_completion_date": w.previous_completion_date.isoformat()}
-        for w in alerts
-    ]})
-
-
-@endpoint("GET")
 def employee_history(request, request_id, employee_id):
     """GET view_request + view_workwearevent: до 100 прежних закрытых snapshot-заявок.
 
@@ -349,7 +324,7 @@ def employee_history(request, request_id, employee_id):
     return respond({"results": [{
         "request_id": m.request_id,
         "completed_at": m.request.completed_at.isoformat(),
-        "organization_name": m.snapshot_organization_name,
+        "snapshot_organization_name": m.snapshot_organization_name,
         "full_name": m.snapshot_full_name,
         "personnel_number": m.snapshot_personnel_number,
         "department_name": m.snapshot_department_name,
@@ -408,7 +383,7 @@ def repeat_scan(request, request_id):
     # Проверяем ID до расчёта; календарные правила принадлежат общему
     # сервису одиночных и пакетных предупреждений.
     reference_date = timezone.localdate()
-    warnings = services.repeat_warnings_for_pairs(
+    warnings = scan_repeats(
         pairs=wanted,
         as_of_date=reference_date,
         exclude_request_id=request_id,

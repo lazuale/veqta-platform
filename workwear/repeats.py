@@ -9,6 +9,7 @@ from datetime import date, datetime, time, timedelta
 from django.core.exceptions import ValidationError
 from django.utils import timezone
 
+from .limits import MAX_REPEAT_PAIRS
 from .models import RequestAssignment, RequestStatus, WorkwearItem
 
 
@@ -36,7 +37,7 @@ def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
     wanted = set(pairs)
     if not wanted:
         return {}
-    if len(wanted) > 1200 or any(
+    if len(wanted) > MAX_REPEAT_PAIRS or any(
         not isinstance(pair, tuple)
         or len(pair) != 2
         or any(type(pk) is not int or pk <= 0 for pk in pair)
@@ -68,8 +69,7 @@ def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
             timezone.get_current_timezone(),
         )
         history = history.filter(request_employee__request__completed_at__lt=next_day)
-    # PostgreSQL выбирает последнее назначение каждой пары. Получаем четыре
-    # нужных значения вместо создания связанных объектов для всей истории.
+    # PostgreSQL выбирает последнее назначение каждой пары. Читаем нужные поля вместо создания связанных объектов для всей истории.
     history = history.order_by(
         "request_employee__employee_id", "item_id",
         "-request_employee__request__completed_at", "-pk",

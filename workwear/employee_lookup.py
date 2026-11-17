@@ -21,7 +21,7 @@ def employee_data(employee, latest_id=None):
         "personnel_number": employee.personnel_number,
         "position_name": employee.position_name,
         "department_name": employee.department_name,
-        "organization_name": employee.organization_name,
+        "organization_name": employee.organization.name,
         "organization_id": employee.organization_id,
         "is_current": latest_id is not None and employee.last_seen_import_id == latest_id,
     }
@@ -55,8 +55,8 @@ def resolve_many(*, lines, organization_id, latest, already):
     name_map = defaultdict(list)
     number_map = defaultdict(list)
     suffix_map = defaultdict(list)
-    queryset = Employee.objects.only(
-        "id", "full_name", "personnel_number", "organization_name", "organization_id",
+    queryset = Employee.objects.select_related("organization").only(
+        "id", "full_name", "personnel_number", "organization__name", "organization_id",
         "last_seen_import_id", "position_name", "department_name",
     )
     for employee in queryset.iterator(chunk_size=2000):

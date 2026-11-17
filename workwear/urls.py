@@ -19,7 +19,6 @@ urlpatterns = [
     path("ui/resolve/", ui_api.resolve, name="ui_resolve"),
     path("ui/requests/<int:request_id>/bulk-add/", ui_api.bulk_add, name="ui_bulk_add"),
     path("ui/requests/<int:request_id>/events/", ui_api.events, name="ui_events"),
-    path("ui/requests/<int:request_id>/repeat/", ui_api.repeat, name="ui_repeat"),
     path("ui/requests/<int:request_id>/sync/", ui_api.sync_request, name="ui_sync"),
     path("ui/requests/<int:request_id>/repeat-scan/", ui_api.repeat_scan, name="ui_repeat_scan"),
     path("ui/requests/<int:request_id>/employees/<int:employee_id>/history/", ui_api.employee_history, name="ui_employee_history"),

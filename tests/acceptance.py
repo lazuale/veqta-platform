@@ -124,6 +124,7 @@ def check_browser(actor, people, executable):
                 page.reload()
                 expect(page.locator('h1')).to_have_text("Состав заявки")
                 assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Горизонтальный выход страницы за экран"
+                draft_url = page.url
                 # Добавляем справочники нативными формами и используем новую позицию в UI.
                 page.set_viewport_size({"width": 1440, "height": 1000})
                 page.goto(base + "/admin/workwear/organization/add/")
@@ -177,10 +178,32 @@ def check_browser(actor, people, executable):
                 page.locator('[data-mode="matrix"]').click()
                 expect(page.locator('.matrix-leaf')).to_contain_text("Позиция из браузерного теста")
                 expect(page.locator('.matrix-leaf')).to_contain_text("90 дн.")
+                # Отсутствие доступных справочников проверяем через реальные формы Admin.
+                metadata = page.request.get(base + "/workwear/api/ui/metadata/").json()
+                for org in metadata["organizations"]:
+                    page.goto(base + f'/admin/workwear/organization/{org["value"]}/change/')
+                    page.locator('[name="requests_enabled"]').uncheck()
+                    page.locator('[name="_save"]').click()
+                    expect(page.locator('#changelist')).to_be_visible()
+                for catalog_item in metadata["items"]:
+                    if not catalog_item["is_active"]:
+                        continue
+                    page.goto(base + f'/admin/workwear/workwearitem/{catalog_item["id"]}/change/')
+                    page.locator('[name="is_active"]').uncheck()
+                    page.locator('[name="_save"]').click()
+                    expect(page.locator('#changelist')).to_be_visible()
+                page.goto(base + "/workwear/")
+                page.locator('[data-action="create"]').click()
+                expect(page.locator('[data-action="create-now"]')).to_be_disabled()
+                expect(page.locator('.vq-modal-body')).to_contain_text("Нет организаций, для которых разрешены заявки")
+                page.goto(draft_url)
+                expect(page.locator('h1')).to_have_text("Состав заявки")
+                expect(page.locator('.vq-banner[role="status"]')).to_contain_text("Нет активных позиций спецодежды")
                 assert not errors, errors
                 assert not failures, failures
                 print(f"Браузер {browser.version}: вход, Portal, подбор, назначение, сохранение, матрица, завершение, возврат, ширина 390 px — успешно")
                 print("Django Admin и интерфейс: новая организация, новая позиция со сроком 90 дней, переименование/отключение и сохранение истории — успешно")
+                print("Пустые состояния: создание без разрешённых организаций заблокировано, отсутствие активных СИЗ объяснено — успешно")
                 browser.close()
         finally:
             server.terminate()

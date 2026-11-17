@@ -8,6 +8,7 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from workwear import services
+from workwear.repeats import scan_repeats
 from workwear.models import Employee, Request, RequestAssignment, RequestEmployee, WorkwearEvent
 from workwear.sync import save_draft
 from .factories import make_user, make_import, make_employees, make_items, make_organization
@@ -142,8 +143,8 @@ class LifecycleTests(TestCase):
         today = timezone.localdate()
         for item in self.items:
             pair = (self.people[0].pk, item.pk)
-            self.assertIn(pair, services.repeat_warnings_for_pairs(pairs={pair}, as_of_date=today+timedelta(days=item.validity_days-1)))
-            self.assertNotIn(pair, services.repeat_warnings_for_pairs(pairs={pair}, as_of_date=today+timedelta(days=item.validity_days)))
+            self.assertIn(pair, scan_repeats(pairs={pair}, as_of_date=today+timedelta(days=item.validity_days-1)))
+            self.assertNotIn(pair, scan_repeats(pairs={pair}, as_of_date=today+timedelta(days=item.validity_days)))
 
     def test_repeat_warning_does_not_block_new_assignment(self):
         self.save(finish=True)
@@ -159,7 +160,7 @@ class LifecycleTests(TestCase):
         with patch("workwear.services.timezone.now", return_value=future):
             save_draft(request_id=other.pk, actor=self.actor, expected_version=1,
                        members=[{"employee_id": self.people[0].pk, "item_ids": [self.items[0].pk]}], finish=True)
-        warning = services.repeat_warnings_for(employee_id=self.people[0].pk, item_id=self.items[0].pk)[0]
+        warning = scan_repeats(pairs={(self.people[0].pk, self.items[0].pk)})[(self.people[0].pk, self.items[0].pk)]
         self.assertEqual(warning.previous_request_id, self.req.pk)
 
 

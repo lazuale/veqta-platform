@@ -7,8 +7,9 @@
 import csv
 from pathlib import Path
 from django.core.management.base import BaseCommand, CommandError
+from django.core.exceptions import ValidationError
 from config.database import require_target
-from django.db import connection, transaction
+from django.db import transaction
 from workwear.models import WorkwearItem
 
 
@@ -38,10 +39,10 @@ class Command(BaseCommand):
             with path.open("r", encoding="utf-8-sig", newline="") as stream:
                 reader = csv.DictReader(stream, delimiter=";")
                 expected = {"code", "name", "category", "validity_days", "sort_order", "is_active"}
-                if set(reader.fieldnames or []) != expected:
+                if set(reader.fieldnames or []) != expected or len(reader.fieldnames or []) != len(expected):
                     raise CommandError("Catalog source must have exactly: " + ", ".join(sorted(expected)))
                 rows = list(reader)
-        except OSError as exc:
+        except (OSError, UnicodeError, csv.Error) as exc:
             raise CommandError(str(exc)) from exc
         if len(rows) != options["expected_count"] or options["expected_count"] < 1:
             raise CommandError("Catalog count differs from explicitly expected count")
@@ -49,24 +50,21 @@ class Command(BaseCommand):
         for idx, row in enumerate(rows, start=2):
             if None in row or any(v is None for v in row.values()):
                 raise CommandError(f"Malformed catalog row {idx}")
-            code = row["code"].strip()
-            name = row["name"].strip()
-            category = row["category"].strip()
-            try:
-                validity = int(row["validity_days"])
-                sort_order = int(row["sort_order"])
-            except ValueError as exc:
-                raise CommandError(f"Invalid numbers on row {idx}") from exc
             if row["is_active"] not in ("1", "0"):
-                raise CommandError(f"is_active must be 0 or 1 on row {idx}")
-            if (not code or len(code) > 32 or not name or len(name) > 120 or
-                    not category or len(category) > 64 or not 1 <= validity <= 32767 or
-                    sort_order < 0 or code in codes):
-                raise CommandError(f"Invalid or duplicated catalog row {idx}")
-            codes.add(code)
-            clean.append({"code": code, "name": name, "category": category,
-                          "validity_days": validity, "sort_order": sort_order,
-                          "is_active": row["is_active"] == "1"})
+                raise CommandError(f"is_active должен быть 0 или 1, строка {idx}")
+            item = WorkwearItem(code=row["code"].strip(), name=row["name"].strip(),
+                category=row["category"].strip(), validity_days=row["validity_days"],
+                sort_order=row["sort_order"], is_active=row["is_active"] == "1")
+            try:
+                # ModelForm в Admin и CLI проверяют одну модель, включая её CHECK.
+                # Уникальность существующего кода разбирается отдельно: apply идемпотентен.
+                item.full_clean(validate_unique=False)
+            except ValidationError as exc:
+                raise CommandError(f"Каталог, строка {idx}: {'; '.join(exc.messages)}") from exc
+            if item.code in codes:
+                raise CommandError(f"Повтор кода {item.code}, строка {idx}")
+            codes.add(item.code)
+            clean.append({field: getattr(item, field) for field in expected})
         if not options["apply"]:
             self.stdout.write(f"DRY_RUN catalog validated: {len(clean)} positions; database untouched")
             return

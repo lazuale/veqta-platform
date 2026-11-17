@@ -12,7 +12,7 @@ class OrganizationAdmin(admin.ModelAdmin):
     readonly_fields = ("source_name",)
 
     def get_readonly_fields(self, request, obj=None):
-        # Первичное сопоставление старой записи с 1С разрешено; замена ID запрещена БД.
+        # Внешний ID можно заполнить один раз; затем идентичность защищает БД.
         return self.readonly_fields + (("external_id",) if obj and obj.external_id else ())
 
 

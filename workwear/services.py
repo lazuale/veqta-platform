@@ -16,8 +16,6 @@ from django.utils import timezone
 from .eligibility import latest_import, require_current
 from .limits import MAX_REQUEST_MEMBERS, MAX_ITEMS_PER_MEMBER, WRITE_BATCH_SIZE
 from .ingest_lock import lock_for_membership
-# RepeatWarning доступен вызывающему коду через модуль services.
-from .repeats import RepeatWarning as RepeatWarning, scan_repeats
 
 from .models import (
     Employee,
@@ -107,9 +105,10 @@ def create_request(*, organization_id, actor):
     if organization is None:
         raise ValidationError("Создание заявок для организации не разрешено")
     req = Request.objects.create(
-        organization=organization, organization_name=organization.name, created_by=actor,
+        organization=organization, created_by=actor,
     )
-    _audit(req.pk, actor, "created", organization_id=organization.pk, organization_name=organization.name)
+    _audit(req.pk, actor, "created", organization_id=organization.pk, snapshot_organization_name=organization.name)
+    req.refresh_from_db()
     return req
 
 
@@ -141,12 +140,7 @@ def add_employees(*, request_id, employee_ids, actor, expected_version):
     members = RequestEmployee.objects.bulk_create([RequestEmployee(
         request=req,
         employee=people[employee_id],
-        organization_id=req.organization_id, organization_name=req.organization_name,
-        snapshot_full_name=people[employee_id].full_name,
-        snapshot_personnel_number=people[employee_id].personnel_number,
-        snapshot_organization_name=people[employee_id].organization_name,
-        snapshot_position_name=people[employee_id].position_name,
-        snapshot_department_name=people[employee_id].department_name,
+        organization_id=req.organization_id,
     ) for employee_id in employee_ids], batch_size=WRITE_BATCH_SIZE)
     _bump_draft_version(req, len(members))
     WorkwearEvent.objects.bulk_create([
@@ -313,31 +307,3 @@ def delete_draft(*, request_id, actor, expected_version):
     # Событие сохраняется после удаления: у WorkwearEvent нет FK на Request.
     _audit(req.pk, actor, "draft_deleted", version=req.version)
     req.delete()
-
-
-def repeat_warnings_for_pairs(*, pairs, as_of_date=None, exclude_request_id=None):
-    """Рассчитать пакет предупреждений через repeats.scan_repeats.
-
-    pairs: пары employee/item, as_of_date: календарная дата или localdate,
-    exclude_request_id исключает текущую заявку. Нет записи и разрешения на выдачу."""
-    return scan_repeats(
-        pairs=pairs,
-        as_of_date=as_of_date,
-        exclude_request_id=exclude_request_id,
-    )
-
-
-def repeat_warnings_for(*, employee_id, item_id, as_of_date=None, exclude_request_id=None):
-    """Совместимый одиночный расчёт повторов без решения о допустимости выдачи.
-
-    Возвращает список из 0–1 предупреждения. Неизвестная позиция даёт
-    DoesNotExist для прежнего HTTP 404; пакетный маршрут сохраняет свою 400."""
-    # Сохраняем прежний одиночный 404 для неизвестной позиции.
-    # Пакетный маршрут отдельно отвергает неверные пары через ValidationError.
-    WorkwearItem.objects.get(pk=item_id)
-    warning = repeat_warnings_for_pairs(
-        pairs={(employee_id, item_id)},
-        as_of_date=as_of_date,
-        exclude_request_id=exclude_request_id,
-    ).get((employee_id, item_id))
-    return [warning] if warning else []

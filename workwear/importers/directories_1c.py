@@ -112,11 +112,9 @@ class Person:
     guid: UUID
     personnel_number: str
     full_name: str
-    organization_name: str
     position_name: str
     department_name: str
     organization_external_id: str
-    current: bool = True
 
 
 @dataclass(frozen=True)
@@ -125,22 +123,17 @@ class ParsedBatch:
     people: tuple[Person, ...]
     sha256: dict[str, str]
     source_row_count: int
-    current_count: int
     anomalies: dict[str, int]
     organizations: dict[str, str]
 
 
-def parse(path, **_obsolete):
-    # Старые параметры табеля отвергаются явно: три справочника
-    # не доказывают наличие периода кадрового табеля.
+def parse(path):
     """Прочитать три CSV из path и вернуть ParsedBatch без побочных записей.
 
     path — каталог либо tar.gz/tgz с обычными файлами в корне. Невалидные GUID,
     конфликтующие непустые атрибуты дублей, сломанные ссылки и лимиты вызывают
     ImportRejected; ошибки доступа к файлу передаются вызывающей CLI. Дату
-    выгрузки и полноту адаптер не изобретает; obsolete-аргументы отвергаются."""
-    if _obsolete:
-        raise ImportRejected("Timesheet/coverage arguments are obsolete: import three directories only")
+    выгрузки и полноту адаптер не изобретает."""
     data = _sources(path)
     hashes = {name: hashlib.sha256(raw).hexdigest() for name, raw in data.items()}
     anomalies = {
@@ -245,10 +238,10 @@ def parse(path, **_obsolete):
                 department = units[ukey]
         else:
             anomalies["employees_without_unit"] += 1
-        people.append(Person(uid, number, full_name, org_name, position, department, org_id.casefold()))
+        people.append(Person(uid, number, full_name, position, department, org_id.casefold()))
     return ParsedBatch(
         people=tuple(sorted(people, key=lambda x: x.guid.hex)),
         sha256=hashes, source_row_count=employee_rows,
-        current_count=len(people), anomalies=anomalies,
+        anomalies=anomalies,
         organizations=organization_names,
     )
