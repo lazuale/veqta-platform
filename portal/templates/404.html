@@ -1,0 +1,4 @@
+{% extends "portal/app_shell.html" %}
+{% block title %}Страница не найдена — VEQTA Platform{% endblock %}
+{% block main_class %}flow{% endblock %}
+{% block content %}<section class="vq-error-page"><div class="vq-error-code">404</div><h1>Страница не найдена</h1><p>Проверьте адрес или откройте доступные приложения.</p><a href="{% url 'home' %}" class="vq-btn primary">К приложениям</a></section>{% endblock %}

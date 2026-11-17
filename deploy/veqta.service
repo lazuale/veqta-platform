@@ -1,0 +1,22 @@
+# Каталог и окружение подготовлены по docs/installation.md.
+[Unit]
+Description=VEQTA Platform
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=veqta
+Group=veqta
+WorkingDirectory=/opt/veqta-platform
+EnvironmentFile=/etc/veqta/prod.env
+ExecStart=/opt/veqta-platform/.venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:8765 --workers 2 --timeout 120 --error-logfile -
+Restart=on-failure
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

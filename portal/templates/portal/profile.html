@@ -1,0 +1,17 @@
+{% extends "portal/app_shell.html" %}
+{% block title %}Профиль — VEQTA Platform{% endblock %}
+{% block main_class %}flow{% endblock %}
+{% block content %}
+<div class="vq-portal-home">
+    <div class="vq-head"><div><h1>Профиль</h1><p class="vq-sub">Ваша учётная запись и доступ к приложениям.</p></div></div>
+    <section class="vq-card vq-profile" aria-label="Учётная запись">
+        <dl>
+            <dt>Логин</dt><dd>{{ user.username }}</dd>
+            <dt>Имя</dt><dd>{{ user.get_full_name|default:"Не указано" }}</dd>
+            <dt>Группы доступа</dt><dd>{% for group in profile_groups %}{{ group.name }}{% if not forloop.last %}, {% endif %}{% empty %}Не назначены{% endfor %}</dd>
+        </dl>
+        <p class="vq-help">Права назначает администратор. Для изменения доступа обратитесь к нему.</p>
+        <a class="vq-btn primary" href="{% url 'password_change' %}">Сменить пароль</a>
+    </section>
+</div>
+{% endblock %}

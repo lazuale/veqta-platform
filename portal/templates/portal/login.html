@@ -1,0 +1,22 @@
+{% extends "portal/base.html" %}
+{% block title %}Вход — VEQTA Platform{% endblock %}
+{% block body %}
+<div class="vq-auth-page">
+    <header class="vq-auth-brand"><span class="vq-brand"><span class="vq-mark">V</span><span class="vq-logo">VEQTA</span></span><span class="vq-caption">Корпоративная платформа</span></header>
+    <main id="main" class="vq-auth-main" tabindex="-1">
+        <section class="vq-auth-panel">
+            <h1>Вход в систему</h1>
+            <p class="vq-sub">Используйте выданные администратором учётные данные.</p>
+            {% if form.errors %}<div class="vq-notice error" role="alert">Проверьте логин и пароль.</div>{% endif %}
+            <form method="post" class="vq-form">
+                {% csrf_token %}
+                <div class="vq-form-field"><label class="vq-field-label" for="{{ form.username.id_for_label }}">Логин</label>{{ form.username }}</div>
+                <div class="vq-form-field"><label class="vq-field-label" for="{{ form.password.id_for_label }}">Пароль</label>{{ form.password }}</div>
+                {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
+                <button class="vq-btn primary" type="submit">Войти</button>
+            </form>
+            <p class="vq-help">Учётные записи и доступ к приложениям выдаёт администратор.</p>
+        </section>
+    </main>
+</div>
+{% endblock %}

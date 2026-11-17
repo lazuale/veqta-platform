@@ -1,0 +1,22 @@
+{% load static %}
+<!doctype html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>{% block title %}VEQTA Platform{% endblock %}</title>
+    <link rel="stylesheet" href="{% static 'portal/tokens.css' %}">
+    <link rel="stylesheet" href="{% static 'portal/base.css' %}">
+    <link rel="stylesheet" href="{% static 'portal/components.css' %}">
+    <link rel="stylesheet" href="{% static 'portal/layout.css' %}">
+    <link rel="stylesheet" href="{% static 'portal/portal.css' %}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="veq-platform">
+    <a href="#{% block skip_target %}main{% endblock %}" class="vq-skip">К содержимому</a>
+    {% block body %}{% endblock %}
+    <script type="module" src="{% static 'portal/ui.js' %}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

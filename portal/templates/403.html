@@ -1,0 +1,4 @@
+{% extends "portal/app_shell.html" %}
+{% block title %}Нет доступа — VEQTA Platform{% endblock %}
+{% block main_class %}flow{% endblock %}
+{% block content %}<section class="vq-error-page"><div class="vq-error-code">403</div><h1>Нет доступа</h1><p>У вас нет разрешения на просмотр этой страницы. Обратитесь к администратору.</p><a href="{% url 'home' %}" class="vq-btn primary">К приложениям</a></section>{% endblock %}

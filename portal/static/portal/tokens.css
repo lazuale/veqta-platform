@@ -1,0 +1,60 @@
+/* Токены общей дизайн-системы VEQTA: цвета, размеры и интервалы.
+ * Порядок загрузки и адаптивные уровни: docs/architecture.md. */
+:root {
+  color-scheme: light;
+  --vq-bg: #f6f7f9;
+  --vq-surface: #ffffff;
+  --vq-surface-muted: #f2f4f6;
+  --vq-text: #283442;
+  --vq-text-muted: #626f7f;
+  --vq-border: #e4e8ed;
+  --vq-control-border: #8290a1;
+  --vq-primary: #293747;
+  --vq-primary-hover: #404d5c;
+  --vq-accent: #4858a7;
+  --vq-accent-hover: #3d4b93;
+  --vq-accent-soft: #eef0fa;
+  --vq-success: #2e6c50;
+  --vq-success-soft: #eaf5ef;
+  --vq-warning: #805a29;
+  --vq-warning-soft: #fcf4e7;
+  --vq-danger: #a4423d;
+  --vq-danger-hover: #8d3834;
+  --vq-danger-soft: #fff3f1;
+  --vq-focus: #4858a7;
+  --vq-backdrop: rgb(23 31 44 / .46);
+  --vq-font: Inter,"Segoe UI",Arial,sans-serif;
+  --vq-font-mono: ui-monospace,SFMono-Regular,Consolas,monospace;
+  --vq-text-xs: 12px;
+  --vq-text-sm: 13px;
+  --vq-text-md: 14px;
+  --vq-text-lg: 16px;
+  --vq-title-section: 20px;
+  --vq-title-page: 26px;
+  --vq-leading: 1.5;
+  --vq-space-1: 4px;
+  --vq-space-2: 8px;
+  --vq-space-3: 12px;
+  --vq-space-4: 16px;
+  /* Unified spacing semantics for cards and accented content, VEQTA DS 1.1 */
+  --vq-stack-gap: var(--vq-space-4);
+  --vq-accent-rail-inset: var(--vq-space-3);
+  --vq-space-5: 24px;
+  --vq-space-6: 32px;
+  --vq-radius-sm: 4px;
+  --vq-radius-control: 8px;
+  --vq-radius-panel: 12px;
+  --vq-control-height: 38px;
+  --vq-control-small: 32px;
+  --vq-header-height: 60px;
+  --vq-content-width: 1680px;
+  --vq-page-x: 28px;
+  --vq-page-y: 20px;
+  --vq-shadow-panel: 0 2px 11px rgb(31 45 64 / .035);
+  --vq-shadow-float: 0 16px 48px rgb(31 45 64 / .16);
+  --vq-motion: 120ms;
+}
+@media(max-width:900px) { :root { --vq-page-x:16px; --vq-page-y:20px; --vq-title-page:24px; } }
+@media(max-width:680px) { :root { --vq-title-page:22px; } }
+@media(max-height:800px) { :root { --vq-header-height:56px; --vq-page-y:16px; } }
+@media(prefers-reduced-motion:reduce) { :root { --vq-motion:0ms; } }

@@ -1,0 +1,29 @@
+<header class="vq-header">
+    <div class="vq-header-start">
+        <a class="vq-brand" href="{% url 'home' %}" aria-label="VEQTA — приложения"><span class="vq-mark">V</span><span class="vq-logo">VEQTA</span></a>
+        <span class="vq-sep" aria-hidden="true"></span>
+        <details class="vq-menu">
+            <summary class="vq-menu-trigger">{% if platform_current_app %}{{ platform_current_app.label }}{% else %}Приложения{% endif %}</summary>
+            <nav class="vq-menu-popover" aria-label="Приложения">
+                <div class="vq-menu-caption">Рабочее пространство</div>
+                <a href="{% url 'home' %}" {% if not platform_current_app %}aria-current="page"{% endif %}>Все приложения</a>
+                {% for app in platform_apps %}<a href="{{ app.url }}" {% if platform_current_app.key == app.key %}aria-current="page"{% endif %}>{{ app.label }}</a>{% endfor %}
+            </nav>
+        </details>
+    </div>
+    <div class="vq-header-right">
+        {% if user.is_authenticated %}
+        <details class="vq-menu">
+            <summary class="vq-menu-trigger" aria-label="Меню пользователя {{ user.username }}"><span class="vq-account-name">{{ user.username }}</span><span class="vq-avatar" aria-hidden="true">{{ user.username|slice:":1"|upper }}</span></summary>
+            <div class="vq-menu-popover end">
+                <div class="vq-menu-caption">{{ user.username }}</div>
+                <a href="{% url 'profile' %}">Профиль</a>
+                {% if user.is_staff %}<a href="{% url 'admin:index' %}">Администрирование</a>{% endif %}
+                <a href="{% url 'password_change' %}">Сменить пароль</a>
+                <div class="vq-menu-divider"></div>
+                <form method="post" action="{% url 'logout' %}">{% csrf_token %}<button type="submit">Выйти</button></form>
+            </div>
+        </details>
+        {% else %}<a href="{% url 'login' %}" class="vq-btn small">Войти</a>{% endif %}
+    </div>
+</header>

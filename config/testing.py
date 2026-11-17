@@ -1,0 +1,7 @@
+"""Настройки временного сервера для браузерных тестов; разрешены только из DEV."""
+from .settings import *
+
+if VEQTA_ENV != "dev":
+    raise ImproperlyConfigured("Тестовый сервер разрешён только из DEV")
+DATABASES["default"]["NAME"] = "test_veqta_dev"
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]

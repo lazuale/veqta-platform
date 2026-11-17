@@ -1,0 +1,47 @@
+# Локальные настройки и секреты.
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+.pgpass
+
+# Окружение, кеши и собранная статика.
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage*
+htmlcov/
+staticfiles/
+media/
+node_modules/
+
+# Рабочие выгрузки, копии баз и результаты испытаний.
+data/
+private/
+backups/
+test-results/
+*.csv
+*.xlsx
+*.xls
+*.dump
+*.backup
+*.sqlite3
+*.db
+*.log
+*.zip
+*.tar
+*.tar.gz
+*.tgz
+*.gz
+
+# Редакторы и ОС.
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+*.swp

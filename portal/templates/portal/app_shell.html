@@ -1,0 +1,8 @@
+{% extends "portal/base.html" %}
+{% block body %}
+<div class="vq-shell {% block app_class %}{% endblock %}" {% block app_attributes %}{% endblock %}>
+    {% block header %}{% include "portal/components/header.html" %}{% endblock %}
+    <main class="vq-main {% block main_class %}{% endblock %}" id="main" tabindex="-1">{% block content %}{% endblock %}</main>
+    {% block overlays %}{% endblock %}
+</div>
+{% endblock %}

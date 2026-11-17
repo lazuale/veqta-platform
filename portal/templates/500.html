@@ -1,0 +1,4 @@
+{% extends "portal/app_shell.html" %}
+{% block title %}Не удалось открыть страницу — VEQTA Platform{% endblock %}
+{% block main_class %}flow{% endblock %}
+{% block content %}<section class="vq-error-page"><div class="vq-error-code">500</div><h1>Не удалось открыть страницу</h1><p>Повторите попытку позже. Если ошибка повторяется, сообщите администратору время и адрес страницы.</p><a href="{% url 'home' %}" class="vq-btn primary">К приложениям</a></section>{% endblock %}

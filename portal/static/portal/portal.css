@@ -1,0 +1,26 @@
+/* Только компоновка домашней страницы и auth. Общие компоненты принадлежат components.css.
+ * Порядок загрузки и адаптивные уровни: docs/architecture.md. */
+.vq-portal-home {width:100%;margin:0 auto}
+.vq-portal-home .vq-head {margin-bottom:28px}
+.vq-portal-home .vq-welcome {margin-bottom:var(--vq-stack-gap)}
+.vq-auth-page {min-height:100vh;display:flex;flex-direction:column}
+.vq-auth-brand {display:flex;align-items:center;gap:18px;padding:24px 32px}
+.vq-auth-main {flex:1;display:flex;align-items:flex-start;justify-content:center;padding:60px 24px 48px}
+.vq-auth-panel {width:100%;max-width:410px}
+.vq-auth-panel>.vq-sub {margin:12px 0 28px}
+.vq-auth-panel>.vq-help {margin-top:24px}
+.vq-account-panel {width:100%;max-width:600px;margin:12px auto}
+.vq-account-panel>.vq-sub {margin:12px 0 28px}
+@media(max-width:680px) {.vq-auth-brand{padding:20px 16px}.vq-auth-brand>.vq-caption{display:none}.vq-auth-main{padding:32px 20px}.vq-portal-home{margin-top:0}}
+.vq-profile {padding:24px;max-width:720px}
+.vq-profile dl {display:grid;grid-template-columns:minmax(120px,1fr) 2fr;gap:16px;margin:0 0 24px}
+.vq-profile dt {color:var(--vq-text-muted)}
+.vq-profile dd {margin:0;overflow-wrap:anywhere}
+@media(max-width:480px){.vq-profile dl{grid-template-columns:1fr;gap:8px}.vq-profile dd{margin-bottom:12px}}
+
+.vq-welcome{display:flex;align-items:center;justify-content:space-between;padding:28px 32px;background:var(--vq-surface);border:1px solid var(--vq-border);border-radius:var(--vq-radius-panel);overflow:hidden}.vq-welcome h2{font-size:24px;margin:12px 0 8px}.vq-welcome p{color:var(--vq-text-muted);max-width:580px}.vq-welcome-mark{font-weight:800;font-size:100px;line-height:1;color:var(--vq-surface-muted);padding:0 30px}
+
+.vq-title-row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.vq-title-row h2{margin:0}.vq-app-entry-content .vq-title-row{justify-content:flex-start}.vq-app-entry-content h2{font-size:16px}
+
+/* Общая мобильная компоновка Portal одинакова в Django и автономном эталоне. */
+@media(max-width:680px){.vq-welcome{padding:22px}.vq-welcome-mark{display:none}.vq-title-row{gap:8px}}

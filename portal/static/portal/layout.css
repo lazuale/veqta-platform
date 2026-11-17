@@ -1,0 +1,56 @@
+/* Единая оболочка, header и навигация; рабочую область задаёт приложение.
+ * Порядок загрузки и адаптивные уровни: docs/architecture.md. */
+.vq-shell {width:100%;height:100vh;height:100dvh;min-height:0;display:flex;flex-direction:column;background:var(--vq-bg);position:relative;isolation:isolate;overflow:hidden}
+.vq-header {height:var(--vq-header-height);min-height:var(--vq-header-height);background:var(--vq-surface);border-bottom:1px solid var(--vq-border);display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 var(--vq-page-x);z-index:20;flex:none}
+.vq-brand {display:inline-flex;align-items:center;gap:10px;white-space:nowrap;flex:none;color:var(--vq-text);text-decoration:none}
+.vq-mark {display:grid;place-items:center;height:32px;width:32px;border-radius:var(--vq-radius-control);background:var(--vq-primary);color:var(--vq-surface);font-size:18px;font-weight:750;letter-spacing:-1.5px}
+.vq-logo {font-size:15px;letter-spacing:1.1px;font-weight:800}
+.vq-header-start,.vq-header-right {display:flex;align-items:center;gap:18px;min-width:0}
+.vq-sep {height:22px;width:1px;background:var(--vq-border);flex:none}
+.vq-appname {font-size:var(--vq-text-sm);color:var(--vq-text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px;font-weight:500}
+.vq-menu {position:relative;flex:none}
+.vq-menu-trigger {display:flex;align-items:center;gap:8px;list-style:none;border:0;border-radius:var(--vq-radius-control);font-size:var(--vq-text-sm);color:var(--vq-text-muted);min-height:36px;padding:4px 8px;cursor:pointer;white-space:nowrap}
+.vq-menu-trigger::-webkit-details-marker {display:none}
+.vq-menu-trigger::after {content:"⌄";font-size:15px;line-height:1}
+.vq-menu-trigger:hover,.vq-menu[open]>.vq-menu-trigger {background:var(--vq-surface-muted);color:var(--vq-text)}
+.vq-menu-popover {position:absolute;left:0;top:calc(100% + 8px);z-index:50;min-width:260px;max-width:calc(100vw - 32px);padding:6px;background:var(--vq-surface);border:1px solid var(--vq-border);border-radius:var(--vq-radius-panel);box-shadow:var(--vq-shadow-float)}
+.vq-menu-popover.end {left:auto;right:0;min-width:220px}
+.vq-menu-caption {padding:8px 10px;color:var(--vq-text-muted);font-size:var(--vq-text-xs)}
+.vq-menu-popover a,.vq-menu-popover button {display:flex;align-items:center;gap:9px;width:100%;min-height:36px;border:0;background:transparent;border-radius:6px;text-align:left;color:var(--vq-text);font-size:var(--vq-text-sm);padding:8px 10px;text-decoration:none;white-space:normal;overflow-wrap:anywhere}
+.vq-menu-popover a:hover,.vq-menu-popover button:hover {background:var(--vq-surface-muted)}
+.vq-menu-popover [aria-current=page] {background:var(--vq-accent-soft);color:var(--vq-accent)}
+.vq-menu-popover form {margin:0}
+.vq-menu-divider {height:1px;background:var(--vq-border);margin:6px}
+.vq-avatar {display:grid;place-items:center;width:30px;height:30px;border-radius:50%;background:var(--vq-accent-soft);color:var(--vq-accent);font-size:var(--vq-text-xs);font-weight:600;flex:none}
+.vq-account-name {max-width:180px;overflow:hidden;text-overflow:ellipsis}
+.vq-main {display:flex;flex-direction:column;flex:1;min-height:0;min-width:0;max-width:var(--vq-content-width);width:100%;margin:0 auto;padding:var(--vq-page-y) var(--vq-page-x);overflow:auto;scrollbar-gutter:stable}
+.vq-main:focus {outline:none}
+.vq-main.flow {display:block}
+.vq-head {display:flex;align-items:flex-end;justify-content:space-between;gap:16px;flex:none;margin-bottom:20px;min-width:0}
+.vq-titleline {display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+.vq-sub {margin-top:7px;font-size:var(--vq-text-sm);line-height:1.6;color:var(--vq-text-muted);overflow-wrap:anywhere}
+.vq-crumb {display:flex;align-items:center;gap:8px;color:var(--vq-text-muted);font-size:var(--vq-text-xs);margin-bottom:8px;flex-wrap:wrap}
+.vq-crumb a,.vq-crumb button {border:0;background:transparent;color:inherit;padding:2px 0;font:inherit;text-decoration:none}
+.vq-crumb a:hover,.vq-crumb button:hover {text-decoration:underline;text-underline-offset:3px}
+.vq-error-page {max-width:580px;margin:64px auto;padding:0 16px}
+.vq-error-code {font:600 13px var(--vq-font-mono);color:var(--vq-text-muted);margin-bottom:14px}
+.vq-error-page h1 {margin-bottom:12px}
+.vq-error-page p {color:var(--vq-text-muted);line-height:1.7;margin-bottom:24px}
+@media(max-width:900px) {.vq-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}.vq-header-start,.vq-header-right{gap:12px}}
+@media(max-width:680px) {.vq-header-start,.vq-header-right{gap:6px}.vq-account-name{display:none}.vq-appname{max-width:180px}.vq-header-start>.vq-menu>.vq-menu-trigger{font-size:0;gap:4px}.vq-header-start>.vq-menu>.vq-menu-trigger::before{content:"Приложения";font-size:12px}.vq-header-start>.vq-menu>.vq-menu-trigger::after{font-size:13px}.vq-logo{font-size:14px}.vq-brand{gap:7px}.vq-head .vq-actions{gap:6px}.vq-error-page{margin:36px auto}}
+
+/* Каталог приложений — общая навигация портала и демонстрационных экранов. */
+.vq-app-list {display:flex;flex-direction:column;border:1px solid var(--vq-border);border-radius:var(--vq-radius-panel);background:var(--vq-surface);overflow:hidden}
+.vq-app-entry {display:flex;align-items:center;gap:20px;padding:24px;border-bottom:1px solid var(--vq-border);color:var(--vq-text);min-width:0}
+.vq-app-entry:last-child {border-bottom:0}
+.vq-app-entry:hover {background:var(--vq-bg)}
+.vq-app-symbol {width:42px;height:42px;display:grid;place-items:center;flex:none;border:1px solid var(--vq-border);border-radius:10px;background:var(--vq-surface);color:var(--vq-accent)}
+.vq-app-symbol svg {width:21px;height:21px}
+.vq-app-entry-content {min-width:0;flex:1}
+.vq-app-entry h2 {margin:0 0 5px;font-size:16px;line-height:1.4;letter-spacing:-.2px}
+.vq-app-entry p {margin:0;color:var(--vq-text-muted);font-size:13px;line-height:1.6}
+.vq-app-entry-open {display:flex;align-items:center;gap:12px;font-size:13px;color:var(--vq-text-muted);white-space:nowrap}
+.vq-section-label {margin:0 0 12px;font-size:12px;font-weight:600;color:var(--vq-text-muted)}
+
+@media(max-width:900px){.vq-app-entry{padding:20px;gap:16px}}
+@media(max-width:680px){.vq-app-entry{align-items:flex-start;gap:12px;padding:16px}.vq-app-entry-open span{display:none}.vq-app-entry h2{font-size:15px}.vq-app-entry p{font-size:12px}.vq-app-symbol{width:34px;height:34px}}
