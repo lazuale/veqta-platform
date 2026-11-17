@@ -67,6 +67,10 @@ sudo test -r /etc/letsencrypt/live/platform.veqta.ru/privkey.pem
 
 Используйте отдельную PostgreSQL и локальный env с `VEQTA_ENV=dev`, новым ключом, localhost, `DJANGO_DEBUG=1`, `DJANGO_TRUST_PROXY=0`, `DJANGO_SECURE_COOKIES=0`. Серверный `/etc/veqta/dev.env` не изменяется для локального HTTP. `runserver` не предназначен для постоянной эксплуатации. Проверки и временная тестовая БД описаны в [testing.md](testing.md).
 
+## Первое заполнение
+
+После миграций создайте администратора штатной `createsuperuser` в нужном контуре, откройте `/admin/` и заполните организации и каталог по [directories.md](directories.md). Новая база не содержит готовых организаций, позиций СИЗ или пользователей. Загрузите кадровые CSV по [import_1c.md](import_1c.md); проверьте связь по `orgExtId` и разрешение новых заявок.
+
 ## Первичные источники
 
 - [Ubuntu 26.04: серверные изменения, PostgreSQL 18](https://documentation.ubuntu.com/release-notes/26.04/changes-since-previous-interim/)
