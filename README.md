@@ -34,4 +34,4 @@
 | `tests/` | Синтетические и браузерные сценарии |
 | `docs/` | Развёртывание, правила, тестирование, эксплуатация |
 
-Документация: [отчёт Cold Start](docs/cold_start_report.md), [архитектура](docs/architecture.md), [настройки](docs/configuration.md), [Workwear](docs/workwear.md), [справочники](docs/directories.md), [импорт 1С](docs/import_1c.md), [тесты](docs/testing.md), [эксплуатация](docs/operations.md).
+Документация: [приёмка Release Candidate](docs/release_candidate_report.md), [отчёт Cold Start](docs/cold_start_report.md), [архитектура](docs/architecture.md), [настройки](docs/configuration.md), [Workwear](docs/workwear.md), [справочники](docs/directories.md), [импорт 1С](docs/import_1c.md), [тесты](docs/testing.md), [эксплуатация](docs/operations.md).
