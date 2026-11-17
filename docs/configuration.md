@@ -10,10 +10,11 @@
 | `DB_HOST`, `DB_PORT` | обычно `127.0.0.1`, `5432` | локальная PostgreSQL либо явный адрес |
 | `DB_SSLMODE` | `prefer` для локального сервера | `prefer` для loopback; для удалённого — `verify-full` |
 | `DJANGO_SECRET_KEY` | случайная строка от 50 символов | отдельная случайная строка |
-| `DJANGO_DEBUG` | `1` | только `0` |
+| `DJANGO_DEBUG` | серверный HTTPS: `0`; локальный HTTP: `1` | только `0` |
 | `DJANGO_ALLOWED_HOSTS` | `test.platform.veqta.ru` на сервере; `localhost` локально | `platform.veqta.ru` |
 | `DJANGO_TRUST_PROXY` | `1` на HTTPS-сервере; `0` локально | `1`, только за доверенным прокси |
-| `DJANGO_CSRF_TRUSTED_ORIGINS` | обычно пусто | HTTPS-адрес собственного домена |
+| `DJANGO_CSRF_TRUSTED_ORIGINS` | сервер: `https://test.platform.veqta.ru`; локально обычно пусто | `https://platform.veqta.ru` |
+| `DJANGO_SECURE_COOKIES` | серверный HTTPS: `1`; локальный HTTP: `0` | `1` |
 | `DJANGO_STATIC_ROOT` | `/var/www/veqta/dev-static` на сервере | `/var/www/veqta/prod-static` |
 
 Для серверного HTTPS DEV укажите `DJANGO_DEBUG=0`, `DJANGO_TRUST_PROXY=1`, `DJANGO_SECURE_COOKIES=1`. PROD всегда требует Secure cookies. Локальные браузерные тесты используют отдельные HTTP-настройки `config.testing`. Подробности: [deployment.md](deployment.md).

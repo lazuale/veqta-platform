@@ -1,11 +1,74 @@
-# Установка с нуля
+# Подготовка сервера с нуля
 
-## Целевая среда
+VEQTA — личный добровольный проект. Для работы серверного приложения используются Ubuntu 26.04.1 LTS, Python 3.14, PostgreSQL 18, Nginx и systemd. Проверенная базовая версия: Python 3.14.4 / PostgreSQL 18.7 / Django 6.1.3 / Gunicorn 27.0.0. Python-пакеты закреплены в `requirements.lock`.
 
-Для сервера `pg-analytics`: Ubuntu 26.04.1, Python 3.14.4, PostgreSQL 18.7, Django 6.1.3. Используются два независимых контура: DEV и PROD. Общие PostgreSQL/Nginx обслуживают и другие системы — не переустанавливать или очищать их.
+Развёртывание состоит из этой подготовки и [полной инструкции DEV/PROD](deployment.md). Старые архивы, существующий DEV, чужой компьютер и история переписки не требуются.
 
-**Каноническая инструкция сервера:** [Развёртывание DEV и PROD](deployment.md). Она содержит каталоги `/opt/veqta-dev`, `/opt/veqta-prod`, `/etc/veqta`, команды cold start, штатные systemd/Nginx и порядок проверки. Не копируйте старый универсальный `veqta.service` на сервер.
+## A. Чистая Ubuntu 26.04
 
-Локальная разработка без Nginx допустима только с отдельной пустой базой и настройками `VEQTA_ENV=dev`, `DJANGO_TRUST_PROXY=0`, `DJANGO_DEBUG=1`, `DJANGO_SECURE_COOKIES=0`, разрешённым localhost и новым секретом. Серверный файл `/etc/veqta/dev.env` для такой разработки не используется. Команда `runserver` не предназначена для постоянной эксплуатации.
+Следующие команды относятся **только к новому серверу**. Исполнитель — обычный оператор с sudo. Нужны исходящий HTTPS к GitHub/PyPI и публичные DNS-имена `test.platform.veqta.ru`, `platform.veqta.ru`, направленные на сервер. Для webroot ACME входящие TCP 80/443 должны доходить до Nginx; если опубликована AAAA-запись, IPv6 должен быть настроен. Примеры Nginx слушают IPv4: удалите неподдерживаемую AAAA либо отдельно настройте IPv6-listen.
 
-Зафиксированные зависимости устанавливаются из `requirements.lock` с `--require-hashes`, а проверки запускаются по [docs/testing.md](testing.md). В новых базах по умолчанию нет сотрудников, справочников 1С, каталога СИЗ и заявок; порядок импорта описан в [docs/import_1c.md](import_1c.md).
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends ca-certificates git curl openssl nginx python3.14 python3.14-venv postgresql-18 postgresql-client-18 util-linux coreutils mawk certbot
+sudo systemctl enable --now postgresql nginx
+sudo systemctl enable --now certbot.timer
+```
+
+Не заменяйте `/usr/bin/python3` и не используйте системный pip для пакетов приложения. Venv создаётся отдельно для каждого контура. Не отключайте firewall целиком; разрешите 80/443 в действующей политике сети. PostgreSQL 5432 и Gunicorn 8765/8767 наружу не публикуются.
+
+Проверьте фактические версии и локальный кластер:
+
+```bash
+python3.14 --version
+python3.14 -m venv --help >/dev/null
+psql --version
+nginx -v
+sudo -u postgres psql -X -h /var/run/postgresql -p 5432 -U postgres -d postgres -c 'SHOW server_version;'
+sudo -u postgres psql -X -h /var/run/postgresql -p 5432 -U postgres -d postgres -c 'SHOW listen_addresses;'
+command -v git curl openssl flock runuser timeout awk
+sudo nginx -t
+sudo systemctl is-active postgresql nginx
+```
+
+Нужны сервер и клиент PostgreSQL 18, Python 3.14 с venv и доступная PostgreSQL на loopback:5432. Если пакетный источник даёт PostgreSQL ниже 18.7, для **нового** сервера доступен официальный PGDG-репозиторий:
+
+```bash
+sudo apt-get install --no-install-recommends postgresql-common
+sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh
+sudo apt-get update
+sudo apt-get install postgresql-18 postgresql-client-18
+```
+
+Не запускайте эту замену источника пакетов на общем сервере ради VEQTA. При иной актуальной patch-версии Python/PostgreSQL зафиксируйте её и выполните приёмку; результаты базовой версии не подтверждают другую сборку автоматически. `.python-version` описывает базовую версию для инструментов разработки, но не устанавливает интерпретатор.
+
+Убедитесь, что локальный административный вход `sudo -u postgres psql` разрешён политикой сервера. Приложения будут подключаться к `127.0.0.1:5432` под собственными ролями с паролями. На новой штатной Ubuntu кластер создаётся пакетами. Если кластер не запущен, изучите `pg_lsclusters` и журнал `postgresql@18-main`; не создавайте второй кластер на занятом порту и не удаляйте существующие данные.
+
+Далее выполняйте [deployment.md](deployment.md): Git → каждый новый контур → сертификаты → apply/verify → администратор → приёмка.
+
+## B. PostgreSQL, Nginx, Python и сертификаты уже подготовлены
+
+Пакетную установку из раздела A **пропустите**. Проверьте версии, путь к Python с venv, локальный административный доступ PostgreSQL и доступность loopback:5432 командами выше. PostgreSQL и Nginx могут обслуживать другие системы: не переустанавливать, не останавливать, не очищать их и не переписывать глобальный `pg_hba.conf`/`nginx.conf`.
+
+Если локальный HBA отличается от штатного, администратор должен разрешить только нужные соединения `veqta_dev → veqta_dev`, `veqta_prod → veqta_prod` с loopback и тестовые соединения DEV. Не добавляйте общие `trust`/`host all all` ради приложения. Подключение и изоляцию подтвердите приёмкой.
+
+Проверьте готовые сертификаты каждого домена:
+
+```bash
+sudo openssl x509 -in /etc/letsencrypt/live/test.platform.veqta.ru/fullchain.pem -checkend 0 -checkhost test.platform.veqta.ru -noout
+sudo test -r /etc/letsencrypt/live/test.platform.veqta.ru/privkey.pem
+sudo openssl x509 -in /etc/letsencrypt/live/platform.veqta.ru/fullchain.pem -checkend 0 -checkhost platform.veqta.ru -noout
+sudo test -r /etc/letsencrypt/live/platform.veqta.ru/privkey.pem
+```
+
+Далее [deployment.md](deployment.md) создаёт **и DEV, и PROD независимо**. При готовых сертификатах первичный HTTP/ACME-этап пропускается. Продление существующих сертификатов должно использовать уже выбранный администратором механизм; его не заменяют вслепую.
+
+## Локальная разработка
+
+Используйте отдельную PostgreSQL и локальный env с `VEQTA_ENV=dev`, новым ключом, localhost, `DJANGO_DEBUG=1`, `DJANGO_TRUST_PROXY=0`, `DJANGO_SECURE_COOKIES=0`. Серверный `/etc/veqta/dev.env` не изменяется для локального HTTP. `runserver` не предназначен для постоянной эксплуатации. Проверки и временная тестовая БД описаны в [testing.md](testing.md).
+
+## Первичные источники
+
+- [Ubuntu 26.04: серверные изменения, PostgreSQL 18](https://documentation.ubuntu.com/release-notes/26.04/changes-since-previous-interim/)
+- [PostgreSQL: Ubuntu и официальный PGDG](https://www.postgresql.org/download/linux/ubuntu/)
+- [Certbot: webroot, renewal и hooks](https://eff-certbot.readthedocs.io/en/stable/using.html)

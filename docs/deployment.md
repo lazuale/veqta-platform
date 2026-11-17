@@ -1,90 +1,215 @@
-# Развёртывание VEQTA на сервере pg-analytics
+# Развёртывание DEV и PROD из GitHub
 
-## Стандарт среды
+Инструкция рассчитана на новый сервер без объектов VEQTA либо на подготовленный общий сервер. Сначала выполните подходящую ветку [installation.md](installation.md). При ошибке любого блока остановитесь и используйте [operations.md](operations.md); не повторяйте создание существующей БД и не удаляйте данные ради повтора.
 
-Один Git-репозиторий, два независимых checkout. ОС Ubuntu 26.04.1; на этом сервере проверены Python 3.14.4, Django 6.1.3 и PostgreSQL 18.7. PostgreSQL и Nginx общие с другими системами: **их не переустанавливать, не останавливать и не очищать**.
+## 1. Контуры и предпосылки
 
-| | DEV | PROD |
+| Параметр | DEV | PROD |
 |---|---|---|
-| HTTPS | `test.platform.veqta.ru` | `platform.veqta.ru` |
-| Исходники | `/opt/veqta-dev` | `/opt/veqta-prod` |
-| Пользователь | `veqta-dev` | `veqta-prod` |
-| Окружение | `/etc/veqta/dev.env` | `/etc/veqta/prod.env` |
-| База и роль | `veqta_dev` | `veqta_prod` |
-| Gunicorn (loopback) | `127.0.0.1:8767` | `127.0.0.1:8765` |
+| Домен | `test.platform.veqta.ru` | `platform.veqta.ru` |
+| Checkout | `/opt/veqta-dev` | `/opt/veqta-prod` |
+| Linux-пользователь / группа | `veqta-dev` | `veqta-prod` |
+| Env, root:группа 0640 | `/etc/veqta/dev.env` | `/etc/veqta/prod.env` |
+| База / роль PostgreSQL | `veqta_dev` | `veqta_prod` |
+| Gunicorn | `127.0.0.1:8767` | `127.0.0.1:8765` |
 | Статика | `/var/www/veqta/dev-static` | `/var/www/veqta/prod-static` |
 | Systemd | `veqta-dev.service` | `veqta-prod.service` |
 
-Сертификаты Let's Encrypt находятся вне Git. Файлы в `deploy/systemd/` и `deploy/nginx/` — канонический источник конфигурации. Команды запуска и проверки — `scripts/server_apply.sh`, `scripts/server_verify.sh`. Не хранить пароли, выгрузки 1С, дампы или `.env.*` в Git.
+Команды предполагают PostgreSQL 18 на локальном сокете `/var/run/postgresql`, порту 5432 и административную роль `postgres`. До создания объектов проверьте, что это выбранный кластер. Общие PostgreSQL/Nginx не останавливаются. Каталоги, роли, БД и hostnames не должны быть заняты другой системой. Работающие контуры обновляются по разделу 7, а не повторным cold start.
 
-## Подготовка исходников
+## 2. Получение и фиксация исходников — оператор без sudo
 
-Исходники из GitHub `lazuale/veqta-platform` получает **оператор с правом доступа к репозиторию**. Системные пользователи не имеют GitHub-токенов и не работают с приватными ключами оператора. Скопируйте или клонируйте проверенный коммит в `/opt/veqta-dev` либо `/opt/veqta-prod`, назначьте владельца соответствующему системному пользователю и убедитесь в `git status --porcelain` (пустой вывод).
-
-На существующем сервере проверенный исходный checkout находится в `/home/analitik/veqta-platform`. Для нового PROD (только если `/opt/veqta-prod` ещё отсутствует):
+Публичный репозиторий не требует GitHub-токена. Используется новый staging в домашнем каталоге оператора; источник не зависит от имени пользователя и старого checkout:
 
 ```bash
-sudo useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin veqta-prod
-sudo install -d -o veqta-prod -g veqta-prod -m 0750 /opt/veqta-prod
-sudo git -c safe.directory=/home/analitik/veqta-platform clone --local --no-hardlinks --branch main /home/analitik/veqta-platform /opt/veqta-prod
-sudo chown -R veqta-prod:veqta-prod /opt/veqta-prod
-sudo -u veqta-prod git -C /opt/veqta-prod remote set-url origin https://github.com/lazuale/veqta-platform.git
+VEQTA_SOURCE=$(mktemp -d "$HOME/veqta-source.XXXXXXXX")
+git clone https://github.com/lazuale/veqta-platform.git "$VEQTA_SOURCE"
+git -C "$VEQTA_SOURCE" --no-pager log -5 --format='%H %s'
+read -r -p 'Полный SHA проверенного коммита (40 hex): ' VEQTA_REVISION
+[[ "$VEQTA_REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo 'Неверный SHA'; exit 1; }
+git -C "$VEQTA_SOURCE" cat-file -e "${VEQTA_REVISION}^{commit}"
+git -C "$VEQTA_SOURCE" checkout --detach "$VEQTA_REVISION"
+git -C "$VEQTA_SOURCE" status --porcelain
+git -C "$VEQTA_SOURCE" rev-parse HEAD
 ```
 
-Сверьте полный SHA коммита с `main` в GitHub. Никакой `git pull` из службы и автоматического обновления из незакреплённой ветки нет. DEV уже размещён в `/opt/veqta-dev`; повторно создавать его не нужно.
+Пустой status и совпадение полного SHA — обязательны. При будущем переводе репозитория в private оператор использует свой разрешённый SSH/credential-helper доступ при clone. Не вставляйте token в URL или команды и не переносите GitHub-секреты сервисным пользователям. Локальный перенос ниже не требует от них сетевой авторизации.
 
-## Настройки
+## 3. Создание одного нового контура
 
-Для каждого контура конфигурацию создают **один раз**, отдельно. Системная конфигурация хранится в `/etc/veqta/<контур>.env`, владелец `root`, группа соответствующего приложения, права `0640`. Для PROD:
+Сначала задайте `dev` и выполните блок. Затем задайте `prod` и выполните **тот же блок полностью**. Никакого заранее существующего DEV не требуется. Переменные `VEQTA_SOURCE` и `VEQTA_REVISION` остаются в той же операторской оболочке после раздела 2.
 
 ```bash
-sudo -u veqta-prod python3.14 /opt/veqta-prod/scripts/create_config.py --environment prod --hostname platform.veqta.ru
-sudo install -d -o root -g root -m 0755 /etc/veqta
-sudo install -o root -g veqta-prod -m 0640 /opt/veqta-prod/.env.prod /etc/veqta/prod.env
-sudo rm /opt/veqta-prod/.env.prod
+VEQTA_TARGET=dev
+# Для второго независимого запуска: VEQTA_TARGET=prod
+sudo bash -s -- "$VEQTA_SOURCE" "$VEQTA_REVISION" "$VEQTA_TARGET" <<'VEQTA_BOOTSTRAP'
+set -Eeuo pipefail
+umask 027
+source_repo=$1
+revision=$2
+target=$3
+[[ "$target" == dev || "$target" == prod ]]
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+actor="veqta-${target}"
+app="/opt/veqta-${target}"
+config="/etc/veqta/${target}.env"
+database="veqta_${target}"
+domain=platform.veqta.ru
+[[ "$target" != dev ]] || domain=test.platform.veqta.ru
+[[ ! -e "$app" && ! -L "$app" && ! -e "$config" && ! -L "$config" ]]
+if id "$actor" >/dev/null 2>&1; then
+    echo 'STOP: пользователь уже существует; проверьте частичную установку по operations.md' >&2
+    exit 1
+fi
+existing=$(runuser -u postgres -- psql -X -At -h /var/run/postgresql -p 5432 -U postgres -d postgres -v target="$database" <<'VEQTA_SQL'
+SELECT EXISTS(SELECT FROM pg_database WHERE datname = :'target')
+    OR EXISTS(SELECT FROM pg_roles WHERE rolname = :'target');
+VEQTA_SQL
+)
+[[ "$existing" == f ]] || { echo 'STOP: роль или база уже существует'; exit 1; }
+useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$actor"
+install -d -o "$actor" -g "$actor" -m 0750 "$app"
+git -c safe.directory="$source_repo" clone --no-local --no-checkout "$source_repo" "$app"
+chown -R "$actor:$actor" "$app"
+runuser -u "$actor" -- git -C "$app" remote set-url origin https://github.com/lazuale/veqta-platform.git
+runuser -u "$actor" -- git -C "$app" checkout --detach "$revision"
+[[ "$(runuser -u "$actor" -- git -C "$app" rev-parse HEAD)" == "$revision" ]]
+status=$(runuser -u "$actor" -- git -C "$app" status --porcelain)
+[[ -z "$status" ]]
+runuser -u "$actor" -- python3.14 "$app/scripts/create_config.py" --environment "$target" --hostname "$domain"
+install -d -o root -g root -m 0755 /etc/veqta
+install -o root -g "$actor" -m 0640 "$app/.env.$target" "$config"
+rm -- "$app/.env.$target"
+set -a; source "$config"; set +a
+# Пароль передаётся через окружение, SQL читает root-перенаправление stdin.
+runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres < "$app/deploy/postgresql/$target.sql"
+runuser -u "$actor" -- python3.14 -m venv "$app/.venv"
+runuser -u "$actor" -- "$app/.venv/bin/python" -m pip install --no-cache-dir --require-hashes -r "$app/requirements.lock"
+runuser -u "$actor" -- "$app/.venv/bin/python" -m pip check
+runuser -u "$actor" -- bash -c '
+    set -Eeuo pipefail
+    set -a; source "$1"; set +a
+    cd "$2"
+    exec .venv/bin/python manage.py veqta_initialize --environment "$3" --database-name "veqta_$3"
+' bash "$config" "$app" "$target"
+VEQTA_BOOTSTRAP
 ```
 
-Существующий `/etc/veqta/dev.env` **не перезаписывать**: в нём уже находятся секреты действующего DEV. Для HTTPS DEV должны быть `DJANGO_DEBUG=0`, `DJANGO_TRUST_PROXY=1`, `DJANGO_SECURE_COOKIES=1`, `DJANGO_ALLOWED_HOSTS=test.platform.veqta.ru,localhost,127.0.0.1`, `DJANGO_CSRF_TRUSTED_ORIGINS=https://test.platform.veqta.ru`, `DJANGO_STATIC_ROOT=/var/www/veqta/dev-static`. Добавьте отсутствующий `DJANGO_SECURE_COOKIES=1` в действующий файл ровно один раз с правами root. Серверный DEV и PROD используют `Secure` для session/CSRF cookies.
+Генератор создаёт независимые ключи и пароли, не печатает их, не перезаписывает существующий файл. В обоих серверных контурах DEBUG=0, proxy=1 и Secure cookies=1. При частичном отказе не генерируйте новый пароль поверх уже созданной роли: порядок продолжения — в operations.md. SQL рассчитан на один запуск, initialize — только на пустую БД. Наличие shell `nologin` не мешает явному `runuser ... bash -c` для административных команд.
 
-## Создание новой базы PROD
+## 4. Первичный HTTPS без остановки общего Nginx
 
-Только когда `veqta_prod` (база **и** роль) ещё не существуют. Выполнять от root после загрузки **только** PROD-настроек; `psql` читает SQL из stdin, чтобы не зависеть от прав пользователя postgres на `/opt`:
+Если сертификаты обоих доменов уже прошли проверки из installation.md, **пропустите выпуск** и перейдите к разделу 5. Для нового сертификата ниже используется webroot; `certbot --nginx` не переписывает канонические конфигурации приложения.
+
+DNS выбранного домена должен вести на сервер, HTTP/80 быть доступен извне. Перед началом просмотрите активные `server_name` через `sudo nginx -T` и убедитесь, что выбранное имя не обслуживает другую систему. Вывод глобальной конфигурации не коммитьте и не публикуйте.
+
+В той же операторской оболочке задайте `VEQTA_TARGET=dev` либо `prod` и действующий контактный e-mail для ACME. Выполните для каждого нового сертификата:
 
 ```bash
-sudo -i
-cd /opt/veqta-prod
-set -a; source /etc/veqta/prod.env; set +a
-sudo --preserve-env=DB_PASSWORD -u postgres psql -X -v ON_ERROR_STOP=1 -d postgres < deploy/postgresql/prod.sql
-sudo -u veqta-prod python3.14 -m venv /opt/veqta-prod/.venv
-sudo -u veqta-prod /opt/veqta-prod/.venv/bin/python -m pip install --no-cache-dir --require-hashes -r /opt/veqta-prod/requirements.lock
-sudo -u veqta-prod bash -c 'cd /opt/veqta-prod; set -a; source /etc/veqta/prod.env; set +a; .venv/bin/python manage.py veqta_initialize --environment prod --database-name veqta_prod'
-exit
+read -r -p 'Контактный e-mail для ACME: ' VEQTA_ACME_EMAIL
+sudo bash -s -- "$VEQTA_TARGET" "$VEQTA_ACME_EMAIL" <<'VEQTA_HTTPS'
+set -Eeuo pipefail
+target=$1
+email=$2
+[[ "$target" == dev || "$target" == prod ]]
+[[ -n "$email" ]]
+source "/opt/veqta-$target/scripts/server_checks.sh"
+veqta_target "$target"
+[[ ! -e "/etc/letsencrypt/live/$DOMAIN" && ! -L "/etc/letsencrypt/live/$DOMAIN" ]]
+[[ ! -e "$NGINX_SITE" && ! -L "$NGINX_SITE" && ! -e "$NGINX_LINK" && ! -L "$NGINX_LINK" ]]
+install -d -o root -g root -m 0755 /var/www/veqta/acme
+install -o root -g root -m 0644 "$APP/deploy/nginx/veqta-$target-http.conf" "$NGINX_SITE"
+ln -s "$NGINX_SITE" "$NGINX_LINK"
+if ! veqta_check_nginx; then
+    rm -- "$NGINX_LINK" "$NGINX_SITE"
+    echo 'STOP: временный сайт не принят; работающий Nginx не перезагружался' >&2
+    exit 1
+fi
+systemctl reload nginx
+certbot certonly --webroot --webroot-path /var/www/veqta/acme --cert-name "$DOMAIN" -d "$DOMAIN" --email "$email" --agree-tos --non-interactive
+openssl x509 -in "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" -checkend 0 -checkhost "$DOMAIN" -noout
+VEQTA_HTTPS
 ```
 
-**Не повторять cold start для базы с таблицами.** Для обновлений используется штатный `migrate` при явно выбранном контуре. Если SQL или инициализация остановились, сначала изучите фактическое состояние; не удаляйте существующую базу для повторной попытки.
+До apply временный HTTP-сайт намеренно возвращает 503 на обычные URL и отдаёт только ACME challenge. При сетевой ошибке Certbot он остаётся для повторной выдачи; повторяйте только команду `certbot certonly` с теми же параметрами, не весь bootstrap. При ошибке reload проверьте `nginx -t` и журнал общего Nginx, не останавливая его.
 
-## Применение и проверка
+## 5. Применение и конечная проверка
 
-Когда checkout, БД, пароль, сертификат и `.env` готовы:
+Когда выбранный checkout, env, БД и сертификат готовы:
 
 ```bash
-sudo bash /opt/veqta-dev/scripts/server_apply.sh dev
-sudo bash /opt/veqta-dev/scripts/server_verify.sh dev
-# PROD — отдельно, только после готовности PROD-базы:
-sudo bash /opt/veqta-prod/scripts/server_apply.sh prod
-sudo bash /opt/veqta-prod/scripts/server_verify.sh prod
+sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_apply.sh" "$VEQTA_TARGET"
+sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_verify.sh" "$VEQTA_TARGET"
 ```
 
-`server_apply.sh` **не создаёт БД, не удаляет данные, не скачивает код, не изменяет соседний контур**. Применение миграций разрешено только с явным аргументом `--migrate`; для PROD предварительно должна быть проверенная точка восстановления, поскольку SQL-миграции могут быть необратимыми. Скрипт обновляет зависимости из lockfile, собирает статику, ставит unit и сайт Nginx и проверяет прямой HTTP и HTTPS. Перезапуск службы может кратковременно вернуть 502; готовность проверяется повторными попытками.
+Выполните отдельно для dev и prod. Apply не скачивает код и не создаёт БД. Он проверяет чистоту Git с обязательным успешным status, env/сертификат, ставит зависимости, проверяет схему, собирает статику, проверяет **все активные include Nginx** через `nginx -t` и отвергает конфликт целевого server_name даже при коде 0. Соседние сайты не отключаются. Общая lock-файл блокировка не позволяет двум контурам применять Nginx одновременно.
 
-Пользователя создают один раз штатной командой `createsuperuser` внутри конкретного контура. Данные не включены в Git; пустой каталог спецодежды и отсутствие кадровых выгрузок после cold start — ожидаемое состояние.
+Gunicorn и оба HTTPS-ресурса ожидаются до 20 попыток каждый: connect timeout 2 с, весь запрос 3 с, пауза 1 с. Поэтому ожидание одного ресурса ограничено примерно 80 с, а не ровно 20 с. Curl отключает `.curlrc` и proxy environment; TLS-сертификат проверяется с правильным SNI, без `-k`. Login обязан вернуть 200 и Secure CSRF-cookie именно выбранного контура; 3xx не принимается. CSS обязан вернуть 200. Финальная read-only проверка PostgreSQL подтверждает базу и роль под пользователем приложения, ограничена 15 с плюс до 2 с на принудительное завершение.
 
-## Обновление, возвращение предыдущей версии
+Verifier повторяет эти проверки без изменения настроек, служб и рабочих данных. Вход в браузере, роли и прикладные сценарии проверяются отдельно. При неуспехе apply EXIT trap возвращает файлы сайта Nginx; до отправленного reload он не перезагружает работающий Nginx. **Unit, venv, статика и схема автоматически не откатываются**. Состояние и дальнейшие действия описаны в operations.md.
 
-Оператор получает обновление на `/home/analitik/veqta-platform` (или другой доверенный staging) и фиксирует проверенный SHA. **Никогда не обновляйте PROD напрямую при наличии несогласованных изменений в DEV.** Каждый checkout переключается на выбранный коммит отдельно; `server_apply.sh` проверяет чистое дерево, но **не делает git fetch/checkout**. После переключения выполняется `server_apply.sh` и `server_verify.sh` для нужного контура.
+Продление для нового webroot-сертификата:
 
-Перед изменением рабочей схемы PROD сделайте проверяемую копию БД вне Git. Для отката кода переключите checkout на ранее развернутый SHA и повторно примените конфигурации. **Откат схемы PostgreSQL автоматически не выполняется**; миграции требуют отдельной процедуры восстановления. Не используйте `migrate --fake`, `flush` или `DROP DATABASE` как способ отката релиза.
+```bash
+sudo install -d -o root -g root -m 0755 /etc/letsencrypt/renewal-hooks/deploy
+sudo install -o root -g root -m 0755 "/opt/veqta-$VEQTA_TARGET/deploy/letsencrypt/renew-nginx.sh" /etc/letsencrypt/renewal-hooks/deploy/veqta-nginx.sh
+sudo systemctl list-timers --all certbot.timer
+sudo certbot renew --dry-run --cert-name "$([ "$VEQTA_TARGET" = dev ] && echo test.platform.veqta.ru || echo platform.veqta.ru)" --run-deploy-hooks
+```
 
-## Граница проверок
+На новой Ubuntu timer включён в installation.md. На подготовленном сервере подтвердите существующее расписание (apt timer или другой уже принятый механизм), не создавая дублирующее. Hook реагирует только на два домена VEQTA и делает `nginx -t` перед reload. Итоговые HTTP-конфигурации сохраняют ACME location, поэтому продление webroot не требует остановки Nginx. Для сертификатов, ранее полученных другим способом, сохраните их согласованный способ продления.
 
-Ранее на исходной версии `a788fea` пройдены 64 теста Django, конкурентный сценарий и браузерный Chromium на серверном стеке. Этот факт **не является** подтверждением новой версии инфраструктурных файлов до применения и повторной проверки. После изменения DEV следует повторить тесты из `docs/testing.md`, затем выполнить серверную приёмку PROD (авторизация, Workwear, права, CSRF, cookies, статика и HTTPS).
+## 6. Администратор, данные и приёмка
+
+Для выбранного контура создайте администратора штатной интерактивной командой; пароль не передаётся в командной строке:
+
+```bash
+sudo -u "veqta-$VEQTA_TARGET" bash -c '
+    set -Eeuo pipefail
+    set -a; source "/etc/veqta/$1.env"; set +a
+    cd "/opt/veqta-$1"
+    exec .venv/bin/python manage.py createsuperuser
+' bash "$VEQTA_TARGET"
+```
+
+После миграций нет сотрудников, импортов, заявок и рабочего каталога. Утверждённый каталог СИЗ на 11 позиций и три CSV 1С загружаются отдельно по [import_1c.md](import_1c.md). Включать рабочие данные/учётные записи в Git не требуется и нельзя.
+
+Повторите [testing.md](testing.md) из серверного DEV с синтетическими данными; браузерный временный сервер использует `config.testing`, отдельную `test_veqta_dev` и DEBUG=True только внутри этого тестового процесса. Проверки PROD не запускаются через settings.testing. Выполните вход/выход, смену пароля, права аналитика, Workwear, CSRF, Secure cookies, статику и HTTPS. Отдельно проверьте запуск обеих служб после перезагрузки на согласованном испытательном узле; это не означает разрешение перезагрузить общий действующий сервер ради установки.
+
+## 7. Обновление существующего контура и откат
+
+Получите выбранный проверенный SHA в операторский staging, как в разделе 2. Для каждого целевого checkout отдельно убедитесь в чистом Git и перенесите объект коммита из staging. Системному пользователю не нужен GitHub-токен:
+
+```bash
+sudo bash -s -- "$VEQTA_SOURCE" "$VEQTA_REVISION" "$VEQTA_TARGET" <<'VEQTA_UPDATE'
+set -Eeuo pipefail
+source_repo=$1
+revision=$2
+target=$3
+[[ "$target" == dev || "$target" == prod ]]
+[[ "$revision" =~ ^[0-9a-f]{40}$ ]]
+source "/opt/veqta-$target/scripts/server_checks.sh"
+veqta_target "$target"
+veqta_clean_checkout
+# root может читать закрытый staging оператора; изменения получает только выбранный checkout.
+bundle=$(mktemp /run/veqta-source.XXXXXXXX.bundle)
+trap 'rm -f -- "$bundle"' EXIT
+git -c safe.directory="$source_repo" -C "$source_repo" bundle create "$bundle" HEAD
+chown "$ACTOR:$ACTOR" "$bundle"
+chmod 0600 "$bundle"
+runuser -u "$ACTOR" -- git -C "$APP" fetch "$bundle" HEAD
+runuser -u "$ACTOR" -- git -C "$APP" checkout --detach "$revision"
+[[ "$(runuser -u "$ACTOR" -- git -C "$APP" rev-parse HEAD)" == "$revision" ]]
+VEQTA_UPDATE
+```
+
+Staging должен оставаться detached на выбранном SHA: перед update ещё раз сверьте его `rev-parse HEAD` с `VEQTA_REVISION`. Bundle содержит историю выбранного HEAD; секреты оператора в checkout не копируются. При ошибке fetch/checkout не запускайте apply. Никогда не используйте force checkout/reset поверх несогласованных изменений.
+
+До изменения рабочей схемы PROD создайте и восстановите пробную копию по operations.md. Затем для выбранного контура:
+
+```bash
+sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_apply.sh" "$VEQTA_TARGET" --migrate
+sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_verify.sh" "$VEQTA_TARGET"
+```
+
+Если миграций нет, `--migrate` не нужен. Без него apply откажет при неприменённых миграциях. Обновление venv/статики происходит на месте, перезапуск может кратковременно прервать запросы; согласуйте окно. Автоматического отката схемы нет. Возврат к предыдущему проверенному SHA и повторный apply допустим лишь при совместимости кода с текущей схемой. `--fake`, `flush` и удаление рабочей БД не являются штатным откатом.

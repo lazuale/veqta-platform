@@ -4,10 +4,32 @@
 
 ## Регрессионный набор
 
-Из корня проекта с активным venv и загруженным `.env.dev`:
+Из корня проекта с активным venv и загруженным **DEV**-окружением. На сервере это `/etc/veqta/dev.env`, локально — отдельный `.env.dev`. Не меняйте серверные DEBUG, Secure cookies или ключи ради тестов. Пример полного серверного запуска:
 
 ```bash
-python -m pip install --require-hashes -r requirements.lock
+sudo -u veqta-dev bash -c '
+    set -Eeuo pipefail
+    set -a; source /etc/veqta/dev.env; set +a
+    cd /opt/veqta-dev
+    .venv/bin/python manage.py check
+    .venv/bin/python manage.py makemigrations --check --dry-run
+    .venv/bin/python manage.py test tests --verbosity 2 --noinput
+    .venv/bin/python -m tests.acceptance
+'
+```
+
+Отдельная регрессия серверных проверок не требует БД, root или systemd. Она работает только с временными файлами, синтетическими внешними командами и loopback:
+
+```bash
+python -m unittest tests.test_deployment -v
+```
+
+Она покрывает временный HTTPS-отказ, cookie другого контура, redirect, отказ транспорта/БД, proxy environment, ошибку Git, нефатальный конфликт Nginx и ограниченный renewal hook. Эти тесты входят также в общий Django runner; они не заменяют установку настоящих unit-файлов и reboot.
+
+Эквивалентные локальные команды:
+
+```bash
+python -m pip install --no-cache-dir --require-hashes -r requirements.lock
 python -m pip check
 python manage.py check
 python manage.py makemigrations --check --dry-run
@@ -44,6 +66,25 @@ python -m tests.acceptance --browser --browser-executable /usr/bin/chromium
 
 Playwright запускает временный сервер только на loopback и в тестовой базе. Пользователь и пароль создаются на время проверки; они не записаны в исходниках. Проверяются вход, переход в Workwear, создание черновика, массовый подбор, назначение СИЗ, сохранение, матрица, завершение, возврат и экран шириной 390 px. Ошибки JavaScript и неуспешные HTTP-ответы приводят к отказу проверки.
 
+`config.testing` явно включает DEBUG=True для раздачи staticfiles только во временном DEV-процессе. Нормальный серверный DEV остаётся DEBUG=0. Конфигурационные subprocess-тесты отдельно нормализуют Secure cookies; результат не зависит от серверного значения этого флага.
+
+Системный пользователь `veqta-dev` имеет HOME `/nonexistent`. Для загрузки управляемого браузера ему нужен отдельный доступный cache, а не каталог HOME:
+
+```bash
+sudo install -d -o veqta-dev -g veqta-dev -m 0700 /var/cache/veqta/dev-playwright
+sudo -u veqta-dev bash -c '
+    set -Eeuo pipefail
+    set -a; source /etc/veqta/dev.env; set +a
+    cd /opt/veqta-dev
+    export PLAYWRIGHT_BROWSERS_PATH=/var/cache/veqta/dev-playwright
+    .venv/bin/python -m pip install --no-cache-dir --require-hashes -r requirements-browser.lock
+    .venv/bin/python -m playwright install chromium
+    .venv/bin/python -m tests.acceptance --browser
+'
+```
+
+При отсутствии системных библиотек браузера администратор подготавливает их по диагностике Playwright (`python -m playwright install-deps chromium` выполняется с нужными правами и меняет пакеты ОС). На общем сервере сначала оцените этот список; вариант с уже установленным Chromium и `--browser-executable` остаётся доступным. Browser dependencies не требуются для работы приложения и не устанавливаются server_apply.
+
 ## Результат локальной проверки
 
 Проверено 17.11.2026 на Linux, Python 3.12.14, Django 6.1.3, PostgreSQL 18.6.
@@ -77,3 +118,22 @@ Playwright запускает временный сервер только на 
 ## Дополнительная приёмка серверного базового коммита
 
 17.11.2026 на `pg-analytics` версия `a788fea` прошла 64/64 теста Django, проверку одновременного изменения и браузерный сценарий Chromium 151 на Python 3.14.4 / PostgreSQL 18.7. Это относится к базовому коммиту, а не автоматически к последующим изменениям инфраструктуры.
+
+## Проверка исправлений процедуры развёртывания — 17.11.2026
+
+На отдельной Debian 13 с Python 3.14.4, Django 6.1.3, PostgreSQL 18.7, Gunicorn 27.0.0 и Nginx 1.26.3:
+
+| Проверка | Результат |
+|---|---|
+| Полный Django runner с серверным DEV env, Secure=1 / DEBUG=0 | 80/80, включая 16 новых регрессий установки |
+| Конкурентное редактирование | Одна успешная запись, один конфликт |
+| Новый SQL и initialize обоих контуров | Пройдены на пустых независимых базах; повтор безопасно отвергнут |
+| Нативные общие проверки HTTP/HTTPS/БД для DEV и PROD | Пройдены; в песочнице заменены только пути, порты и доверие временным сертификатам |
+| ACME webroot до и после перехода на HTTPS | Challenge доступен в обоих контурах, общий Nginx не останавливался |
+| Конфликт hostname с nginx exit status=0 и отключённая БД | Новые проверки вернули отказ |
+| Управление apply/verify в mount/user namespace с подменой внешних команд | 11 сценариев, включая временный HTTPS, ошибку Git/pip/Nginx/БД, чужую cookie и redirect |
+| Копия БД с завершённой синтетической заявкой | pg_dump/pg_restore успешны; 11 триггеров и запрет изменения завершённой заявки сохранены |
+| Переименование восстановленной БД в каноническую | Пройдено, прежняя БД сохранена отдельно |
+| Перенос detached SHA через локальный clone и git bundle | Пройден |
+
+Полный Playwright-сценарий в этой песочнице не завершён: запуск Chromium блокируется запретом среды на Unix-сокеты (`socket(): Operation not permitted`). Это ограничение испытательной среды, а не успешная браузерная приёмка. Получение публичных сертификатов, запуск настоящих unit systemd и reboot на Ubuntu здесь не выполнялись; они остаются отдельной серверной приёмкой по deployment.md. Предыдущие результаты базовых версий выше не подменяют эти проверки.
