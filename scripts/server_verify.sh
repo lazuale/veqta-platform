@@ -16,13 +16,13 @@ test -f "$CONFIG"
 nginx -t
 
 echo '=== Фактическая версия ==='
-git -c safe.directory="$APP" -C "$APP" log -1 --oneline
+git --no-pager -c safe.directory="$APP" -C "$APP" log -1 --oneline
 
 echo '=== systemd ==='
 systemctl show "$SERVICE" -p ActiveState -p SubState -p User -p WorkingDirectory
 
 echo '=== Gunicorn ==='
-CODE=$(curl -sS --max-time 5 -H "Host: $DOMAIN" -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/login/")
+CODE=$(curl -sS --max-time 5 -H "Host: $DOMAIN" -H "X-Forwarded-Proto: https" -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/login/")
 [[ "$CODE" == 200 ]] || { echo "FAIL: HTTP Gunicorn $CODE" >&2; exit 1; }
 
 echo '=== HTTPS и статика ==='

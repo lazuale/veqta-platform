@@ -132,7 +132,7 @@ systemctl restart "$SERVICE"
 
 READY=0
 for _ in $(seq 1 20); do
-  CODE=$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" "http://127.0.0.1:$PORT/login/" 2>/dev/null || true)
+  CODE=$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -H "Host: $DOMAIN" -H "X-Forwarded-Proto: https" "http://127.0.0.1:$PORT/login/" 2>/dev/null || true)
   if [[ "$CODE" == 200 ]]; then READY=1; break; fi
   sleep 1
 done
