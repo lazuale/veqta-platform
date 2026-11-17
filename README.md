@@ -2,40 +2,33 @@
 
 Внутренний портал на Django и PostgreSQL. Portal содержит вход, профиль и навигацию. Workwear ведёт заявки на спецодежду: подбор сотрудников из 1С, массовые назначения, контроль повторов и историю действий.
 
-Один код обслуживает два независимых контура: `veqta_dev` и `veqta_prod`. Данные, роли, ключи и cookies у них разные. Производственный сервер использует Gunicorn и Nginx с HTTPS.
+Один исходный Git-репозиторий обслуживает два независимых контура: `veqta_dev` и `veqta_prod`. Код разворачивается в отдельные checkout, а данные, роли, ключи, cookies, виртуальные окружения и службы не пересекаются.
 
-В проекте нет кадровых выгрузок, сотрудников, заявок, учётных записей или готовых секретов. Утверждённый каталог СИЗ загружается отдельно из CSV на 11 позиций. В исходном приложении такого CSV нет; тестовые позиции его не заменяют.
+## Актуальный серверный стек
 
-## Первый запуск DEV
+- Ubuntu 26.04.1, Python 3.14.4, PostgreSQL 18.7.
+- Django 6.1.3, Psycopg 3.3.8, Gunicorn 27.0.0, Nginx и systemd.
+- DEV: `https://test.platform.veqta.ru` → `/opt/veqta-dev` → `127.0.0.1:8767` → `veqta_dev`.
+- PROD: `https://platform.veqta.ru` → `/opt/veqta-prod` → `127.0.0.1:8765` → `veqta_prod`.
 
-Нужны Linux или WSL, Python с модулем venv и запущенная PostgreSQL 18. Команды выполняются из корня проекта; роль и база ещё не должны существовать.
+Версии Python/PostgreSQL здесь отражают фактический целевой сервер; они не означают, что каждый новый коммит прошёл производственную приёмку. Зависимости Python зафиксированы с SHA-256 в `requirements.lock`.
 
-```bash
-python3 -m venv .venv
-. .venv/bin/activate
-python -m pip install --require-hashes -r requirements.lock
-python scripts/create_config.py --environment dev
-set -a
-. ./.env.dev
-set +a
-sudo --preserve-env=DB_PASSWORD -u postgres psql -X -v ON_ERROR_STOP=1 -f deploy/postgresql/dev.sql
-python manage.py veqta_initialize --environment dev --database-name veqta_dev
-python manage.py createsuperuser
-python manage.py runserver 127.0.0.1:8000
-```
+## Развёртывание
 
-Открыть http://127.0.0.1:8000/. Заявки находятся по адресу `/workwear/`, пользователи и группы — `/admin/`. После первого запуска справочник сотрудников и каталог пусты.
+Читайте **[docs/deployment.md](docs/deployment.md)** — единый порядок подготовки checkout, создания базы, настройки HTTPS, применения версионируемых systemd/Nginx и проверки результата. Не переносите команды из старых итераций.
+
+В проекте нет кадровых выгрузок, сотрудников, заявок, учётных записей или готовых секретов. Утверждённый каталог СИЗ загружается отдельно из CSV на 11 позиций; тестовый каталог его не заменяет.
 
 ## Состав
 
 | Каталог | Назначение |
 |---|---|
-| `config/` | Настройки, WSGI/ASGI, маршруты и проверка контура |
-| `portal/` | Штатная авторизация Django, страницы и общие стили |
-| `workwear/` | Модели, транзакционные сервисы, API, импорт и интерфейс |
-| `deploy/` | Примеры окружения, создание БД, systemd и Nginx |
-| `tests/` | Синтетические проверки, конкуренция и браузерный сценарий |
-| `scripts/` | Создание локальных настроек и проверка публикуемых файлов |
-| `docs/` | Установка, бизнес-правила, разработка и эксплуатация |
+| `config/` | Настройки Django, WSGI/ASGI, защита контура |
+| `portal/` | Штатная авторизация, страницы и дизайн-система |
+| `workwear/` | Модели, транзакционные сервисы, API, импорт и UI |
+| `deploy/` | Примеры окружения, PostgreSQL, отдельные unit-файлы и сайты Nginx |
+| `scripts/` | Генерация секретов, проверки, применение серверной конфигурации |
+| `tests/` | Синтетические и браузерные сценарии |
+| `docs/` | Развёртывание, правила, тестирование, эксплуатация |
 
-Начать с [установки](docs/installation.md). Далее: [настройки](docs/configuration.md), [архитектура](docs/architecture.md), [Workwear](docs/workwear.md), [импорт](docs/import_1c.md), [проверки](docs/testing.md), [эксплуатация](docs/operations.md), [публикация исходников](docs/publication.md).
+Документация: [архитектура](docs/architecture.md), [настройки](docs/configuration.md), [Workwear](docs/workwear.md), [импорт 1С](docs/import_1c.md), [тесты](docs/testing.md), [эксплуатация](docs/operations.md).

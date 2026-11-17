@@ -22,7 +22,7 @@ def main():
     text = text.replace("DJANGO_SECRET_KEY=\n", f"DJANGO_SECRET_KEY={secrets.token_urlsafe(64)}\n")
     text = text.replace("DB_PASSWORD=\n", f"DB_PASSWORD={secrets.token_urlsafe(32)}\n")
     if args.environment == "prod":
-        text = text.replace("portal.example.org", args.hostname)
+        text = text.replace("portal.example.org", args.hostname).replace("platform.veqta.ru", args.hostname)
     try:
         descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:

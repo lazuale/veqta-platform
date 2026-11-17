@@ -1,0 +1,23 @@
+[Unit]
+Description=VEQTA Platform PROD
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=veqta-prod
+Group=veqta-prod
+WorkingDirectory=/opt/veqta-prod
+EnvironmentFile=/etc/veqta/prod.env
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/opt/veqta-prod/.venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:8765 --workers 2 --timeout 120 --error-logfile - --no-control-socket
+Restart=on-failure
+RestartSec=5
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

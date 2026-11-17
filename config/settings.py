@@ -103,14 +103,19 @@ TRUST_PROXY = boolean('DJANGO_TRUST_PROXY')
 if IS_PRODUCTION and not TRUST_PROXY:
     raise ImproperlyConfigured('PROD требует доверенный прокси и DJANGO_TRUST_PROXY=1')
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https') if TRUST_PROXY else None
-SESSION_COOKIE_SECURE = IS_PRODUCTION
-CSRF_COOKIE_SECURE = IS_PRODUCTION
+SECURE_COOKIES = boolean('DJANGO_SECURE_COOKIES', default=IS_PRODUCTION)
+if IS_PRODUCTION and not SECURE_COOKIES:
+    raise ImproperlyConfigured('PROD требует Secure cookies')
+if SECURE_COOKIES and not TRUST_PROXY:
+    raise ImproperlyConfigured('Secure cookies требуют доверенный HTTPS-прокси')
+SESSION_COOKIE_SECURE = SECURE_COOKIES
+CSRF_COOKIE_SECURE = SECURE_COOKIES
 SECURE_SSL_REDIRECT = IS_PRODUCTION
 SECURE_HSTS_SECONDS = 3600 if IS_PRODUCTION else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = IS_PRODUCTION
 SECURE_HSTS_PRELOAD = IS_PRODUCTION
 CSRF_TRUSTED_ORIGINS = [v.strip() for v in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if v.strip()]
-if IS_PRODUCTION and any(not v.startswith('https://') or '*' in v for v in CSRF_TRUSTED_ORIGINS):
+if SECURE_COOKIES and any(not v.startswith('https://') or '*' in v for v in CSRF_TRUSTED_ORIGINS):
     raise ImproperlyConfigured('PROD допускает только явные HTTPS-источники CSRF')
 SESSION_COOKIE_NAME = f'veqta_{VEQTA_ENV}_session'
 CSRF_COOKIE_NAME = f'veqta_{VEQTA_ENV}_csrf'
