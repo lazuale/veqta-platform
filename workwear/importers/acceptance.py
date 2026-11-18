@@ -5,7 +5,7 @@
 приходят извне; дата приёма не выдаётся за дату источника. Смена организации
 одного GUID отвергается существующим контрактом составных внешних ключей."""
 from dataclasses import dataclass
-from datetime import date, datetime, time
+from datetime import date
 import hashlib
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -134,12 +134,7 @@ def accept(batch: ParsedBatch, *, source_export_date: date,
             raise ValidationError(f"Смена организации без нового GUID: {uid}")
     snapshot = EmployeeImport.objects.create(
         **signatures, source_row_count=batch.source_row_count,
-        employee_count=len(by_guid),
-        # Существующая колонка timestamp кодирует календарный день в зоне проекта.
-        # 00:00 не является утверждением о фактическом времени выгрузки.
-        source_exported_at=datetime.combine(
-            source_export_date, time.min, tzinfo=timezone.get_default_timezone()
-        ),
+        employee_count=len(by_guid), source_export_date=source_export_date,
     )
     create, update = [], []
     for uid, p in by_guid.items():

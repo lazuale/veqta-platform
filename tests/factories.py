@@ -19,7 +19,7 @@ def make_import():
     return EmployeeImport.objects.create(
         employees_sha256=secrets.token_hex(32), positions_sha256=secrets.token_hex(32),
         units_sha256=secrets.token_hex(32), source_row_count=1000, employee_count=1000,
-        source_exported_at=timezone.now(),
+        source_export_date=timezone.localdate(),
     )
 
 

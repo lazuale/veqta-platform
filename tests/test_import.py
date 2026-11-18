@@ -1,11 +1,12 @@
 """Контракт трёх справочников, идемпотентность и целостность публикации."""
 import csv
-from datetime import datetime, time, timedelta
+from datetime import timedelta
 from pathlib import Path
 import tarfile
 import tempfile
 from uuid import uuid4
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
@@ -94,14 +95,23 @@ class ImportTests(TestCase):
         self.assertFalse(result.already_accepted)
         self.assertEqual(EmployeeImport.objects.count(), 2)
 
-    def test_idempotent_existing_timestamp_of_same_day(self):
-        self.publish()
-        snapshot = EmployeeImport.objects.get()
-        snapshot.source_exported_at = timezone.make_aware(
-            datetime.combine(self.date, time(13, 45)), timezone.get_default_timezone())
-        snapshot.save(update_fields=["source_exported_at"])
-        self.assertTrue(self.publish().already_accepted)
-        self.assertEqual(EmployeeImport.objects.count(), 1)
+    def test_native_date_column_in_coldstart_schema(self):
+        self.assertEqual(
+            EmployeeImport._meta.get_field("source_export_date").get_internal_type(),
+            "DateField",
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT data_type FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'workwear_employeeimport'
+                  AND column_name = 'source_export_date'
+            """)
+            self.assertEqual(cursor.fetchone(), ("date",))
+        self.assertNotIn(
+            "source_exported_at",
+            [field.name for field in EmployeeImport._meta.fields],
+        )
 
     def test_older_calendar_day_rejected(self):
         first = self.publish()

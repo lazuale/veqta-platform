@@ -27,7 +27,7 @@ class Migration(migrations.Migration):
                 ('accepted_at', models.DateTimeField(default=django.utils.timezone.now, editable=False)),
                 ('source_row_count', models.PositiveIntegerField()),
                 ('employee_count', models.PositiveIntegerField()),
-                ('source_exported_at', models.DateTimeField()),
+                ('source_export_date', models.DateField(verbose_name='Дата выгрузки 1С')),
             ],
             options={
                 'verbose_name': 'Принятая выгрузка сотрудников',

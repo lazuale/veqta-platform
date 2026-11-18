@@ -51,9 +51,7 @@ class EmployeeImport(models.Model):
     )
     source_row_count = models.PositiveIntegerField()
     employee_count = models.PositiveIntegerField()
-    # Хранение даты в существующем timestamptz; время не является фактом выгрузки.
-    # Изменения типа колонки при совместимом обновлении DEV не требуется.
-    source_exported_at = models.DateTimeField()
+    source_export_date = models.DateField("Дата выгрузки 1С")
 
     class Meta:
         verbose_name = "Принятая выгрузка сотрудников"
@@ -83,14 +81,6 @@ class EmployeeImport(models.Model):
                 name="ww_import_counts_ck",
             ),
         ]
-
-
-    @property
-    def source_export_date(self):
-        """Календарная дата выгрузки в настроенной временной зоне проекта."""
-        return timezone.localtime(
-            self.source_exported_at, timezone.get_default_timezone()
-        ).date()
 
 
 class Employee(models.Model):
