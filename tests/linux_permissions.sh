@@ -14,6 +14,9 @@ for file in manage.py config/settings.py scripts/server_checks.sh \
 done
 printf 'synthetic owner password\n' > "$APP/owner.env"
 chmod 0600 "$APP/owner.env"
+# Синтетическая кодовая база повторяет контракт root-owned checkout независимо от ACL runner.
+chown -R root:root "$APP"
+chmod -R go-w "$APP"
 source "$(dirname "$0")/../scripts/server_checks.sh"
 veqta_check_trusted_code
 for file in manage.py config/settings.py scripts/server_checks.sh \
