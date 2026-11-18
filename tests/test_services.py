@@ -1,4 +1,4 @@
-"""Жизненный цикл, права, атомарность, сроки и большой состав заявки."""
+"""Проверяем жизненный цикл заявки, права и атомарность."""
 from datetime import timedelta
 from unittest.mock import patch
 from time import perf_counter
@@ -15,7 +15,6 @@ from .factories import make_user, make_import, make_employees, make_items, make_
 
 
 class LifecycleTests(TestCase):
-    """Все изменения каждого теста откатываются без TRUNCATE защищённых таблиц."""
     def setUp(self):
         self.actor = make_user()
         self.snapshot = make_import()
@@ -24,7 +23,6 @@ class LifecycleTests(TestCase):
         self.req = services.create_request(organization_id=make_organization().pk, actor=self.actor)
 
     def save(self, *, finish=False, people=None, items=None):
-        """Сохранить явно заданный синтетический состав текущей версии."""
         self.req.refresh_from_db()
         return save_draft(request_id=self.req.pk, actor=self.actor, expected_version=self.req.version,
                           members=[{"employee_id": e.pk, "item_ids": [i.pk for i in (items or self.items)]}
@@ -165,7 +163,7 @@ class LifecycleTests(TestCase):
 
 
 class ScaleTests(TestCase):
-    """Верхний технический профиль использует 30 вымышленных тестовых позиций."""
+    """Проверяем предельный набор из 30 вымышленных позиций."""
     def test_thousand_employees_thirty_thousand_assignments(self):
         actor, snapshot = make_user(), make_import()
         people, items = make_employees(snapshot, 1000), make_items(30)

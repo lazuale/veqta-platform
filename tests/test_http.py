@@ -1,4 +1,4 @@
-"""Штатная авторизация, права, CSRF и контракты HTTP."""
+"""Проверяем вход, права, CSRF и HTTP API."""
 import json
 
 from django.contrib.auth.models import Permission
@@ -13,7 +13,6 @@ from .factories import make_user, make_import, make_employees, make_items, make_
 
 @override_settings(ALLOWED_HOSTS=["testserver", "localhost", "127.0.0.1"])
 class HttpTests(TestCase):
-    """Клиент использует ту же маршрутизацию и middleware, что и приложение."""
     def setUp(self):
         self.actor = make_user()
         self.client.force_login(self.actor)

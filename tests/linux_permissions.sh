@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Негативные проверки Unix UID на одноразовом изолированном пути GitHub runner.
+# Проверяем права Unix в одноразовом окружении CI.
 set -Eeuo pipefail
 [[ $EUID -eq 0 ]] || { echo 'Требуется root' >&2; exit 2; }
 umask 022
-# /opt и /usr/share на hosted runner могут быть group-writable; / — доверенный родитель.
+# В CI системные каталоги могут быть доступны группе для записи; корень доверен.
 APP=$(mktemp -d /veqta-permissions.XXXXXXXX)
 trap 'rm -rf -- "$APP"' EXIT
 chmod 0755 "$APP"
@@ -15,10 +15,10 @@ for file in manage.py config/settings.py scripts/server_checks.sh \
 done
 printf 'synthetic owner password\n' > "$APP/owner.env"
 chmod 0600 "$APP/owner.env"
-# Синтетическая кодовая база повторяет контракт root-owned checkout независимо от ACL runner.
+# Создаём доверенный checkout независимо от ACL среды CI.
 chown -R root:root "$APP"
 chmod -R go-w "$APP"
-# Стандартный Linux venv создаёт root-owned symlink lib64 (mode 0777).
+# Ссылка lib64 в venv может иметь права 0777; проверяем её цель.
 ln -s lib "$APP/.venv/lib64"
 source "$(dirname "$0")/../scripts/server_checks.sh"
 veqta_check_trusted_code
@@ -49,7 +49,7 @@ fi
 chown root "$APP/.venv/lib/dependency.py"
 veqta_check_trusted_code
 
-# Root-owned checkout с group-writable родителем нельзя считать доверенным.
+# Код root не доверен, если родительский каталог доступен группе для записи.
 unsafe_parent=$(mktemp -d /veqta-parent-test.XXXXXXXX)
 mkdir -p "$unsafe_parent/app/.git" "$unsafe_parent/app/.venv"
 chmod 0755 "$unsafe_parent/app"
@@ -61,14 +61,14 @@ if (APP="$unsafe_parent/app"; veqta_check_trusted_code >/dev/null 2>&1); then
 fi
 rm -rf -- "$unsafe_parent"
 
-# Root-owned symlink не может направлять доверенный импорт в world-writable /tmp.
+# Ссылка root не должна вести в доступный для записи /tmp.
 ln -s /tmp "$APP/workwear/unsafe_python_modules"
 if veqta_check_trusted_code >/dev/null 2>&1; then
   echo 'FAIL: недоверенная цель симлинка не обнаружена' >&2; exit 1
 fi
 rm "$APP/workwear/unsafe_python_modules"
 
-# Административный Python не наследует внедрённый PYTHONPATH.
+# Административный Python не наследует PYTHONPATH.
 mkdir -p "$APP/.venv/bin"
 cat > "$APP/.venv/bin/python" <<'VEQTA_FAKE_PYTHON'
 #!/bin/sh
@@ -80,7 +80,7 @@ test "$DB_PASSWORD" = synthetic-owner || exit 75
 test "$VEQTA_ENV" = dev || exit 76
 VEQTA_FAKE_PYTHON
 chmod 0755 "$APP/.venv/bin/python"
-# CI runner может наследовать ACL/permission в newly created .venv/bin.
+# Новый каталог venv может наследовать ACL от среды CI.
 chown -R root:root "$APP"
 chmod -R go-w "$APP"
 cat > "$APP/owner.env" <<'VEQTA_FAKE_ENV'
@@ -111,7 +111,7 @@ DJANGO_SECURE_COOKIES=1
 DJANGO_STATIC_ROOT=/tmp/synthetic-static
 PYTHONPATH=/tmp/untrusted-python veqta_migrate
 
-# /proc PID/environ владельца не должен читаться непривилегированным UID.
+# Окружение процесса владельца закрыто для непривилегированного пользователя.
 (DB_PASSWORD=synthetic-owner /bin/sleep 8) &
 owner_pid=$!
 if runuser -u nobody -- cat "/proc/$owner_pid/environ" >/dev/null 2>&1; then

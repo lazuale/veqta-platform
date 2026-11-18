@@ -1,4 +1,4 @@
-"""Контракт трёх справочников, идемпотентность и целостность публикации."""
+"""Проверяем формат справочников и атомарность импорта."""
 import csv
 from datetime import timedelta
 from pathlib import Path
@@ -20,7 +20,6 @@ from workwear.models import Employee, EmployeeImport
 def make_sources(directory, *, people=None,
                  organization_id="00000000-0000-0000-0000-000000000123",
                  organization_name="Тестовая организация источника"):
-    """Записать только вымышленные строки с новым набором случайных GUID."""
     position, unit, organization = str(uuid4()), str(uuid4()), organization_id
     people = people or [(str(uuid4()), "TEST-00001", "Тестовый сотрудник 00001")]
     records = {
@@ -36,7 +35,6 @@ def make_sources(directory, *, people=None,
 
 
 class ImportTests(TestCase):
-    """Данные хранятся во временном каталоге и откатываемой транзакции."""
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -45,7 +43,6 @@ class ImportTests(TestCase):
         self.date = timezone.localdate(timezone=timezone.get_default_timezone()) - timedelta(days=2)
 
     def publish(self, batch=None, **kwargs):
-        """Принять тестовый пакет с точным подтверждением количества и предыдущего ID."""
         batch = batch or parse(self.path)
         return accept(batch, source_export_date=kwargs.pop("source_export_date", self.date),
                       expected_employee_count=len(batch.people),

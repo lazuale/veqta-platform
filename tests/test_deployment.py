@@ -1,8 +1,4 @@
-"""Регрессия отказов установки: только временные файлы, loopback и внешние заглушки.
-
-Запуск без БД и root: python -m unittest tests.test_deployment -v.
-Никакие системные конфигурации и службы эти тесты не изменяют.
-"""
+"""Проверяем отказы установки на временных файлах и заглушках, без рабочих служб."""
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os

@@ -1,4 +1,4 @@
-"""Ограничения PostgreSQL проверяются прямыми SQL-запросами в обход сервисов."""
+"""Проверяем ограничения PostgreSQL в обход прикладных сервисов."""
 from uuid import uuid4
 from django.db import connection, IntegrityError, transaction
 from django.test import TestCase
@@ -10,7 +10,7 @@ from .factories import make_user, make_import, make_employees, make_items, make_
 
 
 class DatabaseGuardsTests(TestCase):
-    """Проверки используют savepoint: ожидаемая ошибка не ломает остальную транзакцию."""
+    """Savepoint позволяет продолжать тест после ожидаемой ошибки БД."""
     def setUp(self):
         self.actor, self.snapshot = make_user(), make_import()
         self.people = make_employees(self.snapshot)
@@ -23,7 +23,7 @@ class DatabaseGuardsTests(TestCase):
         self.assignment = self.member.assignments.get()
 
     def rejected(self, operation, constraint=None):
-        """Потребовать отказ самой БД и при необходимости точное имя ограничения."""
+        """Проверяем ограничение самой БД, а не проверку Django."""
         with self.assertRaises(IntegrityError) as caught:
             with transaction.atomic():
                 operation()
@@ -31,12 +31,10 @@ class DatabaseGuardsTests(TestCase):
             self.assertEqual(caught.exception.__cause__.diag.constraint_name, constraint)
 
     def sql(self, sql):
-        """Выполнить постоянный тестовый SQL без пользовательских параметров."""
         with connection.cursor() as cursor:
             cursor.execute(sql)
 
     def close(self):
-        """Завершить заполненную заявку штатным сервисом."""
         services.complete_request(request_id=self.req.pk, actor=self.actor, expected_version=self.req.version)
         self.req.refresh_from_db()
 
@@ -73,7 +71,7 @@ class DatabaseGuardsTests(TestCase):
         self.rejected(lambda: WorkwearEvent.objects.filter(pk=event.pk).delete(), "ww_event_append_only")
 
     def test_truncate_forbidden_including_cascade(self):
-        # Проверяем отложенные FK сейчас, чтобы достичь именно триггера TRUNCATE.
+        # Проверяем отложенные внешние ключи до триггера TRUNCATE.
         self.sql("SET CONSTRAINTS ALL IMMEDIATE")
         for table in ("workwear_request", "workwear_requestemployee", "workwear_requestassignment", "workwear_workwearevent"):
             with self.subTest(table=table):
