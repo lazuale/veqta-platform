@@ -95,7 +95,9 @@ veqta_check_trusted_code() {
     part=${part%/*}
     [[ -n "$part" ]] || part=/
   done
-  bad=$(find "$APP" \( ! -user root -o -perm /022 \) -print -quit) || {
+  # У симлинков (например .venv/lib64 -> lib) фиктивные права 0777.
+  # Владельца ссылки проверяем здесь, права и путь её цели — далее.
+  bad=$(find "$APP" \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit) || {
     echo 'STOP: проверка прав исходников завершилась ошибкой' >&2; return 1;
   }
   [[ -z "$bad" ]] || {
