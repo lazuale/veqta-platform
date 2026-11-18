@@ -97,7 +97,7 @@ def main():
         options = dict(environment="dev", database_name="veqta_dev", stdout=StringIO())
         call_command("workwear_import_1c", str(archive_path), **options)
         call_command("workwear_import_1c", str(archive_path), apply=True,
-            source_exported_at=timezone.now().isoformat(), expected_employee_count=1,
+            source_export_date=timezone.localdate().isoformat(), expected_employee_count=1,
             expected_previous_import_id=0, **options)
     organization = Organization.objects.get()
     created = client.post("/workwear/api/requests/", {"organization_id": organization.pk}, content_type="application/json")

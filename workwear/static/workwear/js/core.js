@@ -97,7 +97,12 @@ export function installCore(ctx) {
     const importSummary = () => {
         const data = settings.meta?.import;
         if (!data?.accepted_at) return 'Справочник 1С не загружен';
-        return `Принят: ${fmt(data.accepted_at)}`;
+        const sourceDate = data.source_export_date;
+        const verifiedDate = typeof sourceDate === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(sourceDate);
+        const sourceLabel = verifiedDate
+            ? `Выгрузка 1С: ${sourceDate.slice(8, 10)}.${sourceDate.slice(5, 7)}.${sourceDate.slice(0, 4)} · `
+            : '';
+        return `${sourceLabel}Принят: ${fmt(data.accepted_at)}`;
     };
     const allOrgOptions = (value, all = false) => (all ? `<option value="" ${!value ? 'selected' : ''}>Все организации</option>` : '') + (settings.meta?.registry_organizations || []).map(o => `<option value="${esc(o.value)}" ${String(o.value) === String(value) ? 'selected' : ''}>${esc(o.label)}</option>`).join('');
     const tone = (n) => n === 'closed' ? 'Завершена' : 'Черновик';

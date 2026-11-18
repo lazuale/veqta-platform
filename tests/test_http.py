@@ -1,5 +1,6 @@
 """Штатная авторизация, права, CSRF и контракты HTTP."""
 from django.contrib.auth.models import Permission
+from workwear.models import EmployeeImport
 from django.test import Client, TestCase, override_settings
 from workwear import services
 from .factories import make_user, make_import, make_employees, make_items, make_organization
@@ -68,7 +69,10 @@ class HttpTests(TestCase):
     def test_metadata_reports_source_date_without_inventing_period(self):
         data = self.client.get("/workwear/api/ui/metadata/").json()
         self.assertNotIn("coverage_start", data["import"])
-        self.assertIsNotNone(data["import"]["source_exported_at"])
+        self.assertEqual(data["import"]["source_export_date"],
+                         EmployeeImport.objects.get().source_export_date.isoformat())
+        self.assertRegex(data["import"]["source_export_date"], r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+        self.assertNotIn("source_exported_at", data["import"])
         self.assertEqual(data["limits"]["request_members"], 1000)
         self.assertEqual(data["limits"]["items_per_member"], 30)
 

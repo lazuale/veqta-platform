@@ -1,6 +1,6 @@
 """Контракт трёх справочников, идемпотентность и целостность публикации."""
 import csv
-from datetime import timedelta
+from datetime import datetime, time, timedelta
 from pathlib import Path
 import tarfile
 import tempfile
@@ -40,12 +40,12 @@ class ImportTests(TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
         self.people = make_sources(self.path)
-        self.date = timezone.now()-timedelta(days=2)
+        self.date = timezone.localdate(timezone=timezone.get_default_timezone()) - timedelta(days=2)
 
     def publish(self, batch=None, **kwargs):
         """Принять тестовый пакет с точным подтверждением количества и предыдущего ID."""
         batch = batch or parse(self.path)
-        return accept(batch, source_exported_at=kwargs.pop("source_exported_at", self.date),
+        return accept(batch, source_export_date=kwargs.pop("source_export_date", self.date),
                       expected_employee_count=len(batch.people),
                       expected_previous_import_id=kwargs.pop("previous", 0), **kwargs)
 
@@ -54,7 +54,7 @@ class ImportTests(TestCase):
         result = self.publish(batch)
         self.assertEqual((result.created, result.current), (1, 1))
         self.assertEqual(Employee.objects.get().personnel_number, "TEST-00001")
-        self.assertEqual(EmployeeImport.objects.get().source_exported_at, self.date)
+        self.assertEqual(EmployeeImport.objects.get().source_export_date, self.date)
 
     def test_tar_and_directory_have_same_hashes(self):
         target = self.path/"source.tar.gz"
@@ -71,18 +71,56 @@ class ImportTests(TestCase):
     def test_replay_with_changed_date_rejected(self):
         self.publish()
         with self.assertRaises(ValidationError):
-            self.publish(source_exported_at=self.date+timedelta(hours=1))
+            self.publish(source_export_date=self.date+timedelta(days=1))
+
+    def test_cli_requires_strict_calendar_day(self):
+        for value in ("2026-11-18T00:00:00+03:00", "18.11.2026", "20261118", "2026-02-30"):
+            with self.subTest(value=value), self.assertRaises(CommandError):
+                call_command("workwear_import_1c", str(self.path),
+                    environment="dev", database_name="veqta_dev", source_export_date=value)
+        self.assertEqual(EmployeeImport.objects.count(), 0)
+
+    def test_service_rejects_timestamp_instead_of_date(self):
+        with self.assertRaises(ValidationError):
+            self.publish(source_export_date=timezone.now())
+        self.assertEqual(EmployeeImport.objects.count(), 0)
+
+    def test_new_corrected_snapshot_in_same_day(self):
+        first = self.publish()
+        make_sources(self.path, people=[(
+            self.people[0][0], "TEST-CHANGED", self.people[0][2])])
+        result = self.publish(previous=first.import_id)
+        self.assertEqual(result.updated, 1)
+        self.assertFalse(result.already_accepted)
+        self.assertEqual(EmployeeImport.objects.count(), 2)
+
+    def test_idempotent_existing_timestamp_of_same_day(self):
+        self.publish()
+        snapshot = EmployeeImport.objects.get()
+        snapshot.source_exported_at = timezone.make_aware(
+            datetime.combine(self.date, time(13, 45)), timezone.get_default_timezone())
+        snapshot.save(update_fields=["source_exported_at"])
+        self.assertTrue(self.publish().already_accepted)
+        self.assertEqual(EmployeeImport.objects.count(), 1)
+
+    def test_older_calendar_day_rejected(self):
+        first = self.publish()
+        make_sources(self.path, people=[(
+            self.people[0][0], "TEST-CHANGED", self.people[0][2])])
+        with self.assertRaises(ValidationError):
+            self.publish(source_export_date=self.date-timedelta(days=1),
+                         previous=first.import_id)
 
     def test_publication_requires_count_and_previous(self):
         batch = parse(self.path)
         with self.assertRaises(ValidationError):
-            accept(batch, source_exported_at=self.date)
+            accept(batch, source_export_date=self.date)
         self.assertEqual(EmployeeImport.objects.count(), 0)
 
     def test_correction_keeps_guid_identity(self):
         first = self.publish()
         make_sources(self.path, people=[(self.people[0][0], "TEST-UPDATED", "Тестовый сотрудник обновлён")])
-        self.publish(source_exported_at=self.date+timedelta(days=1), previous=first.import_id)
+        self.publish(source_export_date=self.date+timedelta(days=1), previous=first.import_id)
         self.assertEqual(Employee.objects.count(), 1)
         self.assertEqual(Employee.objects.get().personnel_number, "TEST-UPDATED")
 
@@ -91,9 +129,9 @@ class ImportTests(TestCase):
         make_sources(self.path)
         batch = parse(self.path)
         with self.assertRaises(ValidationError):
-            self.publish(batch, source_exported_at=self.date+timedelta(days=1), previous=first.import_id)
+            self.publish(batch, source_export_date=self.date+timedelta(days=1), previous=first.import_id)
         checked = review(batch)
-        result = self.publish(batch, source_exported_at=self.date+timedelta(days=1), previous=first.import_id,
+        result = self.publish(batch, source_export_date=self.date+timedelta(days=1), previous=first.import_id,
                               confirmed_missing_sha256=checked.missing_current_sha256)
         self.assertEqual(result.historical_preserved, 1)
         self.assertEqual(Employee.objects.count(), 2)

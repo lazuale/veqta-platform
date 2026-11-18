@@ -66,7 +66,7 @@ def metadata(request):
             "accepted_at": latest.accepted_at.isoformat() if latest else None,
             "employee_count": latest.employee_count if latest else None,
             # accepted_at не доказывает период источника; отсутствующие даты не выдумываются.
-            "source_exported_at": latest.source_exported_at.isoformat() if latest and latest.source_exported_at else None,
+            "source_export_date": latest.source_export_date.isoformat() if latest else None,
         },
         "limits": {"request_members": MAX_REQUEST_MEMBERS, "items_per_member": MAX_ITEMS_PER_MEMBER,
                    "repeat_pairs": MAX_REPEAT_PAIRS, "json_bytes": MAX_JSON_BYTES, "sync_bytes": MAX_SYNC_JSON_BYTES},

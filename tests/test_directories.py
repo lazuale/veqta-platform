@@ -318,11 +318,11 @@ class OrganizationImportTests(TestCase):
         self.addCleanup(self.temp.cleanup)
         self.path = Path(self.temp.name)
         self.people = make_sources(self.path)
-        self.exported = timezone.now() - timedelta(days=3)
+        self.exported = timezone.localdate(timezone=timezone.get_default_timezone()) - timedelta(days=3)
 
     def publish(self, previous=0, *, batch=None, **kwargs):
         batch = batch or parse(self.path)
-        return accept(batch, source_exported_at=self.exported + timedelta(days=bool(previous)),
+        return accept(batch, source_export_date=self.exported + timedelta(days=bool(previous)),
             expected_employee_count=len(batch.people), expected_previous_import_id=previous, **kwargs)
 
     def test_unknown_organization_is_saved_once_and_not_enabled(self):

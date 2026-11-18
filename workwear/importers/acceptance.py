@@ -5,7 +5,7 @@
 приходят извне; дата приёма не выдаётся за дату источника. Смена организации
 одного GUID отвергается существующим контрактом составных внешних ключей."""
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time
 import hashlib
 from django.core.exceptions import ValidationError
 from django.db import models, transaction
@@ -65,18 +65,19 @@ def _chunks(items, size=500):
 
 
 @transaction.atomic
-def accept(batch: ParsedBatch, *, source_exported_at: datetime,
+def accept(batch: ParsedBatch, *, source_export_date: date,
            expected_employee_count=None, expected_previous_import_id=None,
            confirmed_missing_sha256=None) -> AcceptanceResult:
     """Опубликовать ParsedBatch атомарно под exclusive advisory lock.
 
-    Нужны достоверная source_exported_at с зоной, точный employee_count,
+    Нужна подтверждённая календарная source_export_date, точный employee_count,
     expected_previous_import_id (0 для первого), подтверждение digest выпадений.
     Возвращает AcceptanceResult; ValidationError/IntegrityError отменяют всё.
-    Повтор последней тройки хешей с той же датой идемпотентен. Snapshot-поля
+    Повтор последней тройки хешей с той же датой идемпотентен;
+    изменённая выгрузка того же календарного дня допустима. Snapshot-поля
     заявок не изменяются; отсутствующие GUID остаются в историческом справочнике."""
-    if not isinstance(source_exported_at, datetime) or timezone.is_naive(source_exported_at):
-        raise ValidationError("Дата выгрузки должна содержать часовой пояс")
+    if type(source_export_date) is not date:
+        raise ValidationError("Укажите только дату выгрузки YYYY-MM-DD без времени")
     if not batch.people:
         raise ValidationError("Неверное количество актуальных сотрудников")
     lock_for_acceptance()
@@ -90,11 +91,11 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime,
     if existing is not None:
         if existing.pk != getattr(previous, 'pk', None):
             raise ValidationError("Старая выгрузка уже принималась")
-        if existing.source_exported_at != source_exported_at:
+        if existing.source_export_date != source_export_date:
             raise ValidationError("Дата повторного принятия не совпадает с исходной")
         return AcceptanceResult(existing.pk, 0, 0, len(batch.people),
                                 Employee.objects.exclude(last_seen_import_id=existing.pk).count(), True)
-    if source_exported_at > timezone.now():
+    if source_export_date > timezone.localdate(timezone=timezone.get_default_timezone()):
         raise ValidationError("Дата выгрузки не может находиться в будущем")
     if type(expected_employee_count) is not int or expected_employee_count != len(batch.people):
         raise ValidationError("Не подтверждено точное количество сотрудников подготовленного пакета")
@@ -103,8 +104,8 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime,
     checked = _review(batch, previous)
     if checked.missing_current_count and confirmed_missing_sha256 != checked.missing_current_sha256:
         raise ValidationError("Сотрудники исчезают из текущего справочника. Проверьте DRY_RUN и подтвердите точный SHA-256 списка GUID")
-    if previous and source_exported_at <= previous.source_exported_at:
-        raise ValidationError("Дата выгрузки не новее последней принятой")
+    if previous and source_export_date < previous.source_export_date:
+        raise ValidationError("Дата выгрузки раньше последней принятой")
     by_guid = {p.guid: p for p in batch.people}
     if len(by_guid) != len(batch.people):
         raise ValidationError("Повтор GUID в подготовленном наборе")
@@ -133,7 +134,12 @@ def accept(batch: ParsedBatch, *, source_exported_at: datetime,
             raise ValidationError(f"Смена организации без нового GUID: {uid}")
     snapshot = EmployeeImport.objects.create(
         **signatures, source_row_count=batch.source_row_count,
-        employee_count=len(by_guid), source_exported_at=source_exported_at,
+        employee_count=len(by_guid),
+        # Существующая колонка timestamp кодирует календарный день в зоне проекта.
+        # 00:00 не является утверждением о фактическом времени выгрузки.
+        source_exported_at=datetime.combine(
+            source_export_date, time.min, tzinfo=timezone.get_default_timezone()
+        ),
     )
     create, update = [], []
     for uid, p in by_guid.items():

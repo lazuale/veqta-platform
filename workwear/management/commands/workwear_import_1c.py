@@ -1,12 +1,13 @@
 """Штатная команда проверки и публикации трёх справочников 1С.
 
-По умолчанию dry-run; apply требует tar.gz, точной БД, даты с часовым поясом,
+По умолчанию dry-run; apply требует tar.gz, точной БД и даты YYYY-MM-DD,
 подтверждённого количества и previous id. Запуск имеет доступ к кадровым
 данным; stdout dry-run нельзя публиковать как обезличенный диагностический
 отчёт: review содержит GUID выпавших сотрудников. См. docs/import_1c.md."""
 from dataclasses import asdict
-from datetime import datetime
+from datetime import date
 import json
+import re
 from pathlib import Path
 import tarfile
 from django.core.management.base import BaseCommand, CommandError
@@ -27,8 +28,8 @@ class Command(BaseCommand):
         """Зарегистрировать явные параметры CLI без чтения секретов и записи в БД."""
         parser.add_argument("--environment", required=True, choices=["dev", "prod"])
         parser.add_argument('source', help='Каталог с тремя CSV или архив .tar.gz')
-        parser.add_argument('--source-exported-at', default=None,
-                            help='Подтверждённая дата выгрузки ISO8601 с часовым поясом; обязательна для приёма')
+        parser.add_argument('--source-export-date', default=None,
+                            help='Подтверждённая дата выгрузки YYYY-MM-DD; обязательна для приёма')
         parser.add_argument('--apply', action='store_true', default=False)
         parser.add_argument('--database-name', required=True,
                             help='Точное ожидаемое имя базы выбранного контура')
@@ -43,13 +44,14 @@ class Command(BaseCommand):
         транзакционным сервисом. Не включать кадровый stdout в публичный отчёт."""
         require_target(options["environment"], options["database_name"])
         exported = None
-        if options['source_exported_at']:
+        raw_date = options["source_export_date"]
+        if raw_date is not None:
+            if not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", raw_date):
+                raise CommandError("Дата выгрузки должна иметь формат YYYY-MM-DD")
             try:
-                exported = datetime.fromisoformat(options['source_exported_at'])
-                if exported.utcoffset() is None:
-                    raise ValueError('timezone required')
+                exported = date.fromisoformat(raw_date)
             except ValueError as exc:
-                raise CommandError(f'Invalid source-exported-at: {exc}') from exc
+                raise CommandError("Некорректная дата выгрузки YYYY-MM-DD") from exc
         if options['apply'] and Path(options['source']).is_dir():
             raise CommandError('APPLY requires a .tar.gz snapshot of the three CSV')
         try:
@@ -62,12 +64,12 @@ class Command(BaseCommand):
             'contract': ['Employees.csv', 'Positions.csv', 'Units.csv'],
             'source_employees_rows': batch.source_row_count,
             'unique_current_employees': len(batch.people),
-            'source_exported_at': exported.isoformat() if exported else None,
+            'source_export_date': exported.isoformat() if exported else None,
             'sha256': batch.sha256, 'anomalies': batch.anomalies,
         }
         if options['apply']:
             try:
-                result['acceptance'] = asdict(accept(batch, source_exported_at=exported,
+                result['acceptance'] = asdict(accept(batch, source_export_date=exported,
                     expected_employee_count=options['expected_employee_count'],
                     expected_previous_import_id=options['expected_previous_import_id'],
                     confirmed_missing_sha256=options['confirm_missing_current_sha256']))
