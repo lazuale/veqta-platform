@@ -7,7 +7,7 @@ import json
 from dataclasses import asdict
 from functools import wraps
 
-from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, ValidationError
+from django.core.exceptions import ObjectDoesNotExist, PermissionDenied, RequestDataTooBig, ValidationError
 from django.db import IntegrityError, transaction
 from django.http import JsonResponse
 from django.middleware.csrf import get_token
@@ -48,6 +48,8 @@ def endpoint(*methods):
                 return view(request, *args, **kwargs)
             except services.WorkwearConflict:
                 return error(409, "stale_version", "Заявка была изменена. Обновите данные")
+            except RequestDataTooBig:
+                return error(413, "payload_too_large", "Слишком большой запрос")
             except PermissionDenied:
                 return error(403, "forbidden", "Недостаточно прав")
             except ValidationError as exc:
@@ -74,9 +76,8 @@ def _reject_json_constant(value):
 def payload(request, *fields, optional_fields=(), max_bytes=MAX_JSON_BYTES):
     """Разобрать ограниченный JSON object с точными required/optional ключами.
 
-    По умолчанию64KiB, отдельный sync бюджет задаёт только вызывающий view.
-    application/json, UTF-8; NaN/Infinity и лишние ключи отвергаются.
-    Ошибки возвращаются endpoint как безопасный 400/413, записи нет."""
+    Обязательны application/json и UTF-8. Превышение max_bytes обрабатывается
+    декоратором endpoint; невалидный JSON и набор ключей дают ValidationError."""
     if request.content_type != "application/json":
         raise ValidationError("Ожидается Content-Type: application/json")
     try:
@@ -84,10 +85,10 @@ def payload(request, *fields, optional_fields=(), max_bytes=MAX_JSON_BYTES):
     except ValueError:
         raise ValidationError("Некорректная длина запроса")
     if content_length > max_bytes:
-        return error(413, "payload_too_large", "Слишком большой запрос")
+        raise RequestDataTooBig
     raw = request.body
     if len(raw) > max_bytes:
-        return error(413, "payload_too_large", "Слишком большой запрос")
+        raise RequestDataTooBig
     try:
         obj = json.loads(raw.decode("utf-8"), parse_constant=_reject_json_constant)
     except (ValueError, RecursionError):
@@ -148,8 +149,6 @@ def request_collection(request):
     Контракт, фильтры и пределы ответа: docs/architecture.md; запись выполняет сервис."""
     if request.method == "POST":
         obj = payload(request, "organization_id")
-        if isinstance(obj, JsonResponse):
-            return obj
         req = services.create_request(organization_id=positive_int(obj["organization_id"], "organization_id"), actor=request.user)
         return respond({"request": as_request(req)}, 201)
     require_permission(request, "view_request")
@@ -171,8 +170,6 @@ def request_detail(request, request_id):
     """GET view_request: снимок заявки; DELETE delete_request: удалить черновик с версией."""
     if request.method == "DELETE":
         obj = payload(request, "expected_version")
-        if isinstance(obj, JsonResponse):
-            return obj
         services.delete_draft(request_id=request_id, actor=request.user, expected_version=version(obj))
         return respond({"deleted": True})
     require_permission(request, "view_request")
@@ -200,8 +197,6 @@ def request_detail(request, request_id):
 def member_add(request, request_id):
     """POST change_request: новое включение employee_id с expected_version через сервис."""
     obj = payload(request, "employee_id", "expected_version")
-    if isinstance(obj, JsonResponse):
-        return obj
     member = services.add_employee(request_id=request_id,
         employee_id=positive_int(obj["employee_id"], "employee_id"),
         expected_version=version(obj), actor=request.user)
@@ -213,8 +208,6 @@ def member_add(request, request_id):
 def member_remove(request, request_id, member_id):
     """DELETE change_request: исключение member_id с expected_version через сервис."""
     obj = payload(request, "expected_version")
-    if isinstance(obj, JsonResponse):
-        return obj
     result = services.remove_employee(request_id=request_id, member_id=member_id,
                                       actor=request.user, expected_version=version(obj))
     return respond({"deleted": True, "version": result})
@@ -225,8 +218,6 @@ def member_remove(request, request_id, member_id):
 def assignment_add(request, request_id):
     """POST change_request: назначение member_id/item_id с expected_version через сервис."""
     obj = payload(request, "member_id", "item_id", "expected_version")
-    if isinstance(obj, JsonResponse):
-        return obj
     a = services.add_assignment(request_id=request_id,
         member_id=positive_int(obj["member_id"], "member_id"),
         item_id=positive_int(obj["item_id"], "item_id"),
@@ -239,8 +230,6 @@ def assignment_add(request, request_id):
 def assignment_remove(request, request_id, assignment_id):
     """DELETE change_request: удалить assignment_id с expected_version через сервис."""
     obj = payload(request, "expected_version")
-    if isinstance(obj, JsonResponse):
-        return obj
     result = services.remove_assignment(request_id=request_id, assignment_id=assignment_id,
                                         actor=request.user, expected_version=version(obj))
     return respond({"deleted": True, "version": result})
@@ -250,8 +239,6 @@ def assignment_remove(request, request_id, assignment_id):
 def complete(request, request_id):
     """POST change_request: завершение с expected_version; ответ содержит CompletionResult."""
     obj = payload(request, "expected_version")
-    if isinstance(obj, JsonResponse):
-        return obj
     result = services.complete_request(request_id=request_id, actor=request.user,
                                        expected_version=version(obj))
     return respond({"completion": asdict(result)})
@@ -261,8 +248,6 @@ def complete(request, request_id):
 def reopen(request, request_id):
     """POST reopen_request: возврат с expected_version через сервис; статус/поля защищены БД."""
     obj = payload(request, "expected_version")
-    if isinstance(obj, JsonResponse):
-        return obj
     req = services.reopen_request(request_id=request_id, actor=request.user,
                                   expected_version=version(obj))
     return respond({"request": as_request(req)})

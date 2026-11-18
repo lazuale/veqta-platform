@@ -5,14 +5,9 @@
  * addLocals меняет локальный состав, окончательная проверка выполняется sync.
  * Ошибка сети сохраняет выбор и текст; DOM обновляется внутри панели подбора. */
 export function installEmployees(ctx) {
-    const { settings, overlays } = ctx;
-    const api = (...args) => ctx.api(...args);
-    const notice = (...args) => ctx.notice(...args);
-    const $ = (...args) => ctx.$(...args);
-    const currentMembers = (...args) => ctx.currentMembers(...args);
-    const esc = (...args) => ctx.esc(...args);
-    const renderOverlay = (...args) => ctx.renderOverlay(...args);
-    const refreshMemberRows = (...args) => ctx.refreshMemberRows(...args);
+    const {
+        settings, overlays, api, notice, $, currentMembers, esc, refreshMemberRows,
+    } = ctx;
     async function searchEmployees(q, append = false) {
         settings.singleAbort?.abort();
         const controller = new AbortController(); settings.singleAbort = controller;
@@ -127,7 +122,7 @@ export function installEmployees(ctx) {
                 }
                 return { ...row, chosen: null };
             });
-            settings.bulkChecked = true; renderOverlay();
+            settings.bulkChecked = true; ctx.renderOverlay();
         } catch (err) { if (valid()) throw err; }
     }
     /** Единый список уникальных готовых кандидатов для счётчика и применения. */
@@ -142,7 +137,7 @@ export function installEmployees(ctx) {
     function addBulk() {
         const count = ctx.addLocals(bulkCandidates());
         settings.modal = null; settings.resolved = []; settings.bulkText = '';
-        refreshMemberRows(); renderOverlay();
+        refreshMemberRows(); ctx.renderOverlay();
         notice(`Добавлено в черновик: ${count}. Не забудьте сохранить заявку.`);
     }
     function batchFits(items) {
@@ -167,7 +162,7 @@ export function installEmployees(ctx) {
             }
         }
         settings.modal = null; settings.choice.clear();
-        refreshMemberRows(); renderOverlay();
+        refreshMemberRows(); ctx.renderOverlay();
         notice('Массовые изменения подготовлены. Сохраните заявку.');
     }
     async function scanBatchBeforeAdd() {

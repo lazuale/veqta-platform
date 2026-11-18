@@ -1,33 +1,17 @@
 /* Панели, подтверждения и история Workwear. installOverlays(ctx) публикует
  * функции через ctx; modal/drawer/history/choice принадлежат settings. История
  * кэшируется по заявке, версии и сотруднику; historyEpoch/dialogEpoch
- * отвергают ответы закрытого контекста. Общие cycleFocus/syncModalInert
+ * отвергают ответы закрытого контекста. Функции Portal
  * управляют доступностью, overlayReturn возвращает фокус после закрытия.
  * Панель не выдаёт права: разрешения API остаются независимой защитой. */
+import { syncModalInert } from '../../portal/ui.js';
+
 export function installOverlays(ctx) {
-    const { settings, overlays, root } = ctx;
-    const fmt = (...args) => ctx.fmt(...args);
-    const esc = (...args) => ctx.esc(...args);
-    const btn = (...args) => ctx.btn(...args);
-    const icon = (...args) => ctx.icon(...args);
-    const plural = (...args) => ctx.plural(...args);
-    const byItem = (...args) => ctx.byItem(...args);
-    const currentMembers = (...args) => ctx.currentMembers(...args);
-    const assignedCount = (...args) => ctx.assignedCount(...args);
-    const warningsCount = (...args) => ctx.warningsCount(...args);
-    const emptyCount = (...args) => ctx.emptyCount(...args);
-    const newSelection = (...args) => ctx.newSelection(...args);
-    const assignments = (...args) => ctx.assignments(...args);
-    const itemNames = (...args) => ctx.itemNames(...args);
-    const api = (...args) => ctx.api(...args);
-    const groups = (...args) => ctx.groups(...args);
-    const warning = (...args) => ctx.warning(...args);
-    const editable = (...args) => ctx.editable(...args);
-    const can = (...args) => ctx.can(...args);
-    const isDraft = (...args) => ctx.isDraft(...args);
-    const dirty = (...args) => ctx.dirty(...args);
-    const patchSearchResults = (...args) => ctx.patchSearchResults(...args);
-    const notice = (...args) => ctx.notice(...args);
+    const {
+        settings, overlays, root, fmt, esc, btn, icon, plural, byItem, currentMembers,
+        assignedCount, warningsCount, emptyCount, newSelection, assignments, itemNames, api,
+        groups, warning, editable, can, isDraft, dirty, patchSearchResults, notice,
+    } = ctx;
     function modalAllowed(modal) {
         if (modal === 'create') return can('add_request');
         if (modal === 'delete-draft') return editable() && can('delete_request');
@@ -274,7 +258,7 @@ export function installOverlays(ctx) {
         const scroll = overlays.querySelector('.vq-drawer-body,.vq-modal-body')?.scrollTop || 0;
         const key = ctx.controlSelector(oldFocus);
         overlays.innerHTML = settings.modal ? modalMarkup() : settings.drawer !== null ? drawerMarkup() : '';
-        ctx.syncModalInert(root, overlays);
+        syncModalInert(root, overlays);
         const area = overlays.querySelector('.vq-drawer-body,.vq-modal-body');
         if (area && had)
             area.scrollTop = scroll;
@@ -312,6 +296,6 @@ export function installOverlays(ctx) {
         }
     }
     Object.assign(ctx, {
-        showOverlay, cancelDialog, rosterHint, modalMarkup, loadHistory, drawerMarkup, renderOverlay, openDrawer, loadEvents
+        showOverlay, cancelDialog, renderOverlay, openDrawer, loadEvents,
     });
 }

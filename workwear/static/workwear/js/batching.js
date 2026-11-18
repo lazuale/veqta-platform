@@ -10,7 +10,7 @@
  * buildData([]) содержит остальные неизменные поля; вход — JSON-совместимые
  * строки/объекты без toJSON. Подсчёт линейный, без повторной сериализации префиксов.
  */
-export function partitionRequests(rows, buildData, maxItems, maxBytes) {
+function partitionRequests(rows, buildData, maxItems, maxBytes) {
     if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxBytes) || maxBytes < 1)
         throw new Error('Неверные ограничения пакета');
     const encoder = new TextEncoder(), base = encoder.encode(JSON.stringify(buildData([]))).length;

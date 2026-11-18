@@ -7,33 +7,11 @@
  * patchOneEmployee меняет одну строку; общий scan обновляет только предупреждения.
  * renderEditor сохраняет прокрутку/фокус только при той же заявке. */
 export function installEditor(ctx) {
-    const { settings, main, overlays } = ctx;
-    const api = (...args) => ctx.api(...args);
-    const copy = (...args) => ctx.copy(...args);
-    const syncUrl = (...args) => ctx.syncUrl(...args);
-    const renderOverlay = (...args) => ctx.renderOverlay(...args);
-    const fail = (...args) => ctx.fail(...args);
-    const currentMembers = (...args) => ctx.currentMembers(...args);
-    const notice = (...args) => ctx.notice(...args);
-    const norm = (...args) => ctx.norm(...args);
-    const byItem = (...args) => ctx.byItem(...args);
-    const esc = (...args) => ctx.esc(...args);
-    const icon = (...args) => ctx.icon(...args);
-    const plural = (...args) => ctx.plural(...args);
-    const editable = (...args) => ctx.editable(...args);
-    const btn = (...args) => ctx.btn(...args);
-    const $ = (...args) => ctx.$(...args);
-    const $$ = (...args) => ctx.$$(...args);
-    const isDraft = (...args) => ctx.isDraft(...args);
-    const tone = (...args) => ctx.tone(...args);
-    const fmt = (...args) => ctx.fmt(...args);
-    const fmtTime = (...args) => ctx.fmtTime(...args);
-    const can = (...args) => ctx.can(...args);
-    const dirty = (...args) => ctx.dirty(...args);
-    const assignedCount = (...args) => ctx.assignedCount(...args);
-    const field = (...args) => ctx.field(...args);
-    const emptyCount = (...args) => ctx.emptyCount(...args);
-    const normalizedDraft = (...args) => ctx.normalizedDraft(...args);
+    const {
+        settings, main, overlays, api, copy, syncUrl, fail, currentMembers, notice, norm, byItem,
+        esc, icon, plural, editable, btn, $, $$, isDraft, tone, fmt, fmtTime, can, dirty,
+        assignedCount, field, emptyCount, normalizedDraft,
+    } = ctx;
     function adoptRequest(request, { resetView = true } = {}) {
         if (!request || !Array.isArray(request.members) || !Number.isInteger(request.version))
             throw new Error('Некорректный ответ при загрузке заявки');
@@ -86,7 +64,7 @@ export function installEditor(ctx) {
         settings.repeatEpoch++;
         settings.repeatState = can('view_employee') ? 'pending' : 'unavailable';
         renderEditor();
-        renderOverlay();
+        ctx.renderOverlay();
         if (can('view_employee')) void scanRepeats();
     }
     async function openRequest(id, { route = true, resetView = true } = {}) {
@@ -488,7 +466,7 @@ export function installEditor(ctx) {
             member.assignments = member.assignments.filter(a => a.item_id !== itemId);
             settings.warnings.delete(`${employeeId}:${itemId}`);
             patchOneEmployee(employeeId);
-            if (settings.drawer === employeeId) renderOverlay();
+            if (settings.drawer === employeeId) ctx.renderOverlay();
             return true;
         }
         const operation = { desired: wanted, promise: null };
@@ -519,7 +497,7 @@ export function installEditor(ctx) {
                 if (settings.request === request) {
                     assignmentPending(employeeId, itemId, false);
                     patchOneEmployee(employeeId);
-                    if (settings.drawer === employeeId) renderOverlay();
+                    if (settings.drawer === employeeId) ctx.renderOverlay();
                 }
             }
         })();
@@ -596,7 +574,7 @@ export function installEditor(ctx) {
                         settings.modal = 'conflict';
                     }
                     renderEditor();
-                    renderOverlay();
+                    ctx.renderOverlay();
                     notice('Отправленная версия сохранена. Последующие локальные правки не перезаписаны.', true);
                 } else {
                     adoptRequest(fresh.request, { resetView: false });
@@ -606,7 +584,7 @@ export function installEditor(ctx) {
                 if (!inContext()) return false;
                 settings.error = 'refresh';
                 renderEditor();
-                renderOverlay();
+                ctx.renderOverlay();
                 notice('Сохранение подтверждено. Обновление сведений не удалось: ' + err.message, true);
             }
             return true;
@@ -632,6 +610,7 @@ export function installEditor(ctx) {
         await openRequest(data.request.id);
     }
     Object.assign(ctx, {
-        openRequest, scanRepeats, warning, warningsCount, memberVisible, rowTags, rowWarning, memberList, groups, cell, cellAvailable, matrix, selectionBar, patchSelection, renderEditor, renderDigest, refreshMemberRows, patchOneEmployee, chooseAssignment, addLocals, save, create
+        openRequest, scanRepeats, warning, warningsCount, memberVisible, groups, cellAvailable,
+        patchSelection, renderEditor, refreshMemberRows, chooseAssignment, addLocals, save, create,
     });
 }

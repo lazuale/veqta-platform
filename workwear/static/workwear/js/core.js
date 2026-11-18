@@ -5,8 +5,9 @@
  * busy блокирует ввод только во время сохранения и восстанавливает фокус.
  * page/search/refresh/bulk/dialog/history/repeat Epoch отбрасывают поздние ответы.
  * Описание публичного ctx и инвалидации: docs/architecture.md. */
+import { iconSvg as icon } from '../../portal/ui.js';
+
 export function installCore(ctx) {
-    const renderOverlay = (...args) => ctx.renderOverlay(...args);
     const root = document.getElementById('veq-app');
     if (!root || root.dataset.ready)
         return;
@@ -23,7 +24,6 @@ export function installCore(ctx) {
     const fmt = iso => iso ? new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Moscow' }).format(new Date(iso)) : '—';
     const fmtTime = iso => iso ? new Intl.DateTimeFormat('ru-RU', { hour: '2-digit', minute: '2-digit', timeZone: 'Europe/Moscow' }).format(new Date(iso)) : '';
     const norm = str => String(str || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru-RU').replace(/ё/g, 'е');
-    const icon = key => ctx.platformIcon(key);
     const btn = (title, action, cls = '', extra = '') => `<button type="button" class="vq-btn ${cls}" data-action="${action}" ${extra}>${title}</button>`;
     const field = (placeholder, value, id) => `<label class="vq-field">${icon('search')}<input data-input="${id}" autocomplete="off" value="${esc(value)}" placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}"></label>`;
     const settings = {
@@ -75,15 +75,15 @@ export function installCore(ctx) {
         // чтобы отрисовка каждой строки не сканировала до 30 000 назначений.
         if (catalogCache?.catalog === catalog && catalogCache?.base === settings.base)
             return catalogCache.items.slice();
-        const assigned = new Map();
+        const assigned = new Set();
         for (const member of settings.base?.members || []) for (const a of member.assignments) {
-            if (a.name && !assigned.has(a.item_id)) assigned.set(a.item_id, a);
+            if (a.name) assigned.add(a.item_id);
         }
         // Колонка описывает текущую позицию каталога. Снимки относятся только
         // к отдельным назначениям; у одной позиции они могут различаться.
         const items = catalog.filter(it => (isDraft() && it.is_active) || assigned.has(it.id));
         const known = new Set(items.map(it => it.id));
-        for (const [id] of assigned) if (!known.has(id))
+        for (const id of assigned) if (!known.has(id))
             items.push({ id, name: `Позиция № ${id}`, category: 'Назначения', is_active: false });
         catalogCache = { catalog, base: settings.base, items };
         return items.slice();
@@ -149,12 +149,12 @@ export function installCore(ctx) {
             settings.error = 'conflict';
             settings.remote = null;
             settings.modal = 'conflict';
-            renderOverlay();
+            ctx.renderOverlay();
             if (settings.request)
                 api(`requests/${settings.request.id}/`).then(data => {
                     if (settings.modal === 'conflict' && settings.request?.id === data.request.id) {
                         settings.remote = data.request;
-                        renderOverlay();
+                        ctx.renderOverlay();
                     }
                 }).catch(() => { });
         }
@@ -166,7 +166,11 @@ export function installCore(ctx) {
                     : err.message || 'Ошибка операции', true);
     }
     Object.assign(ctx, {
-        root, main, overlays, feedback, API, $, $$, esc, copy, plural, fmt, fmtTime, norm, icon, btn, field, settings, can, historyKey, assignmentKey, controlSelector, setBusy, byItem, assignmentItem, itemDescription, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable, newSelection, itemNames, assignments, assignedCount, emptyCount, normalizedDraft, dirty, notice, api, fail
+        root, main, overlays, $, $$, esc, copy, plural, fmt, fmtTime, norm, icon, btn, field,
+        settings, can, historyKey, assignmentKey, controlSelector, setBusy, byItem, assignmentItem,
+        itemDescription, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable,
+        newSelection, itemNames, assignments, assignedCount, emptyCount, normalizedDraft, dirty,
+        notice, api, fail,
     });
     return true;
 }

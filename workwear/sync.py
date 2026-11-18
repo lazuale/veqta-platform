@@ -83,23 +83,22 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
     # Полная детерминированная delta вычисляется до записи. Снимки
     # исключаемых участников сохраняются в событии до удаления их строк.
     old_items = {m.employee_id: {a.item_id for a in m.assignments.all()} for m in existing}
+    added_item_ids = {
+        employee_id: requested - old_items.get(employee_id, set())
+        for employee_id, requested in desired.items()
+    }
     # Отключённые позиции можно сохранить в прежнем составе, но нельзя назначить заново.
-    if any(not items[item_id] for employee_id in desired
-           for item_id in desired[employee_id] - old_items.get(employee_id, set())):
+    if any(not items[item_id] for added in added_item_ids.values() for item_id in added):
         raise ValidationError("Нельзя назначить неактивную позицию")
-    old_people = {m.employee_id: {
-        "employee_id": m.employee_id,
-        "full_name": m.snapshot_full_name,
-        "personnel_number": m.snapshot_personnel_number,
-        "snapshot_organization_name": m.snapshot_organization_name,
-        "item_ids": sorted(old_items[m.employee_id]),
-    } for m in existing}
-    additions = sorted(set(desired) - set(old_people))
-    removals = sorted(set(old_people) - set(desired))
+    additions = sorted(desired.keys() - existing_by_employee.keys())
+    removed_members = [
+        existing_by_employee[employee_id]
+        for employee_id in sorted(existing_by_employee.keys() - desired.keys())
+    ]
     assignment_added = [
         {"employee_id": employee_id, "item_id": item_id}
-        for employee_id in sorted(desired)
-        for item_id in sorted(desired[employee_id] - old_items.get(employee_id, set()))
+        for employee_id in sorted(added_item_ids)
+        for item_id in sorted(added_item_ids[employee_id])
     ]
     assignment_removed = [
         {"employee_id": employee_id, "item_id": item_id}
@@ -112,11 +111,16 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         "personnel_number": employees[employee_id].personnel_number,
         "snapshot_organization_name": employees[employee_id].organization.name,
     } for employee_id in additions]
-    removed_people = [old_people[employee_id] for employee_id in removals]
+    removed_people = [{
+        "employee_id": m.employee_id,
+        "full_name": m.snapshot_full_name,
+        "personnel_number": m.snapshot_personnel_number,
+        "snapshot_organization_name": m.snapshot_organization_name,
+        "item_ids": sorted(old_items[m.employee_id]),
+    } for m in removed_members]
     changed = False
-    removing = [m.pk for m in existing if m.employee_id not in desired]
-    if removing:
-        RequestEmployee.objects.filter(pk__in=removing).delete()
+    if removed_members:
+        RequestEmployee.objects.filter(pk__in=[m.pk for m in removed_members]).delete()
         changed = True
     # Снимки и ID новых участников создаются одним bulk-этапом. Все INSERT
     # продолжают исполнять обычные PostgreSQL triggers в той же транзакции.
@@ -138,9 +142,11 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
     if assignment_ids_to_remove:
         RequestAssignment.objects.filter(pk__in=assignment_ids_to_remove).delete()
         changed = True
-    to_create = [RequestAssignment(request_employee_id=existing_by_employee[e].pk, item_id=i)
-                 for e, selected_items in desired.items()
-                 for i in sorted(selected_items - old_items.get(e, set()))]
+    to_create = [
+        RequestAssignment(request_employee_id=existing_by_employee[employee_id].pk, item_id=item_id)
+        for employee_id, added in added_item_ids.items()
+        for item_id in sorted(added)
+    ]
     if to_create:
         RequestAssignment.objects.bulk_create(to_create, batch_size=WRITE_BATCH_SIZE)
         changed = True

@@ -4,20 +4,9 @@
  * ответы списка, refreshEpoch отменяет открытие заявки после перехода назад.
  * Несохранённые изменения требуют явного решения; историю URL ведёт History API. */
 export function installRegistry(ctx) {
-    const { settings, main } = ctx;
-    const openRequest = (...args) => ctx.openRequest(...args);
-    const can = (...args) => ctx.can(...args);
-    const btn = (...args) => ctx.btn(...args);
-    const icon = (...args) => ctx.icon(...args);
-    const field = (...args) => ctx.field(...args);
-    const allOrgOptions = (...args) => ctx.allOrgOptions(...args);
-    const esc = (...args) => ctx.esc(...args);
-    const renderOverlay = (...args) => ctx.renderOverlay(...args);
-    const $ = (...args) => ctx.$(...args);
-    const api = (...args) => ctx.api(...args);
-    const fmt = (...args) => ctx.fmt(...args);
-    const fmtTime = (...args) => ctx.fmtTime(...args);
-    const tone = (...args) => ctx.tone(...args);
+    const {
+        settings, main, can, btn, icon, field, allOrgOptions, esc, $, api, fmt, fmtTime, tone,
+    } = ctx;
     function routeUrl(id) { const u = new URL(location.href); if (id)
         u.searchParams.set('request', id);
     else
@@ -25,7 +14,7 @@ export function installRegistry(ctx) {
     function syncUrl(id, replace = false) { const url = routeUrl(id); if (location.pathname + location.search + location.hash !== url)
         history[replace ? 'replaceState' : 'pushState']({ request: id }, '', url); }
     function finishRoute(id) { settings.pendingRoute = null; syncUrl(id, true); if (id)
-        openRequest(id, { route: false });
+        ctx.openRequest(id, { route: false });
     else
         openRegistry({ route: false }); }
     function toolbarOptionsStatus(v) { return `<option value="" ${v === '' ? 'selected' : ''}>Все состояния</option><option value="draft" ${v === 'draft' ? 'selected' : ''}>Черновики</option><option value="closed" ${v === 'closed' ? 'selected' : ''}>Завершённые</option>`; }
@@ -63,7 +52,7 @@ export function installRegistry(ctx) {
         if (route)
             syncUrl(null);
         renderRegistry();
-        renderOverlay();
+        ctx.renderOverlay();
         await loadRegistry();
     }
     async function loadRegistry() {
@@ -96,6 +85,6 @@ export function installRegistry(ctx) {
         }
     }
     Object.assign(ctx, {
-        routeUrl, syncUrl, finishRoute, toolbarOptionsStatus, renderRegistry, openRegistry, loadRegistry
+        syncUrl, finishRoute, renderRegistry, openRegistry, loadRegistry,
     });
 }

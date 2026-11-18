@@ -222,8 +222,6 @@ def resolve(request):
     require_permission(request, "view_employee")
     obj = payload(request, "organization_id", "lines",
                   optional_fields=("request_id", "present_employee_ids"))
-    if hasattr(obj, "status_code"):
-        return obj
     org, lines = positive_int(obj["organization_id"], "organization_id"), obj["lines"]
     if not Organization.objects.filter(pk=org).exists():
         raise ValidationError("Недопустимая организация")
@@ -257,8 +255,6 @@ def resolve(request):
 def bulk_add(request, request_id):
     """POST change_request: атомарно включить до1000 employee_ids с expected_version."""
     obj = payload(request, "employee_ids", "expected_version")
-    if hasattr(obj, "status_code"):
-        return obj
     ids = obj["employee_ids"]
     if not isinstance(ids, list) or not 1 <= len(ids) <= MAX_REQUEST_MEMBERS:
         raise ValidationError("Требуется от 1 до 1000 сотрудников")
@@ -343,8 +339,6 @@ def sync_request(request, request_id):
     HTTP-слой не строит delta и не завершает заявку самостоятельно."""
     from .sync import save_draft
     obj = payload(request, "members", "expected_version", "finish", max_bytes=MAX_SYNC_JSON_BYTES)
-    if hasattr(obj, "status_code"):
-        return obj
     result = save_draft(
         request_id=request_id, actor=request.user,
         expected_version=version(obj), members=obj["members"],
@@ -362,8 +356,6 @@ def repeat_scan(request, request_id):
     require_permission(request, "view_request")
     require_permission(request, "view_employee")
     obj = payload(request, "pairs")
-    if hasattr(obj, "status_code"):
-        return obj
     pairs = obj["pairs"]
     if not isinstance(pairs, list) or len(pairs) > MAX_REPEAT_PAIRS:
         raise ValidationError("Слишком много позиций для проверки")
@@ -406,8 +398,6 @@ def reopen_with_reason(request, request_id):
     """POST reopen_request: версия и reason до 500 символов; журнал формирует сервис."""
     from .api import as_request
     obj = payload(request, "expected_version", "reason")
-    if hasattr(obj, "status_code"):
-        return obj
     req = services.reopen_request(request_id=request_id, actor=request.user,
         expected_version=version(obj), reason=obj["reason"])
     return respond({"request": as_request(req)})

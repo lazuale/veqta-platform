@@ -4,44 +4,17 @@
  * listeners. Таймеры поиска и epochs защищают контекст; клавиатура матрицы
  * поддерживает один tabindex=0, стрелки и видимость активной ячейки.
  * Сохранение блокирует изменение черновика, beforeunload предупреждает о dirty. */
+import { cycleFocus } from '../../portal/ui.js';
+
 export function installController(ctx) {
-    const { settings, main, root, overlays } = ctx;
-    const api = (...args) => ctx.api(...args);
-    const openRequest = (...args) => ctx.openRequest(...args);
-    const openRegistry = (...args) => ctx.openRegistry(...args);
-    const esc = (...args) => ctx.esc(...args);
-    const openDrawer = (...args) => ctx.openDrawer(...args);
-    const renderOverlay = (...args) => ctx.renderOverlay(...args);
-    const renderEditor = (...args) => ctx.renderEditor(...args);
-    const chooseAssignment = (...args) => ctx.chooseAssignment(...args);
-    const $ = (...args) => ctx.$(...args);
-    const loadRegistry = (...args) => ctx.loadRegistry(...args);
-    const renderRegistry = (...args) => ctx.renderRegistry(...args);
-    const showOverlay = (...args) => ctx.showOverlay(...args);
-    const create = (...args) => ctx.create(...args);
-    const dirty = (...args) => ctx.dirty(...args);
-    const save = (...args) => ctx.save(...args);
-    const notice = (...args) => ctx.notice(...args);
-    const resolveBulk = (...args) => ctx.resolveBulk(...args);
-    const addBulk = (...args) => ctx.addBulk(...args);
-    const scanBatchBeforeAdd = (...args) => ctx.scanBatchBeforeAdd(...args);
-    const batchChange = (...args) => ctx.batchChange(...args);
-    const newSelection = (...args) => ctx.newSelection(...args);
-    const scanRepeats = (...args) => ctx.scanRepeats(...args);
-    const searchEmployees = (...args) => ctx.searchEmployees(...args);
-    const patchSelection = (...args) => ctx.patchSelection(...args);
-    const copy = (...args) => ctx.copy(...args);
-    const finishRoute = (...args) => ctx.finishRoute(...args);
-    const fail = (...args) => ctx.fail(...args);
-    const refreshMemberRows = (...args) => ctx.refreshMemberRows(...args);
-    const memberVisible = (...args) => ctx.memberVisible(...args);
-    const patchSearchResults = (...args) => ctx.patchSearchResults(...args);
-    const $$ = (...args) => ctx.$$(...args);
-    const syncUrl = (...args) => ctx.syncUrl(...args);
-    const editable = (...args) => ctx.editable(...args);
-    const can = (...args) => ctx.can(...args);
-    const isDraft = (...args) => ctx.isDraft(...args);
-    const setBusy = (...args) => ctx.setBusy(...args);
+    const {
+        settings, main, root, overlays, api, openRequest, openRegistry, esc, openDrawer,
+        renderOverlay, renderEditor, chooseAssignment, $, loadRegistry, renderRegistry,
+        showOverlay, create, dirty, save, notice, resolveBulk, addBulk, scanBatchBeforeAdd,
+        batchChange, newSelection, scanRepeats, searchEmployees, patchSelection, copy, finishRoute,
+        fail, refreshMemberRows, memberVisible, patchSearchResults, $$, syncUrl, editable, can,
+        isDraft, setBusy,
+    } = ctx;
     const view = root.ownerDocument.defaultView;
     let memberFrame = null;
     // Локальные фильтр и поиск используют последний ввод к следующему кадру.
@@ -617,7 +590,7 @@ export function installController(ctx) {
             return;
         }
         const modalRoot = overlays.querySelector('.vq-modal,.vq-drawer');
-        if (modalRoot) ctx.cycleFocus(e, modalRoot);
+        if (modalRoot) cycleFocus(e, modalRoot);
         if (e.key === 'Escape' && settings.modal) {
             ctx.cancelDialog();
         }
@@ -645,7 +618,5 @@ export function installController(ctx) {
         e.preventDefault();
         e.returnValue = '';
     } });
-    Object.assign(ctx, {
-        start, debounce
-    });
+    return start;
 }
