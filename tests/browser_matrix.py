@@ -14,7 +14,7 @@ from unittest.mock import patch
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from .browser_support import database_call, delayed_requests, live_server
+from .browser_support import database_call, delayed_requests, live_server, sign_in
 
 
 VIEWPORTS = [(1920, 1080), (1440, 900), (1366, 768), (1024, 768), (768, 1024), (390, 844)]
@@ -114,7 +114,7 @@ def persisted(request_id):
                         .values_list("request_employee__employee_id", "item_id"))}
 
 
-def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=None):
+def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=None, *, server_options=None, http_load=False):
     from playwright.sync_api import sync_playwright, expect
     data = seed_matrix(actor)
     artifacts = Path(artifacts).resolve()
@@ -125,14 +125,21 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
         list(WorkwearItem.objects.filter(is_active=True).order_by('sort_order','pk').values_list('pk', flat=True)[:30]))
     (artifacts/'concurrent-service-results.json').write_text(json.dumps(concurrency,ensure_ascii=False,indent=2))
     results, errors, requests, failures, expected_http, console, sql_samples = [], [], [], [], [], [], []
-    with live_server() as base, sync_playwright() as playwright:
+    with live_server(**(server_options or {})) as server, sync_playwright() as playwright:
+        base = server.url
+        if http_load:
+            from .acceptance import check_http_load
+            active_ids = database_call(lambda: list(WorkwearItem.objects.filter(is_active=True)
+                .order_by('sort_order','pk').values_list('pk', flat=True)[:30]))
+            measurements = check_http_load(server, data['organization'], data['people'][:100], active_ids)
+            (artifacts/'http-load-results.json').write_text(json.dumps(measurements,ensure_ascii=False,indent=2))
         options = {"headless": True}
         if executable:
             options["executable_path"] = executable
         engines = {name:Path(getattr(playwright,name).executable_path).is_file() for name in ("chromium","firefox","webkit")}
         engines[engine] = bool(executable) or engines[engine]
         browser = getattr(playwright, engine).launch(**options)
-        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        context = browser.new_context(viewport={"width": 1440, "height": 900}, ignore_https_errors=server.ca_file is not None)
         page = context.new_page()
         page.set_default_timeout(15000)
         page.on("console",lambda message: console.append({"type":message.type,"text":message.text}) if message.type in ("warning","error") else None)
@@ -141,11 +148,7 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
         page.on("response", lambda response: failures.append((response.status, response.url)) if response.status >= 400 else None)
         page.on("request", lambda req: requests.append({"method": req.method, "url": req.url}))
         page.on("dialog", lambda dialog: dialog.accept())
-        page.goto(base + "/login/")
-        page.locator('[name="username"]').fill(data["username"])
-        page.locator('[name="password"]').fill(data["password"])
-        page.locator('button[type="submit"]').click()
-        expect(page).to_have_url(base + "/")
+        sign_in(page, base, data["username"], data["password"])
 
         def open_matrix(request_id=None):
             page.goto(base + f'/workwear/?request={request_id or data["request"]}')
@@ -587,20 +590,17 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
                 f'{item["name"]} · {item["category"]} · {item["validity_days"]} дней')
             expect(page.locator('th.matrix-leaf').first).to_contain_text('1095 дн. · каталог')
             page.screenshot(path=str(artifacts/'matrix-closed.png'),full_page=True)
-            context=browser.new_context(viewport={"width":1440,"height":900})
+            context=browser.new_context(viewport={"width":1440,"height":900}, ignore_https_errors=server.ca_file is not None)
             reader=context.new_page()
-            reader.goto(base+'/login/')
-            reader.locator('[name="username"]').fill(data["reader"])
-            reader.locator('[name="password"]').fill(data["reader_password"])
-            reader.locator('button[type="submit"]').click()
+            sign_in(reader, base, data["reader"], data["reader_password"])
             reader.goto(base+f'/workwear/?request={data["request"]}')
             reader.locator('[data-mode="matrix"]').click()
             expect(reader.locator('table.matrix')).to_be_visible()
             assert reader.locator('[data-cell]:not(:disabled)').count()==0
             assert reader.locator('[data-action="save"]').count()==0
             session=reader.request.get(base+'/workwear/api/session/').json()
-            result=reader.request.post(base+'/workwear/api/requests/',data={"organization_id":data["organization"]},headers={"X-CSRFToken":session['csrf_token']})
-            assert result.status==403
+            result=reader.request.post(base+'/workwear/api/requests/',data={"organization_id":data["organization"]},headers={"X-CSRFToken":session['csrf_token'], "Referer": base+"/workwear/", "Origin": base})
+            assert result.status==403 and result.json()["error"]["code"] == "forbidden"
             context.close()
             page.locator('[data-action="reopen"]').click()
             page.locator('#reopenAck').check()
@@ -683,12 +683,9 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             page.keyboard.press('Escape')
             assert database_call(lambda:persisted(request_id))==original
             # У читателя с view_workwearevent есть журнал без права изменения.
-            reader_context=browser.new_context(viewport={'width':1440,'height':900})
+            reader_context=browser.new_context(viewport={'width':1440,'height':900}, ignore_https_errors=server.ca_file is not None)
             reader=reader_context.new_page()
-            reader.goto(base+'/login/')
-            reader.locator('[name="username"]').fill(data['reader'])
-            reader.locator('[name="password"]').fill(data['reader_password'])
-            reader.locator('button[type="submit"]').click()
+            sign_in(reader, base, data['reader'], data['reader_password'])
             reader.goto(base+f'/workwear/?request={request_id}')
             reader.locator('[data-action="events"]').click()
             expect(reader.locator('[data-event]')).to_have_count(25)
@@ -884,7 +881,7 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
         summary = {
             "results": results, "completed": True,
             "passed": all(r['status']=='passed' for r in results) and not errors and sorted(failures)==sorted(expected_http),
-            "browser_engine": engine, "browser_version": browser.version, "engines_available": engines,
+            "server_stack": (server_options or {}).get("stack", "runserver"), "browser_engine": engine, "browser_version": browser.version, "engines_available": engines,
             "javascript_errors": errors, "console": console,
             "expected_http_errors": [{"status":status,"path":urlsplit(url).path} for status,url in expected_http],
             "observed_http_errors": [{"status":status,"path":urlsplit(url).path} for status,url in failures],

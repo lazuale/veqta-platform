@@ -20,7 +20,7 @@
 | `DJANGO_SECURE_COOKIES` | серверный HTTPS: `1`; локальный HTTP: `0` | `1` |
 | `DJANGO_STATIC_ROOT` | `/var/www/veqta/dev-static` на сервере | `/var/www/veqta/prod-static` |
 
-Для серверного HTTPS DEV укажите `DJANGO_DEBUG=0`, `DJANGO_TRUST_PROXY=1`, `DJANGO_SECURE_COOKIES=1`. PROD всегда требует Secure cookies. Локальные браузерные тесты используют отдельные HTTP-настройки `config.testing`. Подробности: [deployment.md](deployment.md).
+Для серверного HTTPS DEV укажите `DJANGO_DEBUG=0`, `DJANGO_TRUST_PROXY=1`, `DJANGO_SECURE_COOKIES=1`. PROD всегда требует Secure cookies. Локальные браузерные тесты используют `config.testing`: обычный режим HTTP или `VEQTA_TEST_HTTPS=1` только для изолированных Gunicorn/Nginx. Оба режима требуют DEV и используют test_veqta_dev; исходные настройки службы не меняются. Подробности: [deployment.md](deployment.md).
 
 `create_config.py --environment dev|prod --hostname DNS` требует DNS-имя для каждого контура. Допускаются только строчные DNS-метки длиной до 63 символов; схема, порт, IP, wildcard, пустые метки и завершающая точка отвергаются. Он создаёт `.env.ENV` и `.env.ENV-migrate` с разными паролями. Первый устанавливается как `/etc/veqta/ENV.env` root:veqta-ENV 0640, второй — `/etc/veqta/ENV-migrate.env` root:root 0600.
 

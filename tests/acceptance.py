@@ -13,7 +13,7 @@ import secrets
 from threading import Barrier
 from time import perf_counter
 from uuid import uuid4
-from .browser_support import live_server
+from .browser_support import live_server, sign_in
 
 
 def check_race(actor, people, items):
@@ -94,27 +94,163 @@ def check_parallel_load(organization_id, employee_ids, item_ids, users=8):
     return report
 
 
-def check_browser(actor, people, executable, engine="chromium"):
+def check_http_load(server, organization_id, employee_ids, item_ids):
+    """Восемь HTTP-сессий с настоящими входом, CSRF, API и сверкой PostgreSQL."""
+    from http.cookiejar import CookieJar
+    import json
+    import ssl
+    import urllib.error
+    import urllib.parse
+    import urllib.request
+    from .browser_support import database_call
+    from .browser_matrix import persisted
+    from .factories import make_user
+
+    def identities():
+        result = []
+        for _ in range(8):
+            actor = make_user()
+            password = secrets.token_urlsafe(32)
+            actor.set_password(password)
+            actor.save(update_fields=["password"])
+            result.append((actor.username, password))
+        return result
+
+    users = database_call(identities)
+    base = server.url
+    context = ssl.create_default_context(cafile=str(server.ca_file)) if server.ca_file else None
+    class Session:
+        def __init__(self):
+            self.cookies = CookieJar()
+            self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}),
+                urllib.request.HTTPCookieProcessor(self.cookies), urllib.request.HTTPSHandler(context=context))
+            self.csrf = None
+            self.measurements = []
+
+        def request(self, method, path, *, data=None, form=None):
+            headers = {"Referer": base + "/workwear/", "Origin": base}
+            if self.csrf:
+                headers["X-CSRFToken"] = self.csrf
+            body = None
+            if data is not None:
+                body = json.dumps(data).encode()
+                headers["Content-Type"] = "application/json"
+            elif form is not None:
+                body = urllib.parse.urlencode(form).encode()
+                headers["Content-Type"] = "application/x-www-form-urlencoded"
+                headers["Referer"] = base + "/login/"
+            started = perf_counter()
+            request = urllib.request.Request(base + path, body, headers, method=method)
+            try:
+                response = self.opener.open(request, timeout=45)
+            except urllib.error.HTTPError as error:
+                response = error
+            with response:
+                payload = response.read()
+                record = {"method": method, "path": path, "status": response.status,
+                    "seconds": round(perf_counter()-started, 3), "response_bytes": len(payload),
+                    "sql_queries": int(response.headers.get("X-Veqta-Test-SQL", "0")),
+                    "database_role": response.headers.get("X-Veqta-Test-DB-User")}
+                self.measurements.append(record)
+                result = json.loads(payload) if response.headers.get_content_type() == "application/json" else None
+                return response.status, result
+
+        def login(self, username, password):
+            assert self.request("GET", "/login/")[0] == 200
+            token = next(cookie.value for cookie in self.cookies if cookie.name == "veqta_dev_csrf")
+            assert self.request("POST", "/login/", form={"username": username, "password": password,
+                "csrfmiddlewaretoken": token})[0] == 200
+            status, session = self.request("GET", "/workwear/api/session/")
+            assert status == 200 and session["username"] == username
+            self.csrf = session["csrf_token"]
+            if server.ca_file:
+                assert all(cookie.secure for cookie in self.cookies
+                           if cookie.name in {"veqta_dev_csrf", "veqta_dev_session"})
+
+        def create(self):
+            status, body = self.request("POST", "/workwear/api/requests/", data={"organization_id": organization_id})
+            assert status == 201, (status, body)
+            return body["request"]["id"]
+
+    members = [{"employee_id": person, "item_ids": item_ids} for person in employee_ids]
+    expected = sorted((person, item) for person in employee_ids for item in item_ids)
+    barrier = Barrier(8)
+    def worker(identity):
+        client = Session()
+        client.login(*identity)
+        request_id = client.create()
+        barrier.wait(timeout=30)
+        status, body = client.request("POST", f"/workwear/api/ui/requests/{request_id}/sync/",
+                                      data={"expected_version": 1, "members": members, "finish": False})
+        saving = client.measurements[-1].copy()
+        assert status == 200 and body["version"] == 2 and body["changed"] is True, (status, body)
+        assert saving["database_role"] == "veqta_dev", saving
+        status, stored = client.request("GET", f"/workwear/api/requests/{request_id}/")
+        assert status == 200
+        pairs = sorted((member["employee_id"], assignment["item_id"])
+                       for member in stored["request"]["members"] for assignment in member["assignments"])
+        assert pairs == expected
+        status, unchanged = client.request("POST", f"/workwear/api/ui/requests/{request_id}/sync/",
+                                          data={"expected_version": 2, "members": members, "finish": False})
+        assert status == 200 and unchanged["version"] == 2 and unchanged["changed"] is False
+        return client, request_id, saving
+
+    started = perf_counter()
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(worker, users))
+    elapsed = perf_counter()-started
+    for _, request_id, _ in results:
+        stored = database_call(lambda: persisted(request_id))
+        assert stored["pairs"] == expected and stored["version"] == 2 and stored["events"] == 2
+
+    # Разные сессии одной версии должны дать 200 и осмысленный 409, без частичного состава.
+    shared = results[0][0].create()
+    race = Barrier(2)
+    def race_worker(index):
+        client = results[index][0]
+        race.wait(timeout=15)
+        return client.request("POST", f"/workwear/api/ui/requests/{shared}/sync/", data={
+            "expected_version": 1, "finish": False,
+            "members": [{"employee_id": employee_ids[index], "item_ids": [item_ids[index]]}],
+        })
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        outcomes = list(pool.map(race_worker, (0, 1)))
+    assert sorted(status for status, _ in outcomes) == [200, 409], outcomes
+    loser = next(body for status, body in outcomes if status == 409)
+    assert loser["error"]["code"] == "stale_version"
+    winner = next(index for index, (status, _) in enumerate(outcomes) if status == 200)
+    stored = database_call(lambda: persisted(shared))
+    assert stored["version"] == 2 and stored["events"] == 2
+    assert stored["pairs"] == [(employee_ids[winner], item_ids[winner])]
+    report = {"users": 8, "employees_per_user": len(employee_ids), "items_per_employee": len(item_ids),
+        "total_seconds_including_authentication": round(elapsed, 3), "sync_responses": [r[2] for r in results],
+        "request_count": sum(len(r[0].measurements) for r in results), "tls_verified": bool(server.ca_file),
+        "database_pairs_per_user": len(expected), "idempotent_repeats": 8,
+        "shared_request_conflict": {"statuses": [status for status, _ in outcomes], "version": 2,
+                                    "events": 2, "partial_changes": False},
+        "scope": "isolated HTTP acceptance; eight authenticated users; not a production capacity estimate"}
+    print(f"HTTP-приёмка: 8 пользователей × {len(employee_ids)} × {len(item_ids)}, повтор и конфликт 200/409 — успешно", flush=True)
+    return report
+
+
+def check_browser(actor, people, executable, engine="chromium", server_options=None):
     """Пройти вход, массовый подбор, назначение, сохранение, завершение и возврат."""
     from playwright.sync_api import sync_playwright, expect
     password = secrets.token_urlsafe(32)
     actor.set_password(password)
     actor.save(update_fields=["password"])
-    with live_server() as base, sync_playwright() as playwright:
+    with live_server(**(server_options or {})) as server, sync_playwright() as playwright:
+        base = server.url
         options = {"headless": True}
         if executable:
             options["executable_path"] = executable
         browser = getattr(playwright, engine).launch(**options)
-        page = browser.new_page(viewport={"width": 1440, "height": 1000})
+        page = browser.new_page(viewport={"width": 1440, "height": 1000}, ignore_https_errors=server.ca_file is not None)
         page.set_default_timeout(10000)
         errors, failures = [], []
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on("response", lambda response: failures.append((response.status, response.url)) if response.status >= 400 else None)
-        page.goto(base+"/login/")
-        page.locator('[name="username"]').fill(actor.username)
-        page.locator('[name="password"]').fill(password)
-        page.locator('button[type="submit"]').click()
-        expect(page).to_have_url(base+"/")
+        sign_in(page, base, actor.username, password)
         page.goto(base + "/profile/")
         expect(page.locator('h1')).to_have_text("Профиль")
         expect(page.locator('dl')).to_contain_text(actor.username)
@@ -256,12 +392,9 @@ def check_browser(actor, people, executable, engine="chromium"):
         page.locator('#id_groups_add').click()
         page.locator('[name="_save"]').click()
         expect(page.locator('#changelist')).to_contain_text("rc_browser_user")
-        reader_context = browser.new_context()
+        reader_context = browser.new_context(ignore_https_errors=server.ca_file is not None)
         reader = reader_context.new_page()
-        reader.goto(base + "/login/")
-        reader.locator('[name="username"]').fill("rc_browser_user")
-        reader.locator('[name="password"]').fill(user_password)
-        reader.locator('button[type="submit"]').click()
+        sign_in(reader, base, "rc_browser_user", user_password)
         reader.goto(base + "/workwear/")
         expect(reader.locator('h1')).to_have_text("Заявки на спецодежду")
         assert reader.locator('[data-action="create"]').count() == 0
@@ -280,11 +413,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--browser", action="store_true")
     parser.add_argument("--browser-executable")
+    parser.add_argument("--server", choices=["runserver", "nginx"], default="runserver")
+    parser.add_argument("--nginx-executable", help="Путь к изолированному Nginx для HTTPS-приёмки")
+    parser.add_argument("--http-load", action="store_true", help="Восемь одновременных HTTP-пользователей; требует --matrix")
     parser.add_argument("--engine", choices=["chromium", "firefox", "webkit"], default="chromium")
     parser.add_argument("--axe-script", help="Локальный axe.min.js для расширенной проверки доступности")
     parser.add_argument("--matrix", action="store_true", help="Расширенная приёмка матрицы и профилей нагрузки")
     parser.add_argument("--artifacts", default="test-results/rc", help="Скриншоты и измерения браузера")
     args = parser.parse_args()
+    if args.http_load and not args.matrix:
+        parser.error("--http-load требует --matrix")
+    server_options = {"stack": args.server, "nginx_executable": args.nginx_executable}
     os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
     import django
     django.setup()
@@ -307,10 +446,12 @@ def main():
         people, items = make_employees(snapshot), make_items()
         check_race(actor, people, items)
         if args.browser:
-            check_browser(actor, people, args.browser_executable, args.engine)
+            check_browser(actor, people, args.browser_executable, args.engine,
+                server_options | {"artifacts": Path(args.artifacts) / "servers/basic"})
         if args.matrix:
             from .browser_matrix import check_matrix
-            check_matrix(actor, args.browser_executable, Path(args.artifacts), args.engine, args.axe_script)
+            check_matrix(actor, args.browser_executable, Path(args.artifacts), args.engine, args.axe_script,
+                server_options=server_options | {"artifacts": Path(args.artifacts) / "servers/matrix"}, http_load=args.http_load)
     finally:
         connection.creation.destroy_test_db(original_name, verbosity=0)
 

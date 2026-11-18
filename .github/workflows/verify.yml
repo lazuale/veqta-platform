@@ -84,18 +84,21 @@ jobs:
             node --input-type=module --check < "$script"
           done
           git diff --check
-      - name: Install browsers for manual RC acceptance
+      - name: Install browsers and native servers for manual RC acceptance
         if: github.event_name == 'workflow_dispatch'
         run: |
           python -m playwright install --with-deps chromium firefox webkit
+          sudo apt-get install --yes --no-install-recommends nginx openssl
           npm install --prefix "$RUNNER_TEMP/veqta-axe" --no-save --ignore-scripts --no-audit --no-fund axe-core@4.11.0
       - name: RC acceptance in three engines
         if: github.event_name == 'workflow_dispatch'
         run: |
           failed=0
           for engine in chromium firefox webkit; do
+            extra=()
+            if [[ "$engine" == chromium ]]; then extra+=(--http-load); fi
             if ! DB_RUNTIME_PASSWORD="$DB_PASSWORD" DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
-                python -m tests.acceptance --browser --matrix --engine "$engine" \
+                python -m tests.acceptance --browser --matrix --server nginx --engine "$engine" "${extra[@]}" \
                 --axe-script "$RUNNER_TEMP/veqta-axe/node_modules/axe-core/axe.min.js" \
                 --artifacts "test-results/rc/$engine"; then
               failed=1

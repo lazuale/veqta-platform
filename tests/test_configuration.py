@@ -8,7 +8,7 @@ from django.test import SimpleTestCase
 
 class ConfigurationTests(SimpleTestCase):
     """Отдельный процесс исключает влияние уже загруженных настроек Django."""
-    def settings_process(self, **changes):
+    def settings_process(self, *, module="config.settings", assertions="", **changes):
         """Импортировать настройки с синтетическим ключом и явным набором переменных."""
         env = os.environ.copy()
         # Не наследуем HTTPS-настройку сервера: проверяем defaults для DEV и PROD.
@@ -18,7 +18,8 @@ class ConfigurationTests(SimpleTestCase):
                    DJANGO_SECRET_KEY=secrets.token_urlsafe(64), DJANGO_ALLOWED_HOSTS="localhost",
                    DJANGO_DEBUG="1", DJANGO_TRUST_PROXY="0", DJANGO_CSRF_TRUSTED_ORIGINS="")
         env.update(changes)
-        return subprocess.run([sys.executable, "-c", "import config.settings"], env=env,
+        code = f"from importlib import import_module; settings = import_module({module!r}); " + assertions
+        return subprocess.run([sys.executable, "-c", code], env=env,
                               capture_output=True, timeout=10).returncode
 
     def test_valid_dev_configuration(self):
@@ -51,3 +52,24 @@ class ConfigurationTests(SimpleTestCase):
 
     def test_boolean_typo_rejected(self):
         self.assertNotEqual(self.settings_process(DJANGO_DEBUG="yes"), 0)
+
+    def test_default_browser_server_uses_isolated_http_settings(self):
+        self.assertEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="0",
+            assertions="assert settings.DEBUG; assert not settings.SESSION_COOKIE_SECURE; "
+                       "assert settings.SECURE_PROXY_SSL_HEADER is None; "
+                       "assert settings.DATABASES['default']['NAME'] == 'test_veqta_dev'"), 0)
+
+    def test_https_browser_server_disables_debug_and_requires_secure_cookies(self):
+        self.assertEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="1",
+            assertions="assert not settings.DEBUG; assert settings.SESSION_COOKIE_SECURE; "
+                       "assert settings.CSRF_COOKIE_SECURE; assert settings.SECURE_SSL_REDIRECT; "
+                       "assert settings.SECURE_PROXY_SSL_HEADER == ('HTTP_X_FORWARDED_PROTO', 'https'); "
+                       "assert settings.DATABASES['default']['NAME'] == 'test_veqta_dev'"), 0)
+
+    def test_invalid_https_test_flag_is_rejected(self):
+        self.assertNotEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="yes"), 0)
+
+    def test_browser_server_cannot_use_production_environment(self):
+        self.assertNotEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="1",
+            VEQTA_ENV="prod", DB_NAME="veqta_prod", DB_USER="veqta_prod",
+            DJANGO_DEBUG="0", DJANGO_TRUST_PROXY="1"), 0)
