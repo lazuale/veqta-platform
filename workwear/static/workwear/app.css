@@ -1,6 +1,4 @@
-/* Предметные стили Workwear, загружаются после общих portal/*.css.
- * Владелец матрицы/реестра/подбора — Workwear; общих токенов и controls — Portal.
- * Правила расширения: docs/architecture.md. */
+
 :where(.vq-workwear) .vq-tool svg {
   width: 15px;
   height: 15px;
@@ -1261,7 +1259,7 @@
   background: transparent;
 }
 
-/* Временный disabled при Save сохраняет метрики; крупный шрифт — только readonly. */
+/* Отключённые поля не должны менять размеры при сохранении. */
 #veq-app .matrix .gridpick.on[aria-disabled=true] {
   font-size: var(--vq-text-lg);
 }
@@ -1547,7 +1545,7 @@
   line-height: 1.6;
 }
 
-/* Строки истории сохраняют отступ акцента поверх общих компактных правил. */
+
 #veq-app .vq-item-history .prior-row.within-period {
   padding-inline-start: var(--vq-accent-rail-inset);
 }
@@ -1690,7 +1688,7 @@
 }
 
 
-/* Плотность Workwear; ячейки матрицы не переносятся, прокрутка локальная. */
+/* Ячейки матрицы не переносим; широкую часть прокручиваем отдельно. */
 :where(.vq-workwear) .matrix {white-space:nowrap}
 :where(.vq-workwear) .vq-main {overflow:hidden}
 :where(.vq-workwear) .vq-drawer {width:min(560px,100%)}
@@ -1703,11 +1701,11 @@
 :where(.vq-workwear) #bulkText {font-family:var(--vq-font-mono)}
 :where(.vq-workwear) .vq-no-repeat {color:var(--vq-success)}
 
-/* Пагинация — только рабочее представление больших заявок, с общими controls DS. */
+
 .vq-workwear .vq-editor-pages {display:flex;flex-wrap:wrap;justify-content:space-between;gap:var(--vq-space-2);padding:var(--vq-space-2) var(--vq-space-4);border-top:1px solid var(--vq-border)}
 .vq-workwear .vq-editor-pages[hidden] {display:none}
 
-/* Отметка без поиска шрифта для каждой из тысяч ячеек; доступное имя — у кнопки. */
+/* Значок не требует поиска шрифта для каждой ячейки. */
 .vq-workwear .gridpick .vq-cell-check {
   display: inline-block;
   width: 6px;
@@ -1717,9 +1715,7 @@
   transform: translateY(-1px) rotate(45deg);
 }
 
-/* Короткое окно / настоящий browser zoom: данные сохраняют читаемую область.
- * Весь редактор прокручивается по вертикали, таблица — внутри своей области.
- * Широкие экраны обычной высоты сохраняют исходную гибкую компоновку. */
+/* При небольшой высоте экран прокручивается, а матрица остаётся в своей области. */
 @media (max-height:760px), (max-width:760px) {
   #veq-app > #main[data-screen] {overflow-y:auto}
   #veq-app > #main[data-screen].vq-short-content > .vq-card {max-height:none}
@@ -1729,7 +1725,7 @@
   #veq-app #registryRegion {flex:0 0 auto;height:clamp(180px,55dvh,360px);min-height:180px}
 }
 
-/* Закреплённые имя и итог оставляют место хотя бы одной позиции на телефоне. */
+/* На телефоне оставляем место хотя бы для одной позиции. */
 @media (max-width:760px) {
   #veq-app .matrix {--vq-matrix-name-width:clamp(132px,38vw,200px)}
   #veq-app .matrix thead th.sticky,
@@ -1742,13 +1738,13 @@
   #veq-app .matrix .sumcol {width:48px;min-width:48px;max-width:48px;padding-inline:4px}
 }
 
-/* Читаемый журнал использует те же диалог и кнопки, что остальные операции. */
+
 #veq-app .vq-event-list {list-style:none;margin:0;padding:0}
 #veq-app .vq-event-list li {padding-block:var(--vq-space-3);border-bottom:1px solid var(--vq-border);overflow-wrap:anywhere}
 #veq-app .vq-event-list li:last-child {border-bottom:0}
 #veq-app .vq-event-list p {margin-block:var(--vq-space-2) 0}
 
-/* Заголовок строки сохраняет оформление сотрудника и нативную семантику th. */
+
 #veq-app .matrix tbody th {
   font-weight: normal;
   color: var(--vq-text);

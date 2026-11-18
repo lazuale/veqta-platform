@@ -1,5 +1,4 @@
-/* Базовая типографика и состояния HTML; native Django Admin этот файл не подключает.
- * Порядок загрузки и адаптивные уровни: docs/architecture.md. */
+/* Стили портала не подключаются к Django Admin. */
 :where(.veq-platform),:where(.veq-platform) *,:where(.veq-platform) *::before,:where(.veq-platform) *::after {box-sizing:border-box}
 body.veq-platform {margin:0;min-height:100vh;color:var(--vq-text);background:var(--vq-bg);font:var(--vq-text-md)/var(--vq-leading) var(--vq-font);-webkit-font-smoothing:antialiased}
 :where(.veq-platform) button,:where(.veq-platform) input,:where(.veq-platform) select,:where(.veq-platform) textarea {font:inherit}

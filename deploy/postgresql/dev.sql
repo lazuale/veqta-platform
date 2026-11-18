@@ -12,12 +12,12 @@ GRANT CONNECT ON DATABASE veqta_dev TO veqta_dev;
 ALTER SCHEMA public OWNER TO veqta_dev_owner;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;
 GRANT USAGE ON SCHEMA public TO veqta_dev;
--- Применяются и к штатным миграциям Django. Приложение не состоит в роли владельца.
+-- Права по умолчанию действуют и на таблицы из миграций Django.
 ALTER DEFAULT PRIVILEGES FOR ROLE veqta_dev_owner IN SCHEMA public
     GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO veqta_dev;
 ALTER DEFAULT PRIVILEGES FOR ROLE veqta_dev_owner IN SCHEMA public
     GRANT USAGE, SELECT ON SEQUENCES TO veqta_dev;
--- EXECUTE для PUBLIC отзывается глобально: per-schema REVOKE его не отменяет.
+-- Отзываем EXECUTE у PUBLIC глобально: запрета на уровне схемы недостаточно.
 ALTER DEFAULT PRIVILEGES FOR ROLE veqta_dev_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
 ALTER DEFAULT PRIVILEGES FOR ROLE veqta_dev_owner IN SCHEMA public
     GRANT EXECUTE ON FUNCTIONS TO veqta_dev;

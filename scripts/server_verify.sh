@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Проверка развернутого DEV/PROD без изменений настроек, служб и данных.
+# Проверяем DEV/PROD, не изменяя настройки, службы и данные.
 set -Eeuo pipefail
 [[ $# == 1 && ( "$1" == dev || "$1" == prod ) ]] || { echo 'Использование: bash scripts/server_verify.sh dev|prod' >&2; exit 2; }
 [[ $EUID -eq 0 ]] || { echo 'Требуется root (sudo): проверяются закрытые настройки и сертификаты Nginx' >&2; exit 2; }

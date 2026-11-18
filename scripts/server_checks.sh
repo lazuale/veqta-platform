@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Проверки адресата и команды развёртывания. Файл только определяет функции.
+# Проверки развёртывания. Этот файл только определяет функции.
 
 veqta_target() {
   ENV_NAME=$1
@@ -78,7 +78,7 @@ veqta_render_nginx() {
 }
 
 
-# Исполняемый checkout, Git и virtualenv не должны принадлежать прикладному UID.
+# Приложение не должно владеть исполняемым кодом, Git и виртуальным окружением.
 veqta_check_trusted_code() {
   [[ ! -L "$APP" && -d "$APP/.git" && ! -L "$APP/.git" && ! -L "$APP/.venv" ]] || {
     echo 'STOP: недоверенный checkout или симлинк' >&2; return 1;
@@ -95,16 +95,14 @@ veqta_check_trusted_code() {
     part=${part%/*}
     [[ -n "$part" ]] || part=/
   done
-  # У симлинков (например .venv/lib64 -> lib) фиктивные права 0777.
-  # Владельца ссылки проверяем здесь, права и путь её цели — далее.
+  # Права символьной ссылки не показательны. Проверяем владельца и путь цели.
   bad=$(find "$APP" \( ! -user root -o \( ! -type l -a -perm /022 \) \) -print -quit) || {
     echo 'STOP: проверка прав исходников завершилась ошибкой' >&2; return 1;
   }
   [[ -z "$bad" ]] || {
     echo "STOP: недоверенные владелец или права: $bad" >&2; return 1;
   }
-  # Symlink принадлежит root, но его цель может находиться в writable /tmp,
-  # домашнем каталоге или другом недоверенном пути импорта Python.
+  # Даже ссылка root может вести в каталог, доступный для записи посторонним.
   local link target part
   while IFS= read -r -d '' link; do
     target=$(readlink -e -- "$link") || {
@@ -122,8 +120,7 @@ veqta_check_trusted_code() {
   done < <(find "$APP" -type l -print0)
 }
 
-# Явное административное исполнение из root-owned кода. Окружение очищено:
-# PYTHONPATH, PYTHONHOME, LD_PRELOAD и пользовательский site не наследуются.
+# Административную команду запускаем из доверенного кода без переменных, меняющих загрузку Python.
 veqta_admin_django() (
   [[ $EUID -eq 0 ]] || { echo 'STOP: административная команда требует root' >&2; exit 1; }
   cd "$APP"
@@ -187,7 +184,7 @@ veqta_django() {
     connect_timeout=5
     shift
   fi
-  # Аргументы management-команды передаются отдельно, без повторной интерпретации.
+  # Передаём аргументы без повторного разбора оболочкой.
   "${deadline[@]}" runuser -u "$ACTOR" -- bash -c '
     set -Eeuo pipefail
     set -a; source "$1"; set +a
@@ -199,8 +196,8 @@ veqta_django() {
 }
 
 veqta_check_database() {
-  # SELECT выполняется от роли приложения, проверяет и фактический адресат.
-  # timeout ограничивает также зависшее уже установленное соединение.
+  # Проверяем фактическую базу и роль от имени приложения.
+  # Тайм-аут ограничивает и зависшее соединение.
   local result=0
   veqta_django --bounded shell -c 'from django.conf import settings; from config.database import require_target; require_target(settings.VEQTA_ENV, settings.EXPECTED_DATABASE); print("PostgreSQL: целевая база и роль доступны")' || result=$?
   if [[ "$result" != 0 ]]; then
@@ -211,7 +208,7 @@ veqta_check_database() {
 
 veqta_check_nginx() {
   local output
-  # nginx -t читает ВСЕ активные include, в том числе conf.d и многострочные директивы.
+  # nginx -t проверяет все подключённые файлы конфигурации.
   if ! output=$(nginx -t 2>&1); then
     printf '%s\n' "$output" >&2
     return 1
@@ -245,7 +242,7 @@ veqta_wait_http() {
   local response code=000 result=0 attempt
   for attempt in {1..20}; do
     result=0
-    # --disable первым аргументом исключает ~/.curlrc; resolve не отключает proxy.
+    # --disable исключает ~/.curlrc; --resolve не отключает прокси.
     response=$(curl --disable --noproxy '*' -sS --connect-timeout 2 --max-time 3 \
       -D - -o /dev/null -w $'\n%{http_code}' "$@" "$url" 2>/dev/null) || result=$?
     code=${response##*$'\n'}

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Применяет уже проверенный checkout; не загружает код и не создаёт/удаляет БД.
+# Применяет проверенный код, не создавая и не удаляя базы.
 set -Eeuo pipefail
 umask 022
 
@@ -17,7 +17,7 @@ veqta_target "$ENV_NAME"
 
 exec 9>"/run/lock/veqta-${ENV_NAME}-deploy.lock"
 flock -n 9 || { echo 'Установка этого контура уже выполняется' >&2; exit 2; }
-# Оба контура используют общий Nginx: его применение также сериализуется.
+# Общий Nginx нельзя обновлять одновременно из DEV и PROD.
 exec 8>/run/lock/veqta-nginx-deploy.lock
 flock -n 8 || { echo 'Применение другого контура уже использует Nginx' >&2; exit 2; }
 
@@ -77,8 +77,8 @@ veqta_check_trusted_code
   echo 'STOP: SHA изменился перед запуском службы' >&2; exit 2;
 }
 
-# Конфигурации Nginx и systemd полностью определены зафиксированным коммитом.
-# Ошибка nginx -t не приводит к его перезагрузке; предыдущий сайт восстанавливается.
+# Конфигурации служб берём из проверенного коммита.
+# Если nginx -t не прошёл, восстанавливаем прежний сайт без перезагрузки.
 TMP_DIR=$(mktemp -d /run/veqta-nginx.XXXXXXXX)
 SITE_EXISTED=0
 LINK_CREATED=0
@@ -97,7 +97,7 @@ rollback_nginx() {
       rm -f "$NGINX_SITE"
     fi
     if [[ "$LINK_CREATED" == 1 ]]; then rm -f "$NGINX_LINK"; fi
-    # До reload работающий Nginx не менялся: возвращаем только файлы.
+    # До reload Nginx использует старые настройки; возвращаем только файлы.
     if [[ "$NGINX_RELOAD_REQUESTED" == 1 ]]; then
       if veqta_check_nginx && systemctl reload nginx; then
         echo 'Файлы сайта восстановлены, запрос reload Nginx отправлен; проверьте доступность' >&2
