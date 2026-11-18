@@ -66,6 +66,7 @@ export function installRegistry(ctx) {
             return;
         const counter = $('#registryCount');
         const footer = $('#registryFooter');
+        const periodError = $('#vq-period-error');
         for (const control of footer.querySelectorAll('button'))
             control.disabled = true;
         try {
@@ -73,6 +74,7 @@ export function installRegistry(ctx) {
             if (id !== settings.pageEpoch || settings.screen !== 'registry')
                 return;
             counter.textContent = `Найдено: ${result.count}`;
+            periodError.textContent = '';
             body.innerHTML = result.results.length ? `<table class="vq-registry-table"><colgroup><col style="width:100px"><col><col style="width:156px"><col style="width:156px"><col style="width:112px"><col style="width:150px"><col style="width:36px"></colgroup><thead><tr><th>Заявка</th><th>Организация</th><th>Создана</th><th>Завершена</th><th>Сотрудники</th><th>Состояние</th><th></th></tr></thead><tbody>${result.results.map(r => `<tr data-open="${r.id}" class="registry-row"><td class="registry-number"><button type="button" class="vq-name-action" data-open="${r.id}" aria-label="Открыть заявку ${r.id}">№ ${r.id}</button></td><td>${esc(r.snapshot_organization_name)}</td><td>${fmt(r.created_at)}<div class="secondary">${fmtTime(r.created_at)}</div></td><td>${r.completed_at ? `${fmt(r.completed_at)}<div class="secondary">${fmtTime(r.completed_at)}</div>` : '<span class="quiet">—</span>'}</td><td>${r.members_count}</td><td><span class="status-inline ${r.status === 'closed' ? 'finished' : ''}">${tone(r.status)}</span></td><td class="row-open">›</td></tr>`).join('')}</tbody></table>` : `<div class="vq-empty"><div class="symbol">⌕</div><h3>Совпадений нет</h3><p>Измените запрос или сбросьте фильтры, чтобы вернуться к полному списку.</p>${btn('Сбросить фильтры', 'reset-filters')}</div>`;
             if (result.count > result.limit) {
                 const begin = result.offset + 1, end = result.offset + result.results.length;
@@ -88,9 +90,7 @@ export function installRegistry(ctx) {
             counter.textContent = '';
             footer.textContent = '';
             body.innerHTML = `<div class="vq-banner error"><span class="ico">!</span><div class="copy"><b>Не удалось загрузить заявки</b><p>${esc(err.message)}</p></div></div>`;
-            const message = $('#vq-period-error');
-            if (message)
-                message.textContent = err.message;
+            periodError.textContent = err.message;
         }
     }
     Object.assign(ctx, {
