@@ -16,7 +16,7 @@ from workwear.models import WorkwearItem
 class Command(BaseCommand):
     """Штатная management-команда: проверка целевой БД и явный dry-run/apply.
 
-    Полный порядок и параметры: docs/import_1c.md; ошибки — CommandError."""
+    Полный порядок и параметры: docs/directories.md; ошибки — CommandError."""
     help = "Проверить или загрузить утверждённый CSV каталога СИЗ"
 
     def add_arguments(self, parser):

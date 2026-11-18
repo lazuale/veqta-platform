@@ -3,7 +3,7 @@
 По умолчанию dry-run; apply требует tar.gz, точной БД и даты YYYY-MM-DD,
 подтверждённого количества и previous id. Запуск имеет доступ к кадровым
 данным; stdout dry-run нельзя публиковать как обезличенный диагностический
-отчёт: review содержит GUID выпавших сотрудников. См. docs/import_1c.md."""
+отчёт: review содержит GUID выпавших сотрудников. См. docs/import-1c.md."""
 from dataclasses import asdict
 from datetime import date
 import json
@@ -21,7 +21,7 @@ from workwear.importers.acceptance import accept, review
 class Command(BaseCommand):
     """Штатная management-команда: проверка целевой БД и явный dry-run/apply.
 
-    Полный порядок и параметры: docs/import_1c.md; ошибки — CommandError."""
+    Полный порядок и параметры: docs/import-1c.md; ошибки — CommandError."""
     help = "Проверить или атомарно принять три справочника 1С"
 
     def add_arguments(self, parser):

@@ -2,7 +2,7 @@
 
 Изменения делегируются services; snapshot сериализуется из зафиксированных
 полей заявки. endpoint отображает ожидаемые исключения в безопасные ответы,
-не раскрывая SQL. Точные методы, права, тела и коды: docs/workwear.md."""
+не раскрывая SQL. Точные методы, права, тела и коды: docs/architecture.md."""
 import json
 from dataclasses import asdict
 from functools import wraps
@@ -145,7 +145,7 @@ def session(request):
 def request_collection(request):
     """GET view_request: краткий список; POST add_request: новый черновик.
 
-    Контракт, фильтры и пределы ответа: docs/workwear.md; запись выполняет сервис."""
+    Контракт, фильтры и пределы ответа: docs/architecture.md; запись выполняет сервис."""
     if request.method == "POST":
         obj = payload(request, "organization_id")
         if isinstance(obj, JsonResponse):
