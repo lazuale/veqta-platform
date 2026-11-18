@@ -106,6 +106,10 @@ export PLAYWRIGHT_BROWSERS_PATH=/var/cache/veqta/dev-playwright
 
 Каталог создаёт администратор с владельцем veqta-dev. Недостающие системные библиотеки устанавливаются отдельно по диагностике Playwright; browser dependencies не требуются работающему приложению.
 
+## Проверка изоляции Unix UID
+
+В одноразовом Linux CI runner выполните `sudo bash tests/linux_permissions.sh`. Тест создаёт синтетический root-owned checkout под `/opt`, проверяет реальные отказы непривилегированного Unix UID `nobody` при записи в исполняемый код/venv и чтении закрытого env, а также отказы проверки доверенных прав при ослаблении владения или group-write. Он не изменяет действующие DEV/PROD и не является проверкой промышленного сервера Ubuntu/systemd.
+
 ## Проверка исходников
 
 ```bash
@@ -144,7 +148,7 @@ Gunicorn берётся из requirements.lock; нужны Nginx и OpenSSL. Д�
 
 ## GitHub Actions
 
-`.github/workflows/verify.yml` запускается при push и pull_request. Используются Python из .python-version, PostgreSQL 18.7 в одноразовом контейнере, случайные ключи и две роли. Проверяются установка обоих lock-файлов с hashes, pip check, совпадение requirements.txt/lock, Cold Start под владельцем и прикладные запреты, системные проверки Django, makemigrations, вся регрессия, конкуренция, состав и синтаксис исходников.
+`.github/workflows/verify.yml` запускается при push и pull_request. Используются Python из .python-version, PostgreSQL 18.7 в одноразовом контейнере, случайные ключи и две роли. Дополнительно на push проверяются владельцы и права в синтетическом root-owned checkout через sudo. Проверяются установка обоих lock-файлов с hashes, pip check, совпадение requirements.txt/lock, Cold Start под владельцем и прикладные запреты, системные проверки Django, makemigrations, вся регрессия, конкуренция, состав и синтаксис исходников.
 
 Ручной workflow_dispatch дополнительно устанавливает Chromium/Firefox/WebKit, Nginx/OpenSSL и последовательно запускает полную приёмку каждого движка через HTTPS с axe. В Chromium добавлены восемь HTTP-пользователей и конфликт записи; в Firefox/WebKit повторяются те же пользовательские сценарии без повторной HTTP-нагрузки. JSON/PNG прикладываются к запуску на семь дней. Развёртывания и серверных секретов в workflow нет. Статус конкретного Actions-запуска нужно проверять в GitHub; локальная проверка команд не заменяет зелёный удалённый job.
 
