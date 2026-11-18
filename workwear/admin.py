@@ -1,4 +1,4 @@
-"""Штатное управление справочниками. Заявки изменяются только через сервисы."""
+"""Справочники редактируем в Django Admin; заявки изменяем только через сервисы."""
 from django.contrib import admin
 
 from .models import Organization, WorkwearItem

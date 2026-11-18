@@ -1,8 +1,4 @@
-"""Предметные модели Workwear и декларативные ограничения Django.
-
-Триггеры и составные FK заданы миграциями; они не заменены
-методом save(). Запись через ORM напрямую не подменяет сервисную авторизацию.
-Карта полей и полный каталог ограничений: docs/architecture.md."""
+"""Ограничения Django дополняются защитой на стороне PostgreSQL."""
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
@@ -11,7 +7,7 @@ from django.utils import timezone
 
 
 class Organization(models.Model):
-    """Постоянная организация; имя для интерфейса отделено от имени источника."""
+    """Название для интерфейса может отличаться от названия в источнике."""
     name = models.CharField("Наименование", max_length=255)
     external_id = models.CharField("Идентификатор 1С (orgExtId)", max_length=255,
                                    unique=True, null=True, blank=True)
@@ -41,7 +37,7 @@ class Organization(models.Model):
 
 
 class EmployeeImport(models.Model):
-    """Принятая тройка справочников: хеши, дата приёма и подтверждённые метаданные источника."""
+    """Дата источника не заменяется временем приёма."""
     employees_sha256 = models.CharField(max_length=64)
     positions_sha256 = models.CharField(max_length=64)
     units_sha256 = models.CharField(max_length=64)
@@ -84,10 +80,7 @@ class EmployeeImport(models.Model):
 
 
 class Employee(models.Model):
-    """Постоянный GUID сотрудника и актуальные атрибуты справочника.
-
-    Разрешена коррекция атрибутов источника, но id, GUID и организация неизменны.
-    Исторические поля RequestEmployee от обновления Employee не меняются."""
+    """GUID — постоянный ключ. Изменения справочника не переписывают данные заявок."""
     employee_guid = models.UUIDField(unique=True)
     personnel_number = models.CharField(max_length=64)
     full_name = models.CharField(max_length=255)
@@ -140,7 +133,7 @@ class Employee(models.Model):
 
 
 class WorkwearItem(models.Model):
-    """Управляемая позиция. Атрибуты каждого назначения фиксируются отдельно."""
+    """Назначения хранят данные позиции на момент выдачи."""
     code = models.CharField("Код", max_length=32, unique=True)
     name = models.CharField("Наименование", max_length=120)
     category = models.CharField("Категория", max_length=64)
@@ -173,16 +166,12 @@ class WorkwearItem(models.Model):
 
 
 class RequestStatus(models.TextChoices):
-    """Допустимые состояния жизненного цикла заявки: draft и closed."""
     DRAFT = "draft", "Черновик"
     CLOSED = "closed", "Завершена"
 
 
 class Request(models.Model):
-    """Заявка: организация, версия и серверные атрибуты завершения.
-
-    Нативное дополнительное permission reopen_request отделено от change_request.
-    SQL guard требует начальный draft и защищает переходы/завершённые записи."""
+    """Версия защищает от конкурентной записи; переходы состояния проверяет БД."""
     organization = models.ForeignKey(Organization, on_delete=models.PROTECT,
                                      related_name="requests", verbose_name="Организация")
     snapshot_organization_name = models.CharField(max_length=255, editable=False)
@@ -262,10 +251,7 @@ class Request(models.Model):
 
 
 class RequestEmployee(models.Model):
-    """Участник заявки с кадровыми snapshot-полями на момент включения.
-
-    Составные FK связывают организацию заявки, текущего Employee и участника.
-    Поздняя коррекция кадрового номера не переписывает исторический снимок."""
+    """Кадровые данные сохраняются при включении и не меняются задним числом."""
     request = models.ForeignKey(
         Request,
         on_delete=models.CASCADE,
@@ -314,7 +300,7 @@ class RequestEmployee(models.Model):
 
 
 class RequestAssignment(models.Model):
-    """Уникальная позиция каталога для участника. Закрытые назначения защищены SQL guard."""
+    """Данные назначения не меняются вслед за каталогом."""
     request_employee = models.ForeignKey(
         RequestEmployee,
         on_delete=models.CASCADE,
@@ -325,7 +311,7 @@ class RequestAssignment(models.Model):
         on_delete=models.PROTECT,
         related_name="assignments",
     )
-    # PostgreSQL заполняет снимок при INSERT, включая bulk_create и прямой SQL.
+    # PostgreSQL создаёт снимок и при пакетной, и при прямой записи.
     snapshot_item_code = models.CharField(max_length=32, editable=False)
     snapshot_item_name = models.CharField(max_length=120, editable=False)
     snapshot_item_category = models.CharField(max_length=64, editable=False)
@@ -351,12 +337,8 @@ class RequestAssignment(models.Model):
 
 
 class WorkwearEvent(models.Model):
-    # События сохраняются после удаления черновика.
-    # Поэтому обязательного FK на Request нет.
-    """Неизменяемое событие с независимым request_number и snapshot имени автора.
-
-    Отсутствие FK на Request сохраняет события после удаления черновика.
-    PostgreSQL запрещает UPDATE/DELETE/TRUNCATE; обход ORM не снимает защиту."""
+    # История остаётся после удаления черновика, поэтому связь без FK.
+    """История остаётся после удаления черновика. PostgreSQL запрещает менять и удалять события."""
     request_number = models.BigIntegerField()
     event_type = models.CharField(max_length=64)
     occurred_at = models.DateTimeField(

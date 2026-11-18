@@ -1,9 +1,4 @@
-"""Предметные JSON-представления для интерфейса Workwear.
-
-Чтение не ограничивается организацией пользователя; поиск сотрудников и новое
-включение ограничены организацией заявки. Изменения передаются services/sync.
-Транспортные лимиты, права и ошибки описаны в docs/architecture.md. Здесь нет копии
-алгоритма повторов: оба маршрута обращаются к одному серверному расчёту."""
+"""API интерфейса использует общие сервисы для записи и предупреждений. Читать заявки могут аналитики всех организаций."""
 from .eligibility import latest_import
 from .repeats import scan_repeats
 from .employee_lookup import employee_data, resolve_many
@@ -44,9 +39,7 @@ def _query_num(request, key, *, default, maximum):
 
 @endpoint("GET")
 def metadata(request):
-    """GET view_request: организации, доступный каталог, 8 флагов native permissions и дата импорта.
-
-    Каталог выдаётся только с view_workwearitem; период не выводится из accepted_at."""
+    """Дата приёма выгрузки не подтверждает период исходных данных."""
     require_permission(request, "view_request")
     latest = latest_import()
     items = []
@@ -65,7 +58,7 @@ def metadata(request):
         "import": {
             "accepted_at": latest.accepted_at.isoformat() if latest else None,
             "employee_count": latest.employee_count if latest else None,
-            # accepted_at не доказывает период источника; отсутствующие даты не выдумываются.
+            # Дата приёма не подтверждает период выгрузки.
             "source_export_date": latest.source_export_date.isoformat() if latest else None,
         },
         "limits": {"request_members": MAX_REQUEST_MEMBERS, "items_per_member": MAX_ITEMS_PER_MEMBER,
@@ -83,9 +76,7 @@ def metadata(request):
 
 @endpoint("GET")
 def registry(request):
-    """GET view_request: фильтры/поиск по историческим snapshot-полям, пагинация до 100.
-
-    Все организации доступны читателю; ограничения изменения проверяются отдельно."""
+    """Поиск по сохранённым данным заявок не зависит от текущего справочника."""
     require_permission(request, "view_request")
     org = _query_text(request, "organization_id", limit=19)
     status = _query_text(request, "status", limit=12)
@@ -160,9 +151,7 @@ def registry(request):
 
 @endpoint("GET")
 def employees(request):
-    """GET view_employee: поиск актуального справочника по явной организации и строке ≥2 символов.
-
-    Ранжирование выполняется SQL до LIMIT/OFFSET; страница до 40 записей."""
+    """Ранжируем результаты в SQL до применения LIMIT/OFFSET."""
     require_permission(request, "view_employee")
     org = _query_text(request, "organization_id", limit=19)
     org = query_organization_id(org)
@@ -176,9 +165,7 @@ def employees(request):
         return respond({"results": [], "min_query_length": 2,
                         "count": 0, "offset": offset, "limit": limit, "has_more": False,
                         "import_available": latest is not None})
-    # Ранжирование выполняется SQL до LIMIT/OFFSET. Формат ФИО:
-    # фамилия, имя, отчество. Совпадение внутри отчества не должно
-    # вытеснять точную фамилию с первой страницы результатов.
+    # Точное совпадение фамилии должно быть выше совпадения в отчестве.
     q = " ".join(q.split())
     surname = Func(F("full_name"), Value(" "), Value(1),
                    function="split_part", output_field=CharField())
@@ -215,10 +202,7 @@ def employees(request):
 
 @endpoint("POST")
 def resolve(request):
-    """POST view_employee: разрешить до 100 строк без изменения БД.
-
-    Для request_id дополнительно требуются view_request и совпадение организации.
-    present_employee_ids учитывает локально добавленных участников, не разрешая запись."""
+    """Поиск ничего не записывает. Новое включение повторно проверяет сервис."""
     require_permission(request, "view_employee")
     obj = payload(request, "organization_id", "lines",
                   optional_fields=("request_id", "present_employee_ids"))
@@ -253,7 +237,6 @@ def resolve(request):
 
 @endpoint("POST")
 def bulk_add(request, request_id):
-    """POST change_request: атомарно включить до1000 employee_ids с expected_version."""
     obj = payload(request, "employee_ids", "expected_version")
     ids = obj["employee_ids"]
     if not isinstance(ids, list) or not 1 <= len(ids) <= MAX_REQUEST_MEMBERS:
@@ -271,9 +254,7 @@ def bulk_add(request, request_id):
 
 @endpoint("GET")
 def events(request, request_id):
-    """GET view_request + view_workwearevent: журнал по номеру заявки, до 100 событий.
-
-    События удалённого черновика остаются доступны при наличии журнала."""
+    """События удалённого черновика остаются доступны в истории."""
     require_permission(request, "view_request")
     require_permission(request, "view_workwearevent")
     offset = _query_num(request, "offset", default=0, maximum=1_000_000)
@@ -297,15 +278,10 @@ def events(request, request_id):
 
 @endpoint("GET")
 def employee_history(request, request_id, employee_id):
-    """GET view_request + view_workwearevent: до 100 прежних закрытых snapshot-заявок.
-
-    Сотрудник может быть ещё локальным участником; сервер проверяет организацию
-    текущей заявки и сотрудника до выдачи истории."""
+    """Историю сотрудника можно посмотреть до сохранения его в заявке."""
     require_permission(request, "view_request")
     require_permission(request, "view_workwearevent")
-    # Новый участник может пока существовать только в локальном черновике.
-    # История нужна до сохранения, поэтому наличие RequestEmployee
-    # не обязательно; организация проверяется сервером независимо.
+    # История доступна до сохранения сотрудника; организацию проверяет сервер.
     req = Request.objects.get(pk=request_id)
     Employee.objects.get(pk=employee_id, organization_id=req.organization_id)
     rows = list(
@@ -334,9 +310,6 @@ def employee_history(request, request_id, employee_id):
 
 @endpoint("POST")
 def sync_request(request, request_id):
-    """POST change_request: строгий members/expected_version/finish → sync.save_draft.
-
-    HTTP-слой не строит delta и не завершает заявку самостоятельно."""
     from .sync import save_draft
     obj = payload(request, "members", "expected_version", "finish", max_bytes=MAX_SYNC_JSON_BYTES)
     result = save_draft(
@@ -350,9 +323,7 @@ def sync_request(request, request_id):
 
 @endpoint("POST")
 def repeat_scan(request, request_id):
-    """POST view_request + view_employee: до 1200 уникальных пар, включая локальные назначения.
-
-    Проверяет ID, организацию и позиции; вычисления выполняет общий сервис без записи."""
+    """Для локальных назначений используем тот же расчёт повторов."""
     require_permission(request, "view_request")
     require_permission(request, "view_employee")
     obj = payload(request, "pairs")
@@ -372,8 +343,7 @@ def repeat_scan(request, request_id):
     people = dict(Employee.objects.filter(pk__in={x[0] for x in wanted}).values_list("pk", "organization_id"))
     if len(people) != len({x[0] for x in wanted}) or any(org != req.organization_id for org in people.values()):
         raise ValidationError("Недопустимая организация сотрудника")
-    # Проверяем ID до расчёта; календарные правила принадлежат общему
-    # сервису одиночных и пакетных предупреждений.
+    
     reference_date = timezone.localdate()
     warnings = scan_repeats(
         pairs=wanted,
@@ -395,7 +365,6 @@ def repeat_scan(request, request_id):
 
 @endpoint("POST")
 def reopen_with_reason(request, request_id):
-    """POST reopen_request: версия и reason до 500 символов; журнал формирует сервис."""
     from .api import as_request
     obj = payload(request, "expected_version", "reason")
     req = services.reopen_request(request_id=request_id, actor=request.user,

@@ -1,11 +1,4 @@
-"""Транзакционные операции Workwear.
-
-Публичные операции принимают actor и ожидаемую версию заявки. Проверка прав,
-блокировка, предметное изменение и аудит выполняются в одной atomic-транзакции.
-Сначала берётся advisory lock справочника, затем SELECT FOR UPDATE заявки.
-PostgreSQL независимо защищает связи, жизненный цикл и неизменяемую историю.
-Исключения ValidationError, PermissionDenied, WorkwearConflict и ошибки БД
-не превращаются здесь в HTTP: транспортное отображение находится в api.py."""
+"""Изменения заявки и историю записываем одной транзакцией. Блокировку импорта берём до блокировки строки заявки."""
 from dataclasses import dataclass
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -30,12 +23,10 @@ from .models import (
 
 
 class WorkwearConflict(Exception):
-    """Конфликт версии. HTTP-слой преобразует его в 409; запись отменяется."""
 
 
 @dataclass(frozen=True)
 class CompletionResult:
-    """Неизменяемый результат завершения: request_id, version и количества участников/назначений."""
     request_id: int
     version: int
     excluded_members: int
@@ -70,8 +61,7 @@ def _audit(request_id, actor, event_type, **details):
 
 
 def _lock_request(request_id, expected_version, *, status):
-    # Общий lock с публикацией 1С берётся до блокировки строки заявки.
-    # Тот же порядок действует для sync.save_draft через этот сервис.
+    # Блокировку импорта берём до блокировки заявки, как при сохранении всего черновика.
     lock_for_membership()
     req = Request.objects.select_for_update().get(pk=request_id)
     if type(expected_version) is not int or expected_version < 1:
@@ -93,10 +83,7 @@ def _bump_draft_version(req, step=1):
 
 @transaction.atomic
 def create_request(*, organization_id, actor):
-    """Создать черновик допустимой организации и событие created в одной транзакции.
-
-    actor должен иметь add_request; возвращается Request с исходной версией 1.
-    Недопустимая организация вызывает ValidationError; чужие права — PermissionDenied."""
+    """Создание заявки и событие должны сохраняться вместе."""
     _authorize(actor, "add_request")
     if type(organization_id) is not int or not 0 < organization_id <= 9223372036854775807:
         raise ValidationError("Недопустимая организация")
@@ -114,12 +101,7 @@ def create_request(*, organization_id, actor):
 
 @transaction.atomic
 def add_employees(*, request_id, employee_ids, actor, expected_version):
-    """Добавить 1–1000 уникальных employee_ids и их исторические snapshots.
-
-    actor: change_request; request_id/expected_version проверяются под блокировкой.
-    Сотрудники должны входить в последнюю выгрузку нужной организации.
-    Возвращает (список RequestEmployee, новая version); версия растёт на число включений.
-    Любая ошибка отменяет участников, версию и соответствующие события целиком."""
+    """Добавляем сотрудников только из последней выгрузки нужной организации. Ошибка откатывает весь список."""
     _authorize(actor, "change_request")
     if (not isinstance(employee_ids, list) or not 1 <= len(employee_ids) <= MAX_REQUEST_MEMBERS
             or any(type(value) is not int or value <= 0 for value in employee_ids)
@@ -151,9 +133,6 @@ def add_employees(*, request_id, employee_ids, actor, expected_version):
 
 
 def add_employee(*, request_id, employee_id, actor, expected_version):
-    """Добавить одного сотрудника через add_employees с теми же правами и блокировкой.
-
-    Возвращает RequestEmployee; snapshot берётся сервером, а не из HTTP-полей."""
     members, _ = add_employees(request_id=request_id, employee_ids=[employee_id],
         actor=actor, expected_version=expected_version)
     return members[0]
@@ -161,14 +140,10 @@ def add_employee(*, request_id, employee_id, actor, expected_version):
 
 @transaction.atomic
 def remove_employee(*, request_id, member_id, actor, expected_version):
-    """Исключить member_id из черновика, удалить назначения CASCADE и записать аудит.
-
-    Требуются change_request и ожидаемая версия; возвращает новое число version.
-    Ошибка проверки/БД отменяет все изменения атомарно."""
     _authorize(actor, "change_request")
     req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
     member = RequestEmployee.objects.get(pk=member_id, request_id=req.pk)
-    # Назначения удаляются Django CASCADE в той же транзакции.
+    
     employee_id = member.employee_id
     member.delete()
     _bump_draft_version(req)
@@ -178,10 +153,7 @@ def remove_employee(*, request_id, member_id, actor, expected_version):
 
 @transaction.atomic
 def add_assignment(*, request_id, member_id, item_id, actor, expected_version):
-    """Назначить активный item_id участнику черновика с проверкой версии и аудитом.
-
-    actor: change_request; возвращает RequestAssignment. Повтор той же позиции
-    и неверное состояние отвергаются; предупреждение о прошлой выдаче не запрет."""
+    """Предупреждение о прошлой выдаче не запрещает новое назначение."""
     _authorize(actor, "change_request")
     req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
     member = RequestEmployee.objects.get(pk=member_id, request_id=req.pk)
@@ -204,9 +176,6 @@ def add_assignment(*, request_id, member_id, item_id, actor, expected_version):
 
 @transaction.atomic
 def remove_assignment(*, request_id, assignment_id, actor, expected_version):
-    """Удалить assignment_id черновика, повысить версию и сохранить событие атомарно.
-
-    Требуются change_request, совпадение заявки и expected_version."""
     _authorize(actor, "change_request")
     req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
     assignment = RequestAssignment.objects.get(
@@ -224,16 +193,11 @@ def remove_assignment(*, request_id, assignment_id, actor, expected_version):
 
 @transaction.atomic
 def complete_request(*, request_id, actor, expected_version):
-    """Завершить черновик и вернуть CompletionResult в одной транзакции.
-
-    Требуются change_request и expected_version. Сначала исключаются участники
-    без назначений; если не осталось ни одного, все удаления откатываются.
-    Время и автор задаются сервером; SQL guard проверяет полноту независимо."""
+    """Сначала исключаем сотрудников без назначений. Если заявка опустела, закрытие отменяется."""
     _authorize(actor, "change_request")
     req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
 
-    # Пустые участники исключаются до смены статуса: SQL guard отвергает
-    # неполное завершение и запрещает удаление участников закрытой заявки.
+    # Убираем пустые строки до закрытия: после него удалять участников нельзя.
     empty_ids = list(
         RequestEmployee.objects.filter(request_id=req.pk)
         .annotate(assigned_count=Count("assignments"))
@@ -272,12 +236,8 @@ def complete_request(*, request_id, actor, expected_version):
 
 @transaction.atomic
 def reopen_request(*, request_id, actor, expected_version, reason=""):
-    # Возврат требует native workwear.reopen_request либо superuser.
-    # HTTP-представление отдельно проверяет активную сессию.
-    """Вернуть закрытую заявку в draft с обнулением полей завершения и аудитом.
-
-    actor: native reopen_request (либо superuser); reason — строка до 500 символов.
-    Проверка версии под блокировкой предотвращает конкурентный возврат."""
+    
+    """Возврат требует отдельного права и актуальной версии заявки."""
     _authorize(actor, "reopen_request")
     if not isinstance(reason, str) or len(reason) > 500:
         raise ValidationError("Причина возврата должна содержать не более 500 символов")
@@ -298,12 +258,9 @@ def reopen_request(*, request_id, actor, expected_version, reason=""):
 
 @transaction.atomic
 def delete_draft(*, request_id, actor, expected_version):
-    """Удалить только черновик с delete_request и expected_version.
-
-    Аудит draft_deleted записывается до удаления и сохраняется без FK к заявке.
-    Удаление состава/назначений и событие входят в одну atomic-транзакцию."""
+    """История удаления сохраняется после самого черновика."""
     _authorize(actor, "delete_request")
     req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
-    # Событие сохраняется после удаления: у WorkwearEvent нет FK на Request.
+    
     _audit(req.pk, actor, "draft_deleted", version=req.version)
     req.delete()

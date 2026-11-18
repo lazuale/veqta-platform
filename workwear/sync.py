@@ -1,9 +1,4 @@
-"""Атомарная синхронизация полного локального черновика Workwear.
-
-Вход members задаёт желаемые employee_id/item_ids, а не готовые snapshot-поля.
-Версия проверяется под блокировкой; сервер строит delta, сохраняет изменения
-и аудит в одной транзакции. При finish завершение входит в ту же транзакцию.
-Ошибка любого шага отменяет весь набор изменений."""
+"""Сохраняем весь состав одной транзакцией. Снимки создаёт сервер; ошибка откатывает все изменения."""
 from dataclasses import asdict, dataclass
 
 from django.core.exceptions import ValidationError
@@ -20,7 +15,6 @@ from .models import (
 
 @dataclass(frozen=True)
 class SyncResult:
-    """Результат полной синхронизации: id, подтверждённая version, changed и completion."""
     request_id: int
     version: int
     changed: bool
@@ -49,13 +43,7 @@ def _validate(members):
 
 @transaction.atomic
 def save_draft(*, request_id, actor, expected_version, members, finish=False):
-    """Сохранить желаемые members и, при finish=True, завершить ту же заявку.
-
-    actor: change_request; expected_version проверяется под блокировкой заявки.
-    members — до 1000 уникальных сотрудников, у каждого до 30 уникальных позиций.
-    Новые включения проверяются по последней выгрузке, снимки формирует сервер.
-    Возвращает SyncResult. ValidationError/PermissionDenied/WorkwearConflict/ошибка
-    БД откатывают delta, исключения пустых участников, завершение и аудит целиком."""
+    """Сверяем версию под блокировкой. Завершение заявки и история входят в ту же транзакцию."""
     services._authorize(actor, "change_request")
     if type(finish) is not bool:
         raise ValidationError("Некорректный признак завершения")
@@ -72,16 +60,13 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
     latest = latest_import()
     for employee_id in desired:
         employee = employees[employee_id]
-        # Исторический состав остаётся доступен; новое включение проходит
-        # ту же проверку, что services.add_employee.
+        # Нового участника проверяем по последней выгрузке, даже если он есть в истории.
         if employee_id not in existing_by_employee:
             require_current(employee, organization_id=req.organization_id, latest=latest)
         elif employee.organization_id != req.organization_id:
-            # Смена организации одного GUID требует отдельного решения
-            # о составных FK; текущий контракт её не разрешает.
+            # Смену организации существующего GUID запрещают составные внешние ключи.
             raise ValidationError("Организация сотрудника не совпадает с заявкой")
-    # Полная детерминированная delta вычисляется до записи. Снимки
-    # исключаемых участников сохраняются в событии до удаления их строк.
+    # До записи рассчитываем изменения и сохраняем данные исключаемых участников для истории.
     old_items = {m.employee_id: {a.item_id for a in m.assignments.all()} for m in existing}
     added_item_ids = {
         employee_id: requested - old_items.get(employee_id, set())
@@ -122,8 +107,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
     if removed_members:
         RequestEmployee.objects.filter(pk__in=[m.pk for m in removed_members]).delete()
         changed = True
-    # Снимки и ID новых участников создаются одним bulk-этапом. Все INSERT
-    # продолжают исполнять обычные PostgreSQL triggers в той же транзакции.
+    # Новых участников создаём пакетом; триггеры PostgreSQL срабатывают и для него.
     new_members = []
     for employee_id in desired:
         if employee_id not in existing_by_employee:
@@ -135,8 +119,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         RequestEmployee.objects.bulk_create(new_members, batch_size=WRITE_BATCH_SIZE)
         existing_by_employee.update((m.employee_id, m) for m in new_members)
         changed = True
-    # Удаление позиций и создание назначений пакетные по всей заявке, а не
-    # отдельный SQL на каждого сотрудника. Любая ошибка отменяет весь delta.
+    # Назначения меняем пакетно; ошибка откатывает весь состав.
     assignment_ids_to_remove = [a.pk for m in existing if m.employee_id in desired
         for a in m.assignments.all() if a.item_id not in desired[m.employee_id]]
     if assignment_ids_to_remove:
@@ -164,7 +147,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         )
     completion = None
     if finish:
-        # Нормализация, исключение пустых, завершение и аудит — одна транзакция.
+        
         completion = asdict(services.complete_request(
             request_id=req.pk, actor=actor, expected_version=req.version,
         ))

@@ -1,8 +1,4 @@
-"""Единый расчёт предупреждений по завершённым заявкам.
-
-Сравниваются календарные даты в активном часовом поясе Django, точная позиция
-и последнее нефутурное завершение; срок берётся из снимка прошлого назначения.
-Предупреждение информирует пользователя и не запрещает повторную выдачу."""
+"""Предупреждаем о повторной выдаче, но не запрещаем её."""
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
@@ -15,7 +11,6 @@ from .models import RequestAssignment, RequestStatus, WorkwearItem
 
 @dataclass(frozen=True)
 class RepeatWarning:
-    """Результат контроля: предыдущая заявка/дата, прошедшие, нормативные и оставшиеся дни."""
     previous_request_id: int
     previous_completion_date: date
     elapsed_days: int
@@ -24,12 +19,7 @@ class RepeatWarning:
 
 
 def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
-    """Вернуть словарь (employee_pk, item_pk) → RepeatWarning для не более 1200 пар.
-
-    Входные ID — положительные int; as_of_date по умолчанию timezone.localdate().
-    Учитывается последнее нефутурное завершение; просроченное последнее назначение
-    не заменяется более ранним. Неизвестный item или неверный вход — ValidationError.
-    Записи в БД нет; API проверяет права и организацию до вызова."""
+    """Исключаем будущие даты, чтобы они не скрыли последнюю завершённую выдачу."""
     reference = as_of_date if as_of_date is not None else timezone.localdate()
     if not isinstance(reference, date):
         raise ValidationError("Неверная дата проверки повторов")
@@ -60,16 +50,14 @@ def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
     )
     if exclude_request_id is not None:
         history = history.exclude(request_employee__request_id=exclude_request_id)
-    # Учитывается весь календарный день, в том числе время позже текущего.
-    # Будущие местные даты исключаются до DISTINCT ON, иначе будущая запись
-    # может скрыть последнюю подходящую завершённую заявку.
+    # Исключаем будущие даты до DISTINCT ON, иначе они могут скрыть последнюю выдачу.
     if reference < date.max:
         next_day = timezone.make_aware(
             datetime.combine(reference + timedelta(days=1), time.min),
             timezone.get_current_timezone(),
         )
         history = history.filter(request_employee__request__completed_at__lt=next_day)
-    # PostgreSQL выбирает последнее назначение каждой пары. Читаем нужные поля вместо создания связанных объектов для всей истории.
+    # DISTINCT ON оставляет последнюю выдачу для каждой пары.
     history = history.order_by(
         "request_employee__employee_id", "item_id",
         "-request_employee__request__completed_at", "-pk",
