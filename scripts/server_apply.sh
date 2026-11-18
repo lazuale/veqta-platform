@@ -30,7 +30,6 @@ veqta_check_trusted_code || { echo 'STOP: права исполняемого к
 [[ ! -e "$NGINX_LINK" && ! -L "$NGINX_LINK" || "$(readlink "$NGINX_LINK")" == "$NGINX_SITE" ]] || { echo 'STOP: другой сайт с тем же именем' >&2; exit 2; }
 veqta_clean_checkout
 veqta_load_config
-veqta_check_database
 veqta_check_nginx
 require test -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 require test -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
@@ -54,6 +53,7 @@ veqta_clean_checkout
 [[ "$(git -c safe.directory="$APP" -C "$APP" rev-parse HEAD)" == "$REVISION" ]] || {
   echo 'STOP: SHA изменился во время подготовки' >&2; exit 2;
 }
+veqta_check_database
 veqta_django check
 veqta_django makemigrations --check --dry-run
 veqta_django migrate --plan

@@ -180,26 +180,29 @@ veqta_clean_checkout() {
 }
 
 veqta_django() {
+  local -a deadline=()
+  local connect_timeout=''
+  if [[ "${1:-}" == --bounded ]]; then
+    deadline=(timeout --signal=TERM --kill-after=2s 15s)
+    connect_timeout=5
+    shift
+  fi
   # Аргументы management-команды передаются отдельно, без повторной интерпретации.
-  runuser -u "$ACTOR" -- bash -c '
+  "${deadline[@]}" runuser -u "$ACTOR" -- bash -c '
     set -Eeuo pipefail
     set -a; source "$1"; set +a
-    cd "$2"; shift 2
+    cd "$2"
+    if [[ -n "$3" ]]; then export PGCONNECT_TIMEOUT="$3"; fi
+    shift 3
     exec .venv/bin/python manage.py "$@"
-  ' bash "$CONFIG" "$APP" "$@"
+  ' bash "$CONFIG" "$APP" "$connect_timeout" "$@"
 }
 
 veqta_check_database() {
   # SELECT выполняется от роли приложения, проверяет и фактический адресат.
   # timeout ограничивает также зависшее уже установленное соединение.
   local result=0
-  timeout --signal=TERM --kill-after=2s 15s runuser -u "$ACTOR" -- bash -c '
-    set -Eeuo pipefail
-    set -a; source "$1"; set +a
-    cd "$2"
-    export PGCONNECT_TIMEOUT=5
-    exec .venv/bin/python manage.py shell -c '\''from django.conf import settings; from config.database import require_target; require_target(settings.VEQTA_ENV, settings.EXPECTED_DATABASE); print("PostgreSQL: целевая база и роль доступны")'\''
-  ' bash "$CONFIG" "$APP" || result=$?
+  veqta_django --bounded shell -c 'from django.conf import settings; from config.database import require_target; require_target(settings.VEQTA_ENV, settings.EXPECTED_DATABASE); print("PostgreSQL: целевая база и роль доступны")' || result=$?
   if [[ "$result" != 0 ]]; then
     echo "FAIL: PostgreSQL ${ENV_NAME}: целевая база/роль недоступна или проверка прервана (код ${result})" >&2
     return "$result"
