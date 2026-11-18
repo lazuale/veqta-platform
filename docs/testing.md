@@ -108,7 +108,7 @@ export PLAYWRIGHT_BROWSERS_PATH=/var/cache/veqta/dev-playwright
 
 ## Проверка изоляции Unix UID
 
-В одноразовом Linux CI runner выполните `sudo bash tests/linux_permissions.sh`. Тест создаёт синтетический root-owned checkout под `/opt`, проверяет реальные отказы непривилегированного Unix UID `nobody` при записи в исполняемый код/venv и чтении закрытого env, а также отказы проверки доверенных прав при ослаблении владения или group-write. Он не изменяет действующие DEV/PROD и не является проверкой промышленного сервера Ubuntu/systemd.
+В одноразовом Linux CI runner выполните `sudo bash tests/linux_permissions.sh`. Тест создаёт синтетический root-owned checkout под `/opt`, проверяет реальные отказы непривилегированного Unix UID `nobody` при записи в исполняемый код/venv и чтении закрытого env, а также отказы проверки доверенных прав при ослаблении владения, group-write и подмене цели симлинка. Проверяются очистка `PYTHONPATH` при привилегированном запуске и отказ непривилегированному UID в чтении `/proc/<pid>/environ` root-процесса. Он не изменяет действующие DEV/PROD и не является проверкой промышленного сервера Ubuntu/systemd.
 
 ## Проверка исходников
 

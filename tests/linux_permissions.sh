@@ -42,4 +42,61 @@ if veqta_check_trusted_code >/dev/null 2>&1; then
 fi
 chown root "$APP/.venv/lib/dependency.py"
 veqta_check_trusted_code
-echo 'Linux permissions (isolated runner): PASS'
+
+# Root-owned symlink не может направлять доверенный импорт в world-writable /tmp.
+ln -s /tmp "$APP/workwear/unsafe_python_modules"
+if veqta_check_trusted_code >/dev/null 2>&1; then
+  echo 'FAIL: недоверенная цель симлинка не обнаружена' >&2; exit 1
+fi
+rm "$APP/workwear/unsafe_python_modules"
+
+# Административный Python не наследует внедрённый PYTHONPATH.
+mkdir -p "$APP/.venv/bin"
+cat > "$APP/.venv/bin/python" <<'VEQTA_FAKE_PYTHON'
+#!/bin/sh
+test -z "${PYTHONPATH-}" || exit 71
+test -z "${PYTHONHOME-}" || exit 72
+test -z "${LD_PRELOAD-}" || exit 73
+test "$DB_USER" = veqta_dev_owner || exit 74
+test "$DB_PASSWORD" = synthetic-owner || exit 75
+test "$VEQTA_ENV" = dev || exit 76
+VEQTA_FAKE_PYTHON
+chmod 0755 "$APP/.venv/bin/python"
+cat > "$APP/owner.env" <<'VEQTA_FAKE_ENV'
+VEQTA_ENV=dev
+DB_NAME=veqta_dev
+DB_USER=veqta_dev_owner
+DB_PASSWORD=synthetic-owner
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_SSLMODE=prefer
+VEQTA_FAKE_ENV
+chmod 0600 "$APP/owner.env"
+ENV_NAME=dev
+MIGRATION_CONFIG="$APP/owner.env"
+VEQTA_ENV=dev
+DB_NAME=veqta_dev
+DB_USER=veqta_dev
+DB_PASSWORD=synthetic-runtime
+DB_HOST=127.0.0.1
+DB_PORT=5432
+DB_SSLMODE=prefer
+DJANGO_SECRET_KEY=synthetic-secret
+DJANGO_DEBUG=0
+DJANGO_ALLOWED_HOSTS=localhost
+DJANGO_TRUST_PROXY=1
+DJANGO_CSRF_TRUSTED_ORIGINS=https://localhost
+DJANGO_SECURE_COOKIES=1
+DJANGO_STATIC_ROOT=/tmp/synthetic-static
+PYTHONPATH=/tmp/untrusted-python veqta_migrate
+
+# /proc PID/environ владельца не должен читаться непривилегированным UID.
+(DB_PASSWORD=synthetic-owner /bin/sleep 8) &
+owner_pid=$!
+if runuser -u nobody -- cat "/proc/$owner_pid/environ" >/dev/null 2>&1; then
+  kill "$owner_pid" || true
+  echo 'FAIL: чужой Unix UID прочёл root process environ' >&2; exit 1
+fi
+kill "$owner_pid" 2>/dev/null || true
+wait "$owner_pid" 2>/dev/null || true
+echo 'Linux permissions and isolated privileged Python (CI runner): PASS'

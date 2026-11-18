@@ -93,6 +93,23 @@ veqta_check_trusted_code() {
   [[ -z "$bad" ]] || {
     echo "STOP: недоверенные владелец или права: $bad" >&2; return 1;
   }
+  # Symlink принадлежит root, но его цель может находиться в writable /tmp,
+  # домашнем каталоге или другом недоверенном пути импорта Python.
+  local link target part
+  while IFS= read -r -d '' link; do
+    target=$(readlink -e -- "$link") || {
+      echo "STOP: недоступная цель симлинка: $link" >&2; return 1;
+    }
+    part=$target
+    while [[ "$part" != / ]]; do
+      bad=$(find "$part" -maxdepth 0 \( ! -user root -o -perm /022 \) -print -quit) || return 1
+      [[ -z "$bad" ]] || {
+        echo "STOP: недоверенная цель симлинка: $link -> $bad" >&2; return 1;
+      }
+      part=${part%/*}
+      [[ -n "$part" ]] || part=/
+    done
+  done < <(find "$APP" -xdev -type l -print0)
 }
 
 # Явное административное исполнение из root-owned кода. Окружение очищено:
