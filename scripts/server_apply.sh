@@ -25,7 +25,7 @@ require() { "$@" || { echo "STOP: проверка не пройдена: $1" >&
 require test -d "$APP/.git"
 require test -f "$CONFIG"
 require id "$ACTOR"
-[[ "$(stat -c %U "$APP")" == "$ACTOR" ]] || { echo 'STOP: неверный владелец исходников' >&2; exit 2; }
+veqta_check_trusted_code || { echo 'STOP: права исполняемого кода не приняты' >&2; exit 2; }
 [[ ! -L "$NGINX_SITE" ]] || { echo 'STOP: неожиданный симлинк вместо сайта Nginx' >&2; exit 2; }
 [[ ! -e "$NGINX_LINK" && ! -L "$NGINX_LINK" || "$(readlink "$NGINX_LINK")" == "$NGINX_SITE" ]] || { echo 'STOP: другой сайт с тем же именем' >&2; exit 2; }
 veqta_clean_checkout
@@ -37,17 +37,24 @@ require test -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 require openssl x509 -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" -checkend 0 -noout
 require openssl x509 -in "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem" -checkhost "$DOMAIN" -noout
 
-printf 'Контур: %s | домен: %s | коммит: ' "$ENV_NAME" "$DOMAIN"
-runuser -u "$ACTOR" -- git -C "$APP" rev-parse HEAD
+REVISION=$(git -c safe.directory="$APP" -C "$APP" rev-parse HEAD)
+[[ "$REVISION" =~ ^[0-9a-f]{40}$ ]] || { echo 'STOP: неверный SHA checkout' >&2; exit 2; }
+printf 'Контур: %s | домен: %s | коммит: %s\n' "$ENV_NAME" "$DOMAIN" "$REVISION"
 
 if [[ ! -x "$APP/.venv/bin/python" ]]; then
-  runuser -u "$ACTOR" -- python3.14 -m venv "$APP/.venv"
+  python3.14 -m venv "$APP/.venv"
 fi
-runuser -u "$ACTOR" -- "$APP/.venv/bin/python" -m pip install \
+"$APP/.venv/bin/python" -m pip install \
   --no-cache-dir --disable-pip-version-check --require-hashes -r "$APP/requirements.lock"
-runuser -u "$ACTOR" -- "$APP/.venv/bin/python" -m pip check
+"$APP/.venv/bin/python" -m pip check
+veqta_check_trusted_code
+veqta_clean_checkout
+[[ "$(git -c safe.directory="$APP" -C "$APP" rev-parse HEAD)" == "$REVISION" ]] || {
+  echo 'STOP: SHA изменился во время подготовки' >&2; exit 2;
+}
 veqta_django check
 veqta_django makemigrations --check --dry-run
+veqta_django migrate --plan
 if [[ "${2:-}" == --migrate ]]; then
   echo 'Применяем миграции целевого контура (флаг --migrate задан явно)'
   veqta_migrate
@@ -55,10 +62,18 @@ fi
 veqta_django migrate --check
 
 install -d -o root -g root -m 0755 /var/www/veqta
-install -d -o "$ACTOR" -g www-data -m 2750 "$STATIC_ROOT"
-veqta_django collectstatic --noinput
-chgrp -R www-data "$STATIC_ROOT"
+install -d -o root -g www-data -m 2750 "$STATIC_ROOT"
+[[ -z "$(find "$STATIC_ROOT" -type l -print -quit)" ]] || {
+  echo 'STOP: симлинк в каталоге статики' >&2; exit 2;
+}
+veqta_admin_django collectstatic --noinput
+chown -R root:www-data "$STATIC_ROOT"
+chmod -R go-w "$STATIC_ROOT"
 chmod -R g+rX "$STATIC_ROOT"
+veqta_check_trusted_code
+[[ "$(git -c safe.directory="$APP" -C "$APP" rev-parse HEAD)" == "$REVISION" ]] || {
+  echo 'STOP: SHA изменился перед запуском службы' >&2; exit 2;
+}
 
 # Конфигурации Nginx и systemd полностью определены зафиксированным коммитом.
 # Ошибка nginx -t не приводит к его перезагрузке; предыдущий сайт восстанавливается.

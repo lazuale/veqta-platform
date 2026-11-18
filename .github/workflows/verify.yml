@@ -78,7 +78,8 @@ jobs:
         run: |
           python scripts/check_source.py
           python -m compileall -q config portal workwear tests scripts
-          bash -n scripts/server_checks.sh scripts/server_apply.sh scripts/server_verify.sh
+          bash -n scripts/server_checks.sh scripts/server_apply.sh scripts/server_verify.sh tests/linux_permissions.sh
+          sudo bash tests/linux_permissions.sh
           sh -n deploy/letsencrypt/renew-nginx.sh
           for script in portal/static/portal/*.js workwear/static/workwear/*.js workwear/static/workwear/js/*.js; do
             node --input-type=module --check < "$script"

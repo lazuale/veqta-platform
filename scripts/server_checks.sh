@@ -77,29 +77,75 @@ veqta_render_nginx() {
     -e "s|__STATIC_ROOT__|${STATIC_ROOT}|g" "$APP/deploy/nginx/veqta${suffix}.conf"
 }
 
-veqta_migrate() (
-  # Секрет владельца загружается только в дочерний процесс явного --migrate.
+
+# Исполняемый checkout, Git и virtualenv не должны принадлежать прикладному UID.
+veqta_check_trusted_code() {
+  [[ ! -L "$APP" && -d "$APP/.git" && ! -L "$APP/.git" && ! -L "$APP/.venv" ]] || {
+    echo 'STOP: недоверенный checkout или симлинк' >&2; return 1;
+  }
+  [[ "$(stat -c %U:%G "$APP")" == root:root && "$(stat -c %U "$APP/..")" == root ]] || {
+    echo 'STOP: код и родительский каталог должны принадлежать root' >&2; return 1;
+  }
+  local bad
+  bad=$(find "$APP" -xdev \( ! -user root -o -perm /022 \) -print -quit) || {
+    echo 'STOP: проверка прав исходников завершилась ошибкой' >&2; return 1;
+  }
+  [[ -z "$bad" ]] || {
+    echo "STOP: недоверенные владелец или права: $bad" >&2; return 1;
+  }
+}
+
+# Явное административное исполнение из root-owned кода. Окружение очищено:
+# PYTHONPATH, PYTHONHOME, LD_PRELOAD и пользовательский site не наследуются.
+veqta_admin_django() (
+  [[ $EUID -eq 0 ]] || { echo 'STOP: административная команда требует root' >&2; exit 1; }
+  cd "$APP"
+  exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/root USER=root LOGNAME=root \
+    PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 \
+    VEQTA_ENV="$VEQTA_ENV" VEQTA_HOSTNAME="${VEQTA_HOSTNAME:-}" \
+    DJANGO_SECRET_KEY="$DJANGO_SECRET_KEY" DJANGO_DEBUG="$DJANGO_DEBUG" \
+    DJANGO_ALLOWED_HOSTS="$DJANGO_ALLOWED_HOSTS" DJANGO_TRUST_PROXY="$DJANGO_TRUST_PROXY" \
+    DJANGO_CSRF_TRUSTED_ORIGINS="${DJANGO_CSRF_TRUSTED_ORIGINS:-}" \
+    DJANGO_SECURE_COOKIES="$DJANGO_SECURE_COOKIES" DJANGO_STATIC_ROOT="$DJANGO_STATIC_ROOT" \
+    DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
+    DB_HOST="$DB_HOST" DB_PORT="$DB_PORT" DB_SSLMODE="${DB_SSLMODE:-prefer}" \
+    "$APP/.venv/bin/python" -B manage.py "$@"
+)
+
+veqta_load_migration_config() {
   [[ "$(stat -c %U:%G:%a "$MIGRATION_CONFIG")" == root:root:600 ]] || {
-    echo 'STOP: настройки миграций должны иметь права root:root 0600' >&2; exit 1;
+    echo 'STOP: настройки миграций должны иметь права root:root 0600' >&2; return 1;
   }
   local app_host=$DB_HOST app_port=$DB_PORT app_ssl=${DB_SSLMODE:-prefer}
   unset VEQTA_ENV DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT DB_SSLMODE
-  set -a; source "$MIGRATION_CONFIG"; set +a
-  [[ "${VEQTA_ENV:-}" == "$ENV_NAME" && "${DB_NAME:-}" == "veqta_${ENV_NAME}" && "${DB_USER:-}" == "veqta_${ENV_NAME}_owner" &&
-      "${DB_HOST:-}" == "$app_host" && "${DB_PORT:-}" == "$app_port" && "${DB_SSLMODE:-prefer}" == "$app_ssl" && -n "${DB_PASSWORD:-}" ]] || {
-    echo 'STOP: настройки миграций не совпадают с целевой PostgreSQL' >&2; exit 1;
+  set -a
+  # shellcheck source=/dev/null
+  source "$MIGRATION_CONFIG"
+  set +a
+  [[ "${VEQTA_ENV:-}" == "$ENV_NAME" && "${DB_NAME:-}" == "veqta_${ENV_NAME}" &&
+      "${DB_USER:-}" == "veqta_${ENV_NAME}_owner" && "${DB_HOST:-}" == "$app_host" &&
+      "${DB_PORT:-}" == "$app_port" && "${DB_SSLMODE:-prefer}" == "$app_ssl" &&
+      -n "${DB_PASSWORD:-}" ]] || {
+    echo 'STOP: настройки миграций не совпадают с целевой PostgreSQL' >&2; return 1;
   }
-  runuser -u "$ACTOR" -- bash -c '
-    set -Eeuo pipefail
-    cd "$1"
-    .venv/bin/python manage.py shell -c '\''from django.conf import settings; from config.database import require_target; require_target(settings.VEQTA_ENV, settings.EXPECTED_DATABASE, owner=True)'\''
-    exec .venv/bin/python manage.py migrate --noinput
-  ' bash "$APP"
+}
+
+veqta_owner_django() (
+  [[ $EUID -eq 0 ]] || { echo 'STOP: миграции требуют root' >&2; exit 1; }
+  umask 077
+  veqta_check_trusted_code || exit 1
+  veqta_load_migration_config || exit 1
+  veqta_admin_django shell -c 'from django.conf import settings; from config.database import require_target; require_target(settings.VEQTA_ENV, settings.EXPECTED_DATABASE, owner=True)' || exit 1
+  veqta_admin_django "$@"
 )
+
+veqta_migrate() {
+  veqta_owner_django migrate --noinput
+}
 
 veqta_clean_checkout() {
   local status
-  if ! status=$(runuser -u "$ACTOR" -- git -C "$APP" status --porcelain); then
+  if ! status=$(git -c safe.directory="$APP" -C "$APP" status --porcelain); then
     echo 'STOP: Git не смог проверить рабочее дерево' >&2
     return 1
   fi

@@ -319,7 +319,7 @@ class InstallationConfigurationTests(unittest.TestCase):
         self.script("stat", "#!/bin/sh\necho root:root:600\n")
         self.script("runuser", '#!/bin/sh\necho unexpected > "$VEQTA_TEST_DIR/migration-ran"\n')
         result = self.shell('veqta_target prod; DB_HOST=127.0.0.1; DB_PORT=5432; DB_SSLMODE=prefer; '
-                            'MIGRATION_CONFIG="$VEQTA_TEST_DIR/project/.env.prod-migrate"; veqta_migrate')
+                            'MIGRATION_CONFIG="$VEQTA_TEST_DIR/project/.env.prod-migrate"; veqta_load_migration_config')
         self.assertNotEqual(result.returncode, 0)
         self.assertFalse((self.path / "migration-ran").exists())
 
@@ -363,14 +363,16 @@ class ServerApplyTests(unittest.TestCase):
         self.script("id", "#!/bin/sh\nexit 0\n")
         self.script("stat", '''#!/bin/sh
 case "$2" in
-  %U) echo veqta-prod;;
+  %U:%G) echo root:root;;
+  %U) echo root;;
   *) case "$3" in *-migrate.env) echo root:root:600;; *) echo root:veqta-prod:640;; esac;;
 esac
 ''')
+        self.script("find", "#!/bin/sh\nexit 0\n")
         self.script("git", '''#!/bin/sh
 case "$*" in *rev-parse*) echo 1111111111111111111111111111111111111111;; esac
 ''')
-        for name in ("openssl", "chgrp", "chmod"):
+        for name in ("openssl", "chgrp", "chmod", "chown"):
             self.script(name, "#!/bin/sh\nexit 0\n")
         self.script("install", f"#!{sys.executable}\n" + '''
 import subprocess, sys
@@ -414,6 +416,13 @@ raise SystemExit(1 if os.environ.get('VEQTA_TEST_MODE')=='broken-new-site' and c
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.site.read_text(), previous)
         self.assertEqual(self.link.resolve(), self.site)
+        self.assertFalse((self.path / "systemctl.log").exists())
+
+    def test_insecure_checkout_is_rejected_before_mutation(self):
+        self.script("find", "#!/bin/sh\necho /opt/veqta-prod/config/settings.py\n")
+        result = self.apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("недоверенные владелец или права", result.stderr)
         self.assertFalse((self.path / "systemctl.log").exists())
 
     def test_nginx_failure_removes_only_new_site_and_link(self):

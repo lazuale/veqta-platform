@@ -11,6 +11,8 @@ veqta_target "$1"
 systemctl is-active --quiet "$SERVICE"
 test -d "$APP/.git"
 test -f "$CONFIG"
+veqta_check_trusted_code
+veqta_clean_checkout
 veqta_load_config
 veqta_check_nginx
 
