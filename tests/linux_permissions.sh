@@ -62,6 +62,9 @@ test "$DB_PASSWORD" = synthetic-owner || exit 75
 test "$VEQTA_ENV" = dev || exit 76
 VEQTA_FAKE_PYTHON
 chmod 0755 "$APP/.venv/bin/python"
+# CI runner может наследовать ACL/permission в newly created .venv/bin.
+chown -R root:root "$APP"
+chmod -R go-w "$APP"
 cat > "$APP/owner.env" <<'VEQTA_FAKE_ENV'
 VEQTA_ENV=dev
 DB_NAME=veqta_dev
