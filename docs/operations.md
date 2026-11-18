@@ -30,8 +30,8 @@ Apply сериализует применение обоих контуров о
 |---|---|
 | Clone или права checkout | Каталог может быть неполным. Проверьте владельца, `git status` и полный SHA. Если `.git` неисправен, сохраните каталог для анализа и выполните перенос в новый каталог; не продолжайте apply вслепую. |
 | Пользователь/роль/БД уже существует | Cold start намеренно останавливается. Установите, какой этап завершён; не удаляйте роль, базу или env ради повторного запуска. |
-| Env создан, роль ещё не создана | Сохраните этот env и его пароль; продолжите SQL только после проверки отсутствия соответствующих роли и БД. |
-| Роль создана, CREATE DATABASE не прошёл | Не повторяйте CREATE ROLE и не генерируйте новый пароль. После проверки владельца/свойств роли создайте только отсутствующую БД и выполните REVOKE/GRANT из соответствующего SQL. |
+| Env создан, роли ещё не созданы | Сохраните оба env и пароли; продолжите SQL только после проверки отсутствия соответствующих роли и БД. |
+| Одна или обе роли созданы, CREATE DATABASE не прошёл | Не повторяйте CREATE ROLE и не генерируйте новые пароли. Владельцем новой базы должен быть veqta_ENV_owner. После проверки владельца/свойств роли создайте только отсутствующую БД и выполните REVOKE/GRANT из соответствующего SQL. |
 | БД есть, initialize прервался | Посмотрите таблицы и `django_migrations`. При таблицах initialize повторно не запускается; после проверки контура используйте штатный `migrate --plan`, затем `migrate --noinput`. Не используйте `--fake`. |
 | pip/collectstatic | Операции идут на месте; venv/статика могут быть частично изменены. Верните согласованный SHA и повторите apply после устранения причины. При несовместимых зависимостях сначала остановите только службу выбранного приложения в согласованное окно. |
 | Ошибка nginx -t или конфликт целевого hostname | До reload живой Nginx не менялся; EXIT trap возвращает только файл/ссылку сайта. Найдите прежний hostname во всей конфигурации, включая conf.d; не отключайте соседние сайты автоматически. |
@@ -41,11 +41,11 @@ Apply сериализует применение обоих контуров о
 Проверка административного состояния локального PostgreSQL не меняет данные:
 
 ```bash
-sudo -u postgres psql -X -h /var/run/postgresql -p 5432 -U postgres -d postgres -c "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname IN ('veqta_dev','veqta_prod');"
+sudo -u postgres psql -X -h /var/run/postgresql -p 5432 -U postgres -d postgres -c "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname IN ('veqta_dev','veqta_dev_owner','veqta_prod','veqta_prod_owner');"
 sudo -u postgres psql -X -h /var/run/postgresql -p 5432 -U postgres -d postgres -c "SELECT datname, pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname IN ('veqta_dev','veqta_prod');"
 ```
 
-При частичном DEV/PROD cold start выполняйте только оставшиеся строки `deploy/postgresql/<контур>.sql` после сравнения с этим состоянием. Для схемы команды выполняются под пользователем нужного приложения с загруженным `/etc/veqta/<контур>.env`; способ показан в deployment.md. Пример проверки схемы:
+При частичном DEV/PROD cold start выполняйте только оставшиеся строки `deploy/postgresql/<контур>.sql` после сравнения с этим состоянием. План миграций можно читать под прикладной ролью с `/etc/veqta/<контур>.env`, как в примере ниже. Применение схемы требует закрытого env владельца `/etc/veqta/<контур>-migrate.env`; штатный порядок — `server_apply.sh --migrate` или первоначальный bootstrap из deployment.md. Не добавляйте пароль владельца в env службы. Пример чтения плана:
 
 ```bash
 sudo -u veqta-prod bash -c '
@@ -84,17 +84,22 @@ runuser -u "$ACTOR" -- git -C "$APP" rev-parse HEAD > "$backup.sha"
 /usr/lib/postgresql/18/bin/pg_restore --list "$backup" >/dev/null
 ```
 
-Не включайте shell xtrace: пароль передаётся в окружении процесса, а не в argv или SQL-текст. `pg_dump` получает согласованный снимок БД, но для точки возврата релиза согласуйте окно и зафиксируйте также неизменность кода/env. Env с ключом Django и пароль роли сохраните отдельно от публичного кода с теми же ограничениями доступа.
+Не включайте shell xtrace: пароль передаётся в окружении процесса, а не в argv или SQL-текст. `pg_dump` получает согласованный снимок БД, но для точки возврата релиза согласуйте окно и зафиксируйте также неизменность кода/env. Оба env с ключом Django и разными паролями ролей сохраните отдельно от публичного кода с теми же ограничениями доступа.
 
 Продолжите **в том же root-сеансе**. Пробное восстановление создаёт новую БД, рабочая БД не меняется:
 
 ```bash
 restore_db="veqta_${VEQTA_TARGET}_restore_check_$stamp"
-runuser -u postgres -- /usr/lib/postgresql/18/bin/createdb -h /var/run/postgresql -p 5432 -U postgres --owner="$DB_USER" --template=template0 "$restore_db"
-runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres -v restore_db="$restore_db" <<'VEQTA_REVOKE'
+runuser -u postgres -- /usr/lib/postgresql/18/bin/createdb -h /var/run/postgresql -p 5432 -U postgres --owner="${DB_NAME}_owner" --template=template0 "$restore_db"
+runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres -v restore_db="$restore_db" -v app_role="$DB_USER" <<'VEQTA_REVOKE'
 REVOKE ALL ON DATABASE :"restore_db" FROM PUBLIC;
+GRANT CONNECT ON DATABASE :"restore_db" TO :"app_role";
 VEQTA_REVOKE
-PGPASSWORD="$DB_PASSWORD" /usr/lib/postgresql/18/bin/pg_restore --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$restore_db" --no-owner --no-privileges --exit-on-error "$backup"
+(
+    set -a; source "$MIGRATION_CONFIG"; set +a
+    [[ "$DB_USER" == "veqta_${VEQTA_TARGET}_owner" ]]
+    PGPASSWORD="$DB_PASSWORD" /usr/lib/postgresql/18/bin/pg_restore --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$restore_db" --no-owner --exit-on-error "$backup"
+)
 PGPASSWORD="$DB_PASSWORD" psql -X -v ON_ERROR_STOP=1 --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$restore_db" <<'VEQTA_RESTORE_CHECK'
 SELECT count(*) AS migrations FROM django_migrations;
 SELECT count(*) AS employees FROM workwear_employee;
@@ -103,6 +108,8 @@ SELECT count(*) AS events FROM workwear_workwearevent;
 SELECT count(*) AS workwear_triggers FROM pg_trigger WHERE tgname LIKE 'ww_%';
 VEQTA_RESTORE_CHECK
 ```
+
+Восстановление выполняет владелец, а проверочные SELECT выполняет прикладная роль. `--no-owner` назначает объекты подключённому владельцу; ACL и default privileges сохраняются. Не используйте `--no-privileges`: приложение потеряет свои grants. Роли должны существовать под теми же каноническими именами; пароль владельца не передаётся работающей службе. Не используйте `--disable-triggers`.
 
 Сверьте счётчики с ожидаемым снимком; один существующий `.dump` недостаточен. Схема Cold Start содержит 13 `ww_`-триггеров; при изменении схемы сравнивайте с соответствующим коммитом, а не фиксированной цифрой. Guard приложения не разрешает запускать обычный VEQTA на произвольно названной БД: для полной прикладной проверки восстановите копию в отдельный изолированный кластер с каноническим именем базы. Не ослабляйте `require_target` ради проверки.
 

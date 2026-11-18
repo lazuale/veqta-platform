@@ -1,6 +1,7 @@
 """Настройки DEV и PROD. Секреты поступают только из окружения.
 
-Имя контура определяет точные имена базы и роли. Файлы .env читает оболочка.
+Имя контура определяет базу, прикладную роль и отдельного владельца схемы.
+Файлы .env читает оболочка; служба получает только прикладные реквизиты.
 Ошибка настройки останавливает запуск до подключения к базе.
 """
 import os
@@ -31,7 +32,9 @@ if VEQTA_ENV not in {'dev', 'prod'}:
     raise ImproperlyConfigured('VEQTA_ENV должна быть dev или prod')
 IS_PRODUCTION = VEQTA_ENV == 'prod'
 EXPECTED_DATABASE = f'veqta_{VEQTA_ENV}'
-if required('DB_NAME') != EXPECTED_DATABASE or required('DB_USER') != EXPECTED_DATABASE:
+if required('DB_NAME') != EXPECTED_DATABASE or required('DB_USER') not in {
+    EXPECTED_DATABASE, f'{EXPECTED_DATABASE}_owner',
+}:
     raise ImproperlyConfigured('Контур, имя БД и роль подключения не совпадают')
 SECRET_KEY = required('DJANGO_SECRET_KEY')
 if len(SECRET_KEY) < 50 or SECRET_KEY.startswith('django-insecure-'):

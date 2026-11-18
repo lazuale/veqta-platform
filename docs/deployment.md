@@ -8,11 +8,13 @@
 
 | Параметр | DEV | PROD |
 |---|---|---|
-| Домен | `test.platform.veqta.ru` | `platform.veqta.ru` |
+| Домен | своё DNS-имя DEV в `VEQTA_HOSTNAME` | отдельное DNS-имя PROD |
 | Checkout | `/opt/veqta-dev` | `/opt/veqta-prod` |
 | Linux-пользователь / группа | `veqta-dev` | `veqta-prod` |
 | Env, root:группа 0640 | `/etc/veqta/dev.env` | `/etc/veqta/prod.env` |
-| База / роль PostgreSQL | `veqta_dev` | `veqta_prod` |
+| База / прикладная роль PostgreSQL | `veqta_dev` | `veqta_prod` |
+| Владелец схемы / миграции | `veqta_dev_owner` | `veqta_prod_owner` |
+| Env миграций, root:root 0600 | `/etc/veqta/dev-migrate.env` | `/etc/veqta/prod-migrate.env` |
 | Gunicorn | `127.0.0.1:8767` | `127.0.0.1:8765` |
 | Статика | `/var/www/veqta/dev-static` | `/var/www/veqta/prod-static` |
 | Systemd | `veqta-dev.service` | `veqta-prod.service` |
@@ -44,7 +46,8 @@ git -C "$VEQTA_SOURCE" rev-parse HEAD
 ```bash
 VEQTA_TARGET=dev
 # Для второго независимого запуска: VEQTA_TARGET=prod
-sudo bash -s -- "$VEQTA_SOURCE" "$VEQTA_REVISION" "$VEQTA_TARGET" <<'VEQTA_BOOTSTRAP'
+read -r -p 'DNS-имя HTTPS выбранного контура: ' VEQTA_HOSTNAME
+sudo bash -s -- "$VEQTA_SOURCE" "$VEQTA_REVISION" "$VEQTA_TARGET" "$VEQTA_HOSTNAME" <<'VEQTA_BOOTSTRAP'
 set -Eeuo pipefail
 umask 027
 source_repo=$1
@@ -56,16 +59,19 @@ actor="veqta-${target}"
 app="/opt/veqta-${target}"
 config="/etc/veqta/${target}.env"
 database="veqta_${target}"
-domain=platform.veqta.ru
-[[ "$target" != dev ]] || domain=test.platform.veqta.ru
-[[ ! -e "$app" && ! -L "$app" && ! -e "$config" && ! -L "$config" ]]
+domain=$4
+migration_config="/etc/veqta/${target}-migrate.env"
+source "$source_repo/scripts/server_checks.sh"
+DOMAIN=$domain
+veqta_check_hostname
+[[ ! -e "$app" && ! -L "$app" && ! -e "$config" && ! -L "$config" && ! -e "$migration_config" && ! -L "$migration_config" ]]
 if id "$actor" >/dev/null 2>&1; then
     echo 'STOP: пользователь уже существует; проверьте частичную установку по operations.md' >&2
     exit 1
 fi
 existing=$(runuser -u postgres -- psql -X -At -h /var/run/postgresql -p 5432 -U postgres -d postgres -v target="$database" <<'VEQTA_SQL'
 SELECT EXISTS(SELECT FROM pg_database WHERE datname = :'target')
-    OR EXISTS(SELECT FROM pg_roles WHERE rolname = :'target');
+    OR EXISTS(SELECT FROM pg_roles WHERE rolname IN (:'target', :'target' || '_owner'));
 VEQTA_SQL
 )
 [[ "$existing" == f ]] || { echo 'STOP: роль или база уже существует'; exit 1; }
@@ -78,26 +84,33 @@ runuser -u "$actor" -- git -C "$app" checkout --detach "$revision"
 [[ "$(runuser -u "$actor" -- git -C "$app" rev-parse HEAD)" == "$revision" ]]
 status=$(runuser -u "$actor" -- git -C "$app" status --porcelain)
 [[ -z "$status" ]]
-runuser -u "$actor" -- python3.14 "$app/scripts/create_config.py" --environment "$target" --hostname "$domain"
+python3.14 "$app/scripts/create_config.py" --environment "$target" --hostname "$domain"
 install -d -o root -g root -m 0755 /etc/veqta
 install -o root -g "$actor" -m 0640 "$app/.env.$target" "$config"
-rm -- "$app/.env.$target"
-set -a; source "$config"; set +a
-# Пароль передаётся через окружение, SQL читает root-перенаправление stdin.
-runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres < "$app/deploy/postgresql/$target.sql"
+install -o root -g root -m 0600 "$app/.env.$target-migrate" "$migration_config"
+rm -- "$app/.env.$target" "$app/.env.$target-migrate"
+(
+    set -a; source "$migration_config"; set +a
+    export DB_OWNER_PASSWORD=$DB_PASSWORD
+    set -a; source "$config"; set +a
+    # Оба пароля передаются psql только в окружении этого дочернего процесса.
+    runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres < "$app/deploy/postgresql/$target.sql"
+)
 runuser -u "$actor" -- python3.14 -m venv "$app/.venv"
 runuser -u "$actor" -- "$app/.venv/bin/python" -m pip install --no-cache-dir --require-hashes -r "$app/requirements.lock"
 runuser -u "$actor" -- "$app/.venv/bin/python" -m pip check
-runuser -u "$actor" -- bash -c '
-    set -Eeuo pipefail
-    set -a; source "$1"; set +a
-    cd "$2"
-    exec .venv/bin/python manage.py veqta_initialize --environment "$3" --database-name "veqta_$3"
-' bash "$config" "$app" "$target"
+(
+    set -a; source "$migration_config"; set +a
+    runuser -u "$actor" -- bash -c '
+        set -Eeuo pipefail
+        cd "$1"
+        exec .venv/bin/python manage.py veqta_initialize --environment "$2" --database-name "veqta_$2"
+    ' bash "$app" "$target"
+)
 VEQTA_BOOTSTRAP
 ```
 
-Генератор создаёт независимые ключи и пароли, не печатает их, не перезаписывает существующий файл. В обоих серверных контурах DEBUG=0, proxy=1 и Secure cookies=1. При частичном отказе не генерируйте новый пароль поверх уже созданной роли: порядок продолжения — в operations.md. SQL рассчитан на один запуск, initialize — только на пустую БД. Наличие shell `nologin` не мешает явному `runuser ... bash -c` для административных команд.
+Генератор требует `--hostname` для обоих контуров и создаёт пару файлов: приложение и миграции. Он не печатает секреты и отказывается от повторного запуска, если любой файл уже существует. Пароль владельца не попадает в env службы. Владелец создаёт схему штатным `migrate`, а default privileges дают приложению DML, последовательности и вызов функций без владения объектами, DDL, TRUNCATE или членства в роли владельца. Только владелец DEV имеет CREATEDB для одноразовых тестовых баз. В обоих серверных контурах DEBUG=0, proxy=1 и Secure cookies=1. При частичном отказе не генерируйте новый пароль поверх уже созданной роли: порядок продолжения — в operations.md. SQL рассчитан на один запуск, initialize — только на пустую БД. Наличие shell `nologin` не мешает явному `runuser ... bash -c` для административных команд.
 
 ## 4. Первичный HTTPS без остановки общего Nginx
 
@@ -117,10 +130,12 @@ email=$2
 [[ -n "$email" ]]
 source "/opt/veqta-$target/scripts/server_checks.sh"
 veqta_target "$target"
+veqta_load_config
 [[ ! -e "/etc/letsencrypt/live/$DOMAIN" && ! -L "/etc/letsencrypt/live/$DOMAIN" ]]
 [[ ! -e "$NGINX_SITE" && ! -L "$NGINX_SITE" && ! -e "$NGINX_LINK" && ! -L "$NGINX_LINK" ]]
 install -d -o root -g root -m 0755 /var/www/veqta/acme
-install -o root -g root -m 0644 "$APP/deploy/nginx/veqta-$target-http.conf" "$NGINX_SITE"
+veqta_render_nginx -http > "$NGINX_SITE"
+chmod 0644 "$NGINX_SITE"
 ln -s "$NGINX_SITE" "$NGINX_LINK"
 if ! veqta_check_nginx; then
     rm -- "$NGINX_LINK" "$NGINX_SITE"
@@ -156,10 +171,16 @@ Verifier повторяет эти проверки без изменения н
 sudo install -d -o root -g root -m 0755 /etc/letsencrypt/renewal-hooks/deploy
 sudo install -o root -g root -m 0755 "/opt/veqta-$VEQTA_TARGET/deploy/letsencrypt/renew-nginx.sh" /etc/letsencrypt/renewal-hooks/deploy/veqta-nginx.sh
 sudo systemctl list-timers --all certbot.timer
-sudo certbot renew --dry-run --cert-name "$([ "$VEQTA_TARGET" = dev ] && echo test.platform.veqta.ru || echo platform.veqta.ru)" --run-deploy-hooks
+sudo bash -s -- "$VEQTA_TARGET" <<'VEQTA_RENEW'
+set -Eeuo pipefail
+source "/opt/veqta-$1/scripts/server_checks.sh"
+veqta_target "$1"
+veqta_load_config
+certbot renew --dry-run --cert-name "$DOMAIN" --run-deploy-hooks
+VEQTA_RENEW
 ```
 
-На новой Ubuntu timer включён в installation.md. На подготовленном сервере подтвердите существующее расписание (apt timer или другой уже принятый механизм), не создавая дублирующее. Hook реагирует только на два домена VEQTA и делает `nginx -t` перед reload. Итоговые HTTP-конфигурации сохраняют ACME location, поэтому продление webroot не требует остановки Nginx. Для сертификатов, ранее полученных другим способом, сохраните их согласованный способ продления.
+На новой Ubuntu timer включён в installation.md. На подготовленном сервере подтвердите существующее расписание (apt timer или другой уже принятый механизм), не создавая дублирующее. Hook читает только VEQTA_HOSTNAME из env двух контуров и для соответствующих сертификатов выполняет `nginx -t` перед reload. Итоговые HTTP-конфигурации сохраняют ACME location, поэтому продление webroot не требует остановки Nginx. Для сертификатов, ранее полученных другим способом, сохраните их согласованный способ продления.
 
 ## 6. Администратор, данные и приёмка
 
@@ -215,3 +236,5 @@ sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_verify.sh" "$VEQTA_TARGET"
 ```
 
 Если миграций нет, `--migrate` не нужен. Без него apply откажет при неприменённых миграциях. Обновление venv/статики происходит на месте, перезапуск может кратковременно прервать запросы; согласуйте окно. Автоматического отката схемы нет. Возврат к предыдущему проверенному SHA и повторный apply допустим лишь при совместимости кода с текущей схемой. `--fake`, `flush` и удаление рабочей БД не являются штатным откатом.
+
+`server_apply.sh --migrate` загружает закрытый env владельца только в дочерний процесс. До migrate проверяются контур, имя БД, роль, host, port, SSL и фактическое подключение. Обычный apply не читает этот файл. Скрипт рендерит один из двух шаблонов Nginx по `VEQTA_HOSTNAME`; пути и loopback-порты контуров остаются фиксированным техническим контрактом. При ошибке Nginx восстанавливается только сайт выбранного контура.

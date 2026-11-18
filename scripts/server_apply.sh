@@ -30,6 +30,7 @@ require id "$ACTOR"
 [[ ! -e "$NGINX_LINK" && ! -L "$NGINX_LINK" || "$(readlink "$NGINX_LINK")" == "$NGINX_SITE" ]] || { echo 'STOP: другой сайт с тем же именем' >&2; exit 2; }
 veqta_clean_checkout
 veqta_load_config
+veqta_check_database
 veqta_check_nginx
 require test -f "/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 require test -f "/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
@@ -49,7 +50,7 @@ veqta_django check
 veqta_django makemigrations --check --dry-run
 if [[ "${2:-}" == --migrate ]]; then
   echo 'Применяем миграции целевого контура (флаг --migrate задан явно)'
-  veqta_django migrate --noinput
+  veqta_migrate
 fi
 veqta_django migrate --check
 
@@ -94,7 +95,8 @@ rollback_nginx() {
 }
 trap rollback_nginx EXIT
 
-install -o root -g root -m 0644 "$APP/deploy/nginx/veqta-${ENV_NAME}.conf" "$NGINX_SITE"
+veqta_render_nginx > "$TMP_DIR/new-site.conf"
+install -o root -g root -m 0644 "$TMP_DIR/new-site.conf" "$NGINX_SITE"
 if [[ ! -e "$NGINX_LINK" ]]; then
   ln -s "$NGINX_SITE" "$NGINX_LINK"
   LINK_CREATED=1

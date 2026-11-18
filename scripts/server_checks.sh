@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Общие read-only проверки серверных сценариев. Файл только определяет функции.
+# Проверки адресата и команды развёртывания. Файл только определяет функции.
 
 veqta_target() {
   ENV_NAME=$1
@@ -7,13 +7,14 @@ veqta_target() {
   APP="/opt/veqta-${ENV_NAME}"
   ACTOR="veqta-${ENV_NAME}"
   CONFIG="/etc/veqta/${ENV_NAME}.env"
+  MIGRATION_CONFIG="/etc/veqta/${ENV_NAME}-migrate.env"
   SERVICE="veqta-${ENV_NAME}.service"
   NGINX_SITE="/etc/nginx/sites-available/veqta-${ENV_NAME}"
   NGINX_LINK="/etc/nginx/sites-enabled/veqta-${ENV_NAME}"
   STATIC_ROOT="/var/www/veqta/${ENV_NAME}-static"
   case "$ENV_NAME" in
-    dev) DOMAIN=test.platform.veqta.ru; PORT=8767 ;;
-    prod) DOMAIN=platform.veqta.ru; PORT=8765 ;;
+    dev) PORT=8767 ;;
+    prod) PORT=8765 ;;
   esac
 }
 
@@ -22,11 +23,19 @@ veqta_load_config() {
     echo 'STOP: настройки должны иметь права root:veqta-ENV 0640' >&2; return 1;
   }
   set -a
+  unset VEQTA_ENV VEQTA_HOSTNAME DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT DB_SSLMODE
+  unset DJANGO_SECRET_KEY DJANGO_DEBUG DJANGO_ALLOWED_HOSTS DJANGO_TRUST_PROXY
+  unset DJANGO_CSRF_TRUSTED_ORIGINS DJANGO_STATIC_ROOT DJANGO_SECURE_COOKIES
   # shellcheck source=/dev/null
   source "$CONFIG"
   set +a
-  [[ "$VEQTA_ENV" == "$ENV_NAME" && "$DB_NAME" == "veqta_${ENV_NAME}" && "$DB_USER" == "veqta_${ENV_NAME}" ]] || {
+  DOMAIN=${VEQTA_HOSTNAME:-}
+  veqta_check_hostname || return 1
+  [[ "${VEQTA_ENV:-}" == "$ENV_NAME" && "${DB_NAME:-}" == "veqta_${ENV_NAME}" && "${DB_USER:-}" == "veqta_${ENV_NAME}" ]] || {
     echo 'STOP: неверная база/роль/окружение' >&2; return 1;
+  }
+  [[ -n "${DB_HOST:-}" && -n "${DB_PORT:-}" && -n "${DB_PASSWORD:-}" ]] || {
+    echo 'STOP: не заданы реквизиты PostgreSQL' >&2; return 1;
   }
   [[ "${DJANGO_DEBUG:-}" == 0 && "${DJANGO_TRUST_PROXY:-}" == 1 ]] || {
     echo 'STOP: для серверного HTTPS требуются DEBUG=0 и TRUST_PROXY=1' >&2; return 1;
@@ -44,6 +53,49 @@ veqta_load_config() {
     echo 'STOP: для серверного HTTPS требуются Secure cookies' >&2; return 1;
   }
 }
+
+veqta_check_hostname() {
+  local label
+  local -a labels
+  [[ ${#DOMAIN} -le 253 && "$DOMAIN" == *.* && "$DOMAIN" =~ [a-z] ]] || {
+    echo 'STOP: нужен VEQTA_HOSTNAME с явным DNS-именем HTTPS' >&2; return 1;
+  }
+  IFS=. read -r -a labels <<< "$DOMAIN"
+  [[ "$DOMAIN" != *. ]] || return 1
+  for label in "${labels[@]}"; do
+    [[ "$label" =~ ^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$ ]] || {
+      echo 'STOP: недопустимый VEQTA_HOSTNAME' >&2; return 1;
+    }
+  done
+}
+
+veqta_render_nginx() {
+  veqta_check_hostname || return 1
+  local suffix=${1:-}
+  [[ -z "$suffix" || "$suffix" == -http ]] || return 2
+  sed -e "s/__HOSTNAME__/${DOMAIN}/g" -e "s/__PORT__/${PORT}/g" \
+    -e "s|__STATIC_ROOT__|${STATIC_ROOT}|g" "$APP/deploy/nginx/veqta${suffix}.conf"
+}
+
+veqta_migrate() (
+  # Секрет владельца загружается только в дочерний процесс явного --migrate.
+  [[ "$(stat -c %U:%G:%a "$MIGRATION_CONFIG")" == root:root:600 ]] || {
+    echo 'STOP: настройки миграций должны иметь права root:root 0600' >&2; exit 1;
+  }
+  local app_host=$DB_HOST app_port=$DB_PORT app_ssl=${DB_SSLMODE:-prefer}
+  unset VEQTA_ENV DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT DB_SSLMODE
+  set -a; source "$MIGRATION_CONFIG"; set +a
+  [[ "${VEQTA_ENV:-}" == "$ENV_NAME" && "${DB_NAME:-}" == "veqta_${ENV_NAME}" && "${DB_USER:-}" == "veqta_${ENV_NAME}_owner" &&
+      "${DB_HOST:-}" == "$app_host" && "${DB_PORT:-}" == "$app_port" && "${DB_SSLMODE:-prefer}" == "$app_ssl" && -n "${DB_PASSWORD:-}" ]] || {
+    echo 'STOP: настройки миграций не совпадают с целевой PostgreSQL' >&2; exit 1;
+  }
+  runuser -u "$ACTOR" -- bash -c '
+    set -Eeuo pipefail
+    cd "$1"
+    .venv/bin/python manage.py shell -c '\''from django.conf import settings; from config.database import require_target; require_target(settings.VEQTA_ENV, settings.EXPECTED_DATABASE, owner=True)'\''
+    exec .venv/bin/python manage.py migrate --noinput
+  ' bash "$APP"
+)
 
 veqta_clean_checkout() {
   local status

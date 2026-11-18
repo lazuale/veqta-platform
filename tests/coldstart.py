@@ -29,7 +29,10 @@ def main():
     )
     from .test_import import make_sources
 
-    require_target("dev", "veqta_dev")
+    require_target("dev", "veqta_dev", owner=True)
+    runtime_password = os.environ.get("DB_RUNTIME_PASSWORD")
+    if not runtime_password:
+        raise RuntimeError("Нужен DB_RUNTIME_PASSWORD отдельной прикладной роли")
     if connection.introspection.table_names():
         raise RuntimeError("Cold Start требует новую пустую БД. Существующая схема не изменена")
     call_command("veqta_initialize", environment="dev", database_name="veqta_dev", stdout=StringIO())
@@ -55,6 +58,12 @@ def main():
         assert "snapshot_organization_name" in columns and "organization_name" not in columns
     print("Cold Start: одна начальная миграция, пустые справочники, 10 функций, 13 триггеров и составные FK — успешно")
 
+    # Схему создаёт владелец. Все дальнейшие ORM/Admin/API-операции выполняет
+    # реальное отдельное подключение приложения, а не SET ROLE владельца.
+    connection.close()
+    connection.settings_dict.update(USER="veqta_dev", PASSWORD=runtime_password)
+    require_target("dev", "veqta_dev")
+
     password = secrets.token_urlsafe(32)
     os.environ["DJANGO_SUPERUSER_PASSWORD"] = password
     try:
@@ -62,7 +71,7 @@ def main():
                      interactive=False, stdout=StringIO())
     finally:
         os.environ.pop("DJANGO_SUPERUSER_PASSWORD", None)
-    client = Client()
+    client = Client(HTTP_HOST="localhost")
     assert client.login(username="coldstart_admin", password=password)
     metadata = client.get("/workwear/api/ui/metadata/").json()
     assert metadata["organizations"] == [] and metadata["items"] == []
@@ -103,6 +112,8 @@ def main():
     assert Request.objects.get().status == "closed"
     assert RequestEmployee.objects.get().snapshot_organization_name == organization.name
     assert RequestAssignment.objects.get().snapshot_validity_days == 90
+    from .database_roles import check_runtime_permissions
+    check_runtime_permissions()
     call_command("migrate", check_unapplied=True, stdout=StringIO())
     call_command("makemigrations", check_changes=True, dry_run=True, stdout=StringIO())
     print("Cold Start: createsuperuser, Admin, пустые состояния, справочники, импорт CLI и первая завершённая заявка — успешно")

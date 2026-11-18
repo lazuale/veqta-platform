@@ -16,7 +16,7 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         """Отказаться от существующей схемы, затем выполнить штатные миграции."""
-        require_target(options["environment"], options["database_name"])
+        require_target(options["environment"], options["database_name"], owner=True)
         if connection.introspection.table_names():
             raise CommandError("База уже содержит таблицы. Для дальнейших миграций используйте migrate после проверки контура")
         call_command("migrate", interactive=False, stdout=self.stdout)

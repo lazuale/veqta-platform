@@ -8,7 +8,7 @@
 
 ## A. Чистая Ubuntu 26.04
 
-Следующие команды относятся **только к новому серверу**. Исполнитель — обычный оператор с sudo. Нужны исходящий HTTPS к GitHub/PyPI и публичные DNS-имена `test.platform.veqta.ru`, `platform.veqta.ru`, направленные на сервер. Для webroot ACME входящие TCP 80/443 должны доходить до Nginx; если опубликована AAAA-запись, IPv6 должен быть настроен. Примеры Nginx слушают IPv4: удалите неподдерживаемую AAAA либо отдельно настройте IPv6-listen.
+Следующие команды относятся **только к новому серверу**. Исполнитель — обычный оператор с sudo. Нужны исходящий HTTPS к GitHub/PyPI и два разных публичных DNS-имени DEV и PROD, направленных на сервер; они задаются при генерации конфигурации. Для webroot ACME входящие TCP 80/443 должны доходить до Nginx; если опубликована AAAA-запись, IPv6 должен быть настроен. Примеры Nginx слушают IPv4: удалите неподдерживаемую AAAA либо отдельно настройте IPv6-listen.
 
 ```bash
 sudo apt-get update
@@ -52,15 +52,15 @@ sudo apt-get install postgresql-18 postgresql-client-18
 
 Пакетную установку из раздела A **пропустите**. Проверьте версии, путь к Python с venv, локальный административный доступ PostgreSQL и доступность loopback:5432 командами выше. PostgreSQL и Nginx могут обслуживать другие системы: не переустанавливать, не останавливать, не очищать их и не переписывать глобальный `pg_hba.conf`/`nginx.conf`.
 
-Если локальный HBA отличается от штатного, администратор должен разрешить только нужные соединения `veqta_dev → veqta_dev`, `veqta_prod → veqta_prod` с loopback и тестовые соединения DEV. Не добавляйте общие `trust`/`host all all` ради приложения. Подключение и изоляцию подтвердите приёмкой.
+Если локальный HBA отличается от штатного, администратор должен разрешить только нужные соединения `veqta_dev → veqta_dev`, `veqta_prod → veqta_prod` с loopback и роли `veqta_dev_owner`, `veqta_prod_owner` к соответствующим базам. Для владельца DEV дополнительно нужны подключения к `postgres` и одноразовой `test_veqta_dev`. Не добавляйте общие `trust`/`host all all` ради приложения. Подключение и изоляцию подтвердите приёмкой.
 
 Проверьте готовые сертификаты каждого домена:
 
 ```bash
-sudo openssl x509 -in /etc/letsencrypt/live/test.platform.veqta.ru/fullchain.pem -checkend 0 -checkhost test.platform.veqta.ru -noout
-sudo test -r /etc/letsencrypt/live/test.platform.veqta.ru/privkey.pem
-sudo openssl x509 -in /etc/letsencrypt/live/platform.veqta.ru/fullchain.pem -checkend 0 -checkhost platform.veqta.ru -noout
-sudo test -r /etc/letsencrypt/live/platform.veqta.ru/privkey.pem
+read -r -p 'DNS-имя проверяемого контура: ' VEQTA_HOSTNAME
+sudo openssl x509 -in "/etc/letsencrypt/live/$VEQTA_HOSTNAME/fullchain.pem" -checkend 0 -checkhost "$VEQTA_HOSTNAME" -noout
+sudo test -r "/etc/letsencrypt/live/$VEQTA_HOSTNAME/privkey.pem"
+# Повторите для другого имени DEV/PROD.
 ```
 
 Далее [deployment.md](deployment.md) создаёт **и DEV, и PROD независимо**. При готовых сертификатах первичный HTTP/ACME-этап пропускается. Продление существующих сертификатов должно использовать уже выбранный администратором механизм; его не заменяют вслепую.

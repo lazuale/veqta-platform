@@ -1,10 +1,23 @@
--- Администратор PostgreSQL выполняет файл только для нового локального DEV.
--- Пароль поступает из окружения psql, а не из SQL-файла.
+-- Только новый изолированный контур. Существующие базы и роли не изменяются.
+-- DB_PASSWORD — пароль приложения; DB_OWNER_PASSWORD — отдельный пароль миграций.
 \set ON_ERROR_STOP on
 \getenv app_password DB_PASSWORD
-CREATE ROLE veqta_dev LOGIN PASSWORD :'app_password' NOSUPERUSER NOCREATEROLE CREATEDB NOREPLICATION;
-CREATE DATABASE veqta_dev OWNER veqta_dev TEMPLATE template0 ENCODING 'UTF8';
+\getenv owner_password DB_OWNER_PASSWORD
+CREATE ROLE veqta_dev_owner LOGIN PASSWORD :'owner_password' NOSUPERUSER NOCREATEROLE CREATEDB NOREPLICATION;
+CREATE ROLE veqta_dev LOGIN PASSWORD :'app_password' NOSUPERUSER NOCREATEROLE NOCREATEDB NOREPLICATION;
+CREATE DATABASE veqta_dev OWNER veqta_dev_owner TEMPLATE template0 ENCODING 'UTF8';
 REVOKE ALL ON DATABASE veqta_dev FROM PUBLIC;
-GRANT CONNECT, TEMPORARY ON DATABASE veqta_dev TO veqta_dev;
+GRANT CONNECT ON DATABASE veqta_dev TO veqta_dev;
 \connect veqta_dev
-REVOKE CREATE ON SCHEMA public FROM PUBLIC;
+ALTER SCHEMA public OWNER TO veqta_dev_owner;
+REVOKE ALL ON SCHEMA public FROM PUBLIC;
+GRANT USAGE ON SCHEMA public TO veqta_dev;
+-- Применяются и к штатным миграциям Django. Приложение не состоит в роли владельца.
+ALTER DEFAULT PRIVILEGES FOR ROLE veqta_dev_owner IN SCHEMA public
+    GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO veqta_dev;
+ALTER DEFAULT PRIVILEGES FOR ROLE veqta_dev_owner IN SCHEMA public
+    GRANT USAGE, SELECT ON SEQUENCES TO veqta_dev;
+-- EXECUTE для PUBLIC отзывается глобально: per-schema REVOKE его не отменяет.
+ALTER DEFAULT PRIVILEGES FOR ROLE veqta_dev_owner REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE veqta_dev_owner IN SCHEMA public
+    GRANT EXECUTE ON FUNCTIONS TO veqta_dev;

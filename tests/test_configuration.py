@@ -24,6 +24,11 @@ class ConfigurationTests(SimpleTestCase):
     def test_valid_dev_configuration(self):
         self.assertEqual(self.settings_process(), 0)
 
+    def test_schema_owner_is_bound_to_its_environment(self):
+        self.assertEqual(self.settings_process(DB_USER="veqta_dev_owner"), 0)
+        self.assertNotEqual(self.settings_process(DB_USER="veqta_prod_owner"), 0)
+        self.assertNotEqual(self.settings_process(DB_USER="postgres"), 0)
+
     def test_database_and_role_must_match_environment(self):
         for changes in ({"DB_NAME": "veqta_prod"}, {"DB_USER": "veqta_prod"}, {"VEQTA_ENV": "unknown"}):
             with self.subTest(changes=changes):

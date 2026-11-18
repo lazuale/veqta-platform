@@ -62,7 +62,7 @@ sys.exit(7 if mode=="transport_failure" else 0)
     def http(self, mode):
         self.fake_curl()
         return self.shell(
-            "veqta_target prod; veqta_check_https",
+            "veqta_target prod; DOMAIN=release.example.invalid; veqta_check_https",
             VEQTA_TEST_MODE=mode,
         )
 
@@ -77,7 +77,7 @@ sys.exit(7 if mode=="transport_failure" else 0)
     def test_other_contour_is_rejected_even_when_static_would_work(self):
         self.fake_curl()
         result = self.shell(
-            "veqta_target prod; if veqta_check_https; then echo ACCEPTED; else exit 1; fi",
+            "veqta_target prod; DOMAIN=release.example.invalid; if veqta_check_https; then echo ACCEPTED; else exit 1; fi",
             VEQTA_TEST_MODE="wrong_contour",
         )
         self.assertNotEqual(result.returncode, 0)
@@ -161,13 +161,13 @@ sys.exit(7 if mode=="transport_failure" else 0)
     def nginx(self, mode):
         self.script("nginx", '''#!/bin/sh
 case "$VEQTA_TEST_MODE" in
-  conflict) echo '[warn] conflicting server name "platform.veqta.ru" on 0.0.0.0:443, ignored' >&2;;
+  conflict) echo '[warn] conflicting server name "release.example.invalid" on 0.0.0.0:443, ignored' >&2;;
   neighbor) echo '[warn] conflicting server name "other.example.invalid" on 0.0.0.0:443, ignored' >&2;;
   broken) echo 'synthetic syntax error' >&2; exit 1;;
 esac
 exit 0
 ''')
-        return self.shell("veqta_target prod; veqta_check_nginx", VEQTA_TEST_MODE=mode)
+        return self.shell("veqta_target prod; DOMAIN=release.example.invalid; veqta_check_nginx", VEQTA_TEST_MODE=mode)
 
     def test_nginx_target_conflict_with_exit_zero_is_rejected(self):
         self.assertNotEqual(self.nginx("conflict").returncode, 0)
@@ -187,7 +187,13 @@ exit 0
     def hook(self, domains, nginx_status):
         self.script("nginx", '#!/bin/sh\necho nginx >> "$VEQTA_TEST_DIR/hook.log"\nexit "$VEQTA_TEST_NGINX_STATUS"\n')
         self.script("systemctl", '#!/bin/sh\necho systemctl >> "$VEQTA_TEST_DIR/hook.log"\n')
-        return subprocess.run(["sh", str(ROOT / "deploy/letsencrypt/renew-nginx.sh")],
+        config = self.path / "config"
+        config.mkdir(exist_ok=True)
+        (config / "prod.env").write_text("VEQTA_HOSTNAME=release.example.invalid\n")
+        (config / "dev.env").write_text("VEQTA_HOSTNAME=dev.example.invalid\n")
+        hook = self.path / "renew.sh"
+        hook.write_text((ROOT / "deploy/letsencrypt/renew-nginx.sh").read_text().replace("/etc/veqta", str(config)))
+        return subprocess.run(["sh", str(hook)],
                               env=self.env | {"RENEWED_DOMAINS": domains,
                                               "VEQTA_TEST_NGINX_STATUS": str(nginx_status)},
                               capture_output=True, text=True, timeout=5)
@@ -197,9 +203,222 @@ exit 0
         self.assertFalse((self.path / "hook.log").exists())
 
     def test_renewal_hook_checks_before_reload(self):
-        self.assertEqual(self.hook("platform.veqta.ru", 0).returncode, 0)
+        self.assertEqual(self.hook("release.example.invalid", 0).returncode, 0)
         self.assertEqual((self.path / "hook.log").read_text().splitlines(), ["nginx", "systemctl"])
 
     def test_renewal_hook_does_not_reload_invalid_nginx(self):
-        self.assertNotEqual(self.hook("test.platform.veqta.ru", 1).returncode, 0)
+        self.assertNotEqual(self.hook("dev.example.invalid", 1).returncode, 0)
         self.assertEqual((self.path / "hook.log").read_text().splitlines(), ["nginx"])
+
+
+class InstallationConfigurationTests(unittest.TestCase):
+    script = DeploymentChecks.script
+    shell = DeploymentChecks.shell
+
+    def setUp(self):
+        DeploymentChecks.setUp(self)
+        self.project = self.path / "project"
+        (self.project / "scripts").mkdir(parents=True)
+        (self.project / "deploy").mkdir()
+        shutil.copy(ROOT / "scripts/create_config.py", self.project / "scripts")
+        for contour in ("dev", "prod"):
+            shutil.copy(ROOT / f"deploy/{contour}.env.example", self.project / "deploy")
+        self.env["VEQTA_TEST_SOURCE"] = str(ROOT)
+
+    def generate(self, contour="prod", hostname="release.example.invalid"):
+        args = [sys.executable, str(self.project / "scripts/create_config.py"), "--environment", contour]
+        if hostname is not None:
+            args += ["--hostname", hostname]
+        return subprocess.run(args, capture_output=True, text=True, timeout=10)
+
+    def test_independent_credentials_and_domains_for_both_contours(self):
+        secrets_seen = []
+        for contour, hostname in (("dev", "dev.example.invalid"), ("prod", "release.example.invalid")):
+            result = self.generate(contour, hostname)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            contents = []
+            for suffix in ("", "-migrate"):
+                path = self.project / f".env.{contour}{suffix}"
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                text = path.read_text()
+                contents.append(text)
+                self.assertIn(f"VEQTA_HOSTNAME={hostname}\n", text)
+                self.assertIn(f"DB_USER=veqta_{contour}" + ("_owner" if suffix else "") + "\n", text)
+                password = next(line.split("=", 1)[1] for line in text.splitlines() if line.startswith("DB_PASSWORD="))
+                self.assertNotIn(password, result.stdout + result.stderr)
+                secrets_seen.append(password)
+            self.assertNotEqual(contents[0], contents[1])
+        self.assertEqual(len(set(secrets_seen)), 4)
+
+    def test_generator_rejects_invalid_or_missing_hostname(self):
+        for hostname in (None, "", "https://host.example", "*.example.org", ".example.org", "example.org.",
+                         "a..example.org", "-a.example.org", "a-.example.org", "a_b.example.org",
+                         "127.0.0.1", "UPPER.example.org", "a" * 64 + ".example.org", "a.example.org;exit"):
+            with self.subTest(hostname=hostname):
+                self.assertNotEqual(self.generate(hostname=hostname).returncode, 0)
+                self.assertFalse((self.project / ".env.prod").exists())
+                self.assertFalse((self.project / ".env.prod-migrate").exists())
+
+    def test_generator_refuses_repetition_without_changing_either_file(self):
+        self.assertEqual(self.generate().returncode, 0)
+        paths = [self.project / f".env.prod{suffix}" for suffix in ("", "-migrate")]
+        before = [path.read_bytes() for path in paths]
+        self.assertNotEqual(self.generate().returncode, 0)
+        self.assertEqual([path.read_bytes() for path in paths], before)
+
+    def load(self, changes=None, contour="prod"):
+        hostname = "release.example.invalid" if contour == "prod" else "dev.example.invalid"
+        self.assertEqual(self.generate(contour, hostname).returncode, 0)
+        config = self.project / f".env.{contour}"
+        content = config.read_text()
+        for name, value in (changes or {}).items():
+            content = "\n".join(f"{name}={value}" if line.startswith(name + "=") else line for line in content.splitlines()) + "\n"
+        config.write_text(content)
+        self.script("stat", f"#!/bin/sh\necho root:veqta-{contour}:640\n")
+        return self.shell(f'veqta_target {contour}; CONFIG="$VEQTA_TEST_DIR/project/.env.{contour}"; '
+                          'veqta_load_config; APP="$VEQTA_TEST_SOURCE"; veqta_render_nginx')
+
+    def test_custom_prod_hostname_drives_all_nginx_directives(self):
+        result = self.load()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("server_name release.example.invalid;", result.stdout)
+        self.assertIn("live/release.example.invalid/fullchain.pem", result.stdout)
+        self.assertIn("127.0.0.1:8765", result.stdout)
+        self.assertNotIn("__", result.stdout)
+
+    def test_custom_dev_hostname_keeps_separate_port_and_static(self):
+        result = self.load(contour="dev")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("server_name dev.example.invalid;", result.stdout)
+        self.assertIn("127.0.0.1:8767", result.stdout)
+        self.assertIn("/var/www/veqta/dev-static/", result.stdout)
+
+    def test_configuration_rejects_missing_hostname(self):
+        self.assertNotEqual(self.load({"VEQTA_HOSTNAME": ""}).returncode, 0)
+
+    def test_configuration_rejects_invalid_hostname(self):
+        self.assertNotEqual(self.load({"VEQTA_HOSTNAME": "invalid..example.org"}).returncode, 0)
+
+    def test_configuration_rejects_wrong_environment(self):
+        self.assertNotEqual(self.load({"VEQTA_ENV": "dev"}).returncode, 0)
+
+    def test_configuration_rejects_wrong_database(self):
+        self.assertNotEqual(self.load({"DB_NAME": "veqta_dev"}).returncode, 0)
+
+    def test_configuration_does_not_inherit_missing_postgresql_parameter(self):
+        self.env['DB_HOST'] = '127.0.0.1'
+        self.assertNotEqual(self.load({"DB_HOST": ""}).returncode, 0)
+
+    def test_service_configuration_rejects_owner_role(self):
+        self.assertNotEqual(self.load({"DB_USER": "veqta_prod_owner"}).returncode, 0)
+
+    def test_migration_configuration_rejects_other_postgresql_address(self):
+        self.assertEqual(self.generate().returncode, 0)
+        config = self.project / ".env.prod-migrate"
+        config.write_text(config.read_text().replace("DB_PORT=5432", "DB_PORT=6543"))
+        self.script("stat", "#!/bin/sh\necho root:root:600\n")
+        self.script("runuser", '#!/bin/sh\necho unexpected > "$VEQTA_TEST_DIR/migration-ran"\n')
+        result = self.shell('veqta_target prod; DB_HOST=127.0.0.1; DB_PORT=5432; DB_SSLMODE=prefer; '
+                            'MIGRATION_CONFIG="$VEQTA_TEST_DIR/project/.env.prod-migrate"; veqta_migrate')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse((self.path / "migration-ran").exists())
+
+
+class ServerApplyTests(unittest.TestCase):
+    script = DeploymentChecks.script
+    shell = DeploymentChecks.shell
+    fake_curl = DeploymentChecks.fake_curl
+
+    def setUp(self):
+        DeploymentChecks.setUp(self)
+        self.app = self.path / "opt/veqta-prod"
+        (self.app / ".git").mkdir(parents=True)
+        (self.app / ".venv/bin").mkdir(parents=True)
+        shutil.copytree(ROOT / "deploy", self.app / "deploy")
+        (self.app / "requirements.lock").write_text("")
+        python = self.app / ".venv/bin/python"
+        python.write_text('#!/bin/sh\nexit 0\n')
+        python.chmod(0o700)
+        self.scripts = self.path / "scripts"
+        self.scripts.mkdir()
+        for name in ("server_checks.sh", "server_apply.sh"):
+            text = (ROOT / "scripts" / name).read_text()
+            for prefix in ("/opt/", "/etc/", "/var/www/", "/run/"):
+                text = text.replace(prefix, str(self.path) + prefix)
+            text = text.replace('[[ $EUID -eq 0 ]]', 'true')
+            (self.scripts / name).write_text(text)
+        for directory in ("etc/veqta", "etc/nginx/sites-available", "etc/nginx/sites-enabled",
+                          "etc/systemd/system", "run/lock", "etc/letsencrypt/live/release.example.invalid"):
+            (self.path / directory).mkdir(parents=True, exist_ok=True)
+        for name in ("fullchain.pem", "privkey.pem"):
+            (self.path / "etc/letsencrypt/live/release.example.invalid" / name).write_text("synthetic")
+        config = (ROOT / "deploy/prod.env.example").read_text().replace("__HOSTNAME__", "release.example.invalid")
+        config = config.replace("DB_PASSWORD=\n", "DB_PASSWORD=synthetic\n")
+        config = config.replace("/var/www/", str(self.path) + "/var/www/")
+        (self.path / "etc/veqta/prod.env").write_text(config)
+        (self.path / "etc/veqta/prod-migrate.env").write_text(config.replace("DB_USER=veqta_prod\n", "DB_USER=veqta_prod_owner\n"))
+        self.site = self.path / "etc/nginx/sites-available/veqta-prod"
+        self.link = self.path / "etc/nginx/sites-enabled/veqta-prod"
+        self.script("runuser", '#!/bin/sh\nshift 3\nexec "$@"\n')
+        self.script("id", "#!/bin/sh\nexit 0\n")
+        self.script("stat", '''#!/bin/sh
+case "$2" in
+  %U) echo veqta-prod;;
+  *) case "$3" in *-migrate.env) echo root:root:600;; *) echo root:veqta-prod:640;; esac;;
+esac
+''')
+        self.script("git", '''#!/bin/sh
+case "$*" in *rev-parse*) echo 1111111111111111111111111111111111111111;; esac
+''')
+        for name in ("openssl", "chgrp", "chmod"):
+            self.script(name, "#!/bin/sh\nexit 0\n")
+        self.script("install", f"#!{sys.executable}\n" + '''
+import subprocess, sys
+args=[]; source=iter(sys.argv[1:])
+for arg in source:
+    if arg in ('-o','-g'): next(source)
+    else: args.append(arg)
+raise SystemExit(subprocess.call(['/usr/bin/install',*args]))
+''')
+        self.script("nginx", f"#!{sys.executable}\n" + '''
+import os, pathlib
+path=pathlib.Path(os.environ['VEQTA_TEST_DIR'])/'nginx-count'
+count=int(path.read_text())+1 if path.exists() else 1
+path.write_text(str(count))
+raise SystemExit(1 if os.environ.get('VEQTA_TEST_MODE')=='broken-new-site' and count==2 else 0)
+''')
+        self.script("systemctl", '#!/bin/sh\necho "$*" >> "$VEQTA_TEST_DIR/systemctl.log"\n')
+        self.fake_curl()
+
+    def apply(self, mode="ok"):
+        return subprocess.run(["bash", str(self.scripts / "server_apply.sh"), "prod", "--migrate"],
+            env=self.env | {"VEQTA_TEST_MODE": mode}, capture_output=True, text=True, timeout=20)
+
+    def test_repeated_apply_accepts_custom_hostname_and_preserves_neighbor(self):
+        neighbor = self.path / "etc/nginx/sites-available/neighbor"
+        neighbor.write_text("unchanged neighbor")
+        for _ in range(2):
+            result = self.apply()
+            self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+            self.assertIn("SERVER APPLY: PASS", result.stdout)
+            self.assertIn("server_name release.example.invalid;", self.site.read_text())
+            self.assertEqual(self.link.resolve(), self.site)
+            self.assertEqual(neighbor.read_text(), "unchanged neighbor")
+        self.assertNotIn("veqta-dev", (self.path / "systemctl.log").read_text())
+
+    def test_nginx_failure_restores_existing_file_without_reload(self):
+        previous = "previous exact site\n"
+        self.site.write_text(previous)
+        self.link.symlink_to(self.site)
+        result = self.apply("broken-new-site")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.site.read_text(), previous)
+        self.assertEqual(self.link.resolve(), self.site)
+        self.assertFalse((self.path / "systemctl.log").exists())
+
+    def test_nginx_failure_removes_only_new_site_and_link(self):
+        result = self.apply("broken-new-site")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.site.exists())
+        self.assertFalse(self.link.is_symlink())
+        self.assertFalse((self.path / "systemctl.log").exists())
