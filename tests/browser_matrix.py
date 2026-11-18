@@ -14,7 +14,7 @@ from unittest.mock import patch
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from .browser_support import database_call, live_server
+from .browser_support import database_call, delayed_requests, live_server
 
 
 VIEWPORTS = [(1920, 1080), (1440, 900), (1366, 768), (1024, 768), (768, 1024), (390, 844)]
@@ -114,24 +114,30 @@ def persisted(request_id):
                         .values_list("request_employee__employee_id", "item_id"))}
 
 
-def check_matrix(actor, executable, artifacts):
+def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=None):
     from playwright.sync_api import sync_playwright, expect
     data = seed_matrix(actor)
     artifacts = Path(artifacts).resolve()
     artifacts.mkdir(parents=True, exist_ok=True)
-    results, errors, requests, failures, expected_http, console = [], [], [], [], [], []
+    from .acceptance import check_parallel_load
+    from workwear.models import WorkwearItem
+    concurrency = check_parallel_load(data['organization'], data['people'][:100],
+        list(WorkwearItem.objects.filter(is_active=True).order_by('sort_order','pk').values_list('pk', flat=True)[:30]))
+    (artifacts/'concurrent-service-results.json').write_text(json.dumps(concurrency,ensure_ascii=False,indent=2))
+    results, errors, requests, failures, expected_http, console, sql_samples = [], [], [], [], [], [], []
     with live_server() as base, sync_playwright() as playwright:
         options = {"headless": True}
         if executable:
             options["executable_path"] = executable
         engines = {name:Path(getattr(playwright,name).executable_path).is_file() for name in ("chromium","firefox","webkit")}
-        engines["chromium"] = bool(executable) or engines["chromium"]
-        browser = playwright.chromium.launch(**options)
+        engines[engine] = bool(executable) or engines[engine]
+        browser = getattr(playwright, engine).launch(**options)
         context = browser.new_context(viewport={"width": 1440, "height": 900})
         page = context.new_page()
         page.set_default_timeout(15000)
         page.on("console",lambda message: console.append({"type":message.type,"text":message.text}) if message.type in ("warning","error") else None)
         page.on("pageerror", lambda error: errors.append(str(error)))
+        page.on("response", lambda response: sql_samples.append(int(response.headers.get('x-veqta-test-sql', 0))))
         page.on("response", lambda response: failures.append((response.status, response.url)) if response.status >= 400 else None)
         page.on("request", lambda req: requests.append({"method": req.method, "url": req.url}))
         page.on("dialog", lambda dialog: dialog.accept())
@@ -294,17 +300,13 @@ def check_matrix(actor, executable, artifacts):
             cell = page.locator(selector)
             expect(cell).to_have_attribute('aria-pressed', 'false')
             page.evaluate("""() => {window.rcNodes={main:document.querySelector('#main'),table:document.querySelector('table.matrix'),other:document.querySelectorAll('tr[data-row]')[1]};}""")
-            client = page.context.new_cdp_session(page)
-            client.send('Network.enable')
-            client.send('Network.emulateNetworkConditions', {"offline":False,"latency":1000,"downloadThroughput":-1,"uploadThroughput":-1})
             before = len([r for r in requests if 'repeat-scan' in r["url"]])
-            cell.dblclick()
-            expect(page.locator(selector)).to_have_attribute('aria-busy', 'true')
-            expect(page.locator('[data-action="save"]')).to_be_disabled()
-            assert database_call(lambda: persisted(request_id)) == original
+            with delayed_requests(page, "**/repeat-scan/"):
+                cell.dblclick()
+                expect(page.locator(selector)).to_have_attribute('aria-busy', 'true')
+                expect(page.locator('[data-action="save"]')).to_be_disabled()
+                assert database_call(lambda: persisted(request_id)) == original
             expect(page.locator(selector)).to_have_attribute('aria-pressed', 'true')
-            client.send('Network.emulateNetworkConditions', {"offline":False,"latency":0,"downloadThroughput":-1,"uploadThroughput":-1})
-            client.detach()
             expect(page.locator('[data-action="save"]')).to_be_enabled()
             assert len([r for r in requests if 'repeat-scan' in r["url"]])-before == 1
             assert page.locator('[data-cell][tabindex="0"]').count() == 1
@@ -437,13 +439,9 @@ def check_matrix(actor, executable, artifacts):
             # Отмена во время чтения не добавляет найденных сотрудников позже.
             page.locator('[data-action="add"]').first.click()
             page.locator('#bulkText').fill('RC-0004')
-            client = page.context.new_cdp_session(page)
-            client.send('Network.enable')
-            client.send('Network.emulateNetworkConditions', {'offline':False,'latency':1000,'downloadThroughput':-1,'uploadThroughput':-1})
-            page.locator('[data-action="check-bulk"]').click()
-            page.locator('[data-action="cancel"]').click()
-            client.send('Network.emulateNetworkConditions', {'offline':False,'latency':0,'downloadThroughput':-1,'uploadThroughput':-1})
-            client.detach()
+            with delayed_requests(page, "**/ui/resolve/"):
+                page.locator('[data-action="check-bulk"]').click()
+                page.locator('[data-action="cancel"]').click()
             expect(page.locator('.vq-modal')).to_have_count(0)
             expect(page.locator('tr[data-row]')).to_have_count(4)
             assert database_call(lambda: persisted(request_id)) == saved
@@ -575,6 +573,7 @@ def check_matrix(actor, executable, artifacts):
             assert page.locator('[data-check]').count()==0
             # Меняем справочник штатным Admin; закрытая матрица сохраняет снимок.
             item=data["items"][0]
+            person=data["people"][0]
             page.goto(base+f'/admin/workwear/workwearitem/{item["id"]}/change/')
             page.locator('[name="name"]').fill('Новое название после закрытия RC')
             page.locator('[name="category"]').fill('Новая категория после закрытия')
@@ -583,8 +582,10 @@ def check_matrix(actor, executable, artifacts):
             page.locator('[name="_save"]').click()
             expect(page.locator('#changelist')).to_be_visible()
             open_matrix(request_id)
-            expect(page.locator('th.matrix-leaf').first).to_have_attribute('title',item["name"])
-            expect(page.locator('th.matrix-leaf').first).to_contain_text('90 дн.')
+            expect(page.locator('th.matrix-leaf').first).to_have_attribute('title','Новое название после закрытия RC')
+            expect(page.locator(f'[data-cell="{person}:{item["id"]}"]')).to_have_attribute('title',
+                f'{item["name"]} · {item["category"]} · {item["validity_days"]} дней')
+            expect(page.locator('th.matrix-leaf').first).to_contain_text('1095 дн. · каталог')
             page.screenshot(path=str(artifacts/'matrix-closed.png'),full_page=True)
             context=browser.new_context(viewport={"width":1440,"height":900})
             reader=context.new_page()
@@ -673,12 +674,10 @@ def check_matrix(actor, executable, artifacts):
             expect(page.locator('[data-event]')).to_have_count(25)
             page.keyboard.press('Escape')
             # Отмена чтения во время задержки не открывает диалог повторно.
-            client=page.context.new_cdp_session(page);client.send('Network.enable')
-            client.send('Network.emulateNetworkConditions',{'offline':False,'latency':1000,'downloadThroughput':-1,'uploadThroughput':-1})
-            page.locator('[data-action="events"]').click()
-            expect(page.get_by_role('status').filter(has_text='Загрузка истории')).to_be_visible()
-            page.keyboard.press('Escape')
-            client.send('Network.emulateNetworkConditions',{'offline':False,'latency':0,'downloadThroughput':-1,'uploadThroughput':-1});client.detach()
+            with delayed_requests(page, endpoint):
+                page.locator('[data-action="events"]').click()
+                expect(page.get_by_role('status').filter(has_text='Загрузка истории')).to_be_visible()
+                page.keyboard.press('Escape')
             page.locator('[data-action="events"]').click()
             expect(page.locator('[data-event]')).to_have_count(25)
             page.keyboard.press('Escape')
@@ -707,11 +706,130 @@ def check_matrix(actor, executable, artifacts):
             return {'events':31,'pages':2,'database_unchanged':True,'unsaved_preserved':True,
                 'retry_and_cancel':True,'malformed_response_rejected':True,'escaped_reason':True,'reader_and_denied_permissions':True}
 
+        def historical_snapshots():
+            from workwear import services
+            from workwear.models import RequestAssignment, WorkwearItem
+            item_id, request_id = database_call(lambda: (
+                WorkwearItem.objects.create(code="RC-SNAPSHOT", name="Исходное имя позиции",
+                    category="Исходная категория", validity_days=365, sort_order=0).pk,
+                services.create_request(organization_id=data['organization'], actor=actor).pk,
+            ))
+            page.set_viewport_size({'width':1440,'height':900})
+            page.goto(base + f'/workwear/?request={request_id}')
+
+            def add_and_assign(index):
+                page.locator('[data-action="add"]').first.click()
+                page.locator('#bulkText').fill(f'RC-{index:04d}')
+                page.locator('[data-action="check-bulk"]').click()
+                page.locator('[data-action="apply-bulk"]').click()
+                person = data['people'][index]
+                page.locator(f'[data-person="{person}"]').first.click()
+                page.locator(f'[data-item="{item_id}"]').check()
+                page.locator('[data-action="close-drawer"]').last.click()
+                page.locator('[data-action="save"]').click()
+                expect(page.locator('[data-action="save"]')).to_be_disabled()
+
+            add_and_assign(0)
+            admin = context.new_page()
+            def change_catalog(active):
+                admin.goto(base + f'/admin/workwear/workwearitem/{item_id}/change/')
+                admin.locator('[name="name"]').fill('Новое имя позиции')
+                admin.locator('[name="category"]').fill('Новая категория')
+                admin.locator('[name="validity_days"]').fill('90')
+                admin.locator('[name="is_active"]').set_checked(active)
+                admin.locator('[name="_save"]').click()
+                expect(admin.locator('#changelist')).to_be_visible()
+            change_catalog(True)
+            page.reload()
+            expect(page.locator('tr[data-row]')).to_have_count(1)
+            add_and_assign(1)
+            expected = {data['people'][0]:('Исходное имя позиции','Исходная категория',365),
+                        data['people'][1]:('Новое имя позиции','Новая категория',90)}
+            def verify():
+                api = api_request(request_id)
+                for member in api['members']:
+                    a = member['assignments'][0]
+                    assert (a['name'],a['category'],a['validity_days']) == expected[member['employee_id']]
+                stored = database_call(lambda: list(RequestAssignment.objects.filter(
+                    request_employee__request_id=request_id).values_list(
+                    'request_employee__employee_id','snapshot_item_name','snapshot_item_category','snapshot_validity_days')))
+                assert {row[0]:row[1:] for row in stored} == expected
+                page.locator('[data-mode="list"]').click()
+                for person, (name,category,days) in expected.items():
+                    tag = page.locator(f'tr[data-row="{person}"] .vitem')
+                    expect(tag).to_have_text(name)
+                    expect(tag).to_have_attribute('title',f'{name} · {category} · {days} дней')
+                page.locator('[data-mode="matrix"]').click()
+                header = page.locator(f'#matrix-item-{item_id}')
+                expect(header).to_have_attribute('title','Новое имя позиции')
+                expect(header).to_contain_text('90 дн. · каталог')
+                for person, (name,category,days) in expected.items():
+                    cell = page.locator(f'[data-cell="{person}:{item_id}"]')
+                    expect(cell).to_have_attribute('aria-pressed','true')
+                    expect(cell).to_have_attribute('title',f'{name} · {category} · {days} дней')
+                    expect(cell).to_have_attribute('aria-label',__import__('re').compile(f'^{name} · {category} · {days} дней: назначено'))
+                    page.locator(f'[data-person="{person}"]').first.click()
+                    row = page.locator('.vq-item-row').filter(has=page.locator(f'[data-item="{item_id}"]'))
+                    expect(row.locator('label')).to_have_text(name)
+                    expect(row.locator('.detail')).to_have_text(f'{category} · {days} дней')
+                    page.locator('[data-action="close-drawer"]').last.click()
+                return stored
+            verify()
+            change_catalog(False)
+            page.reload()
+            expect(page.locator('tr[data-row]')).to_have_count(2)
+            verify()
+            page.locator('[data-action="finish"]').click()
+            page.locator('#finishAck').check()
+            page.locator('[data-action="apply-finish"]').click()
+            expect(page.locator('[data-action="reopen"]')).to_be_visible()
+            verify()
+            page.reload()
+            expect(page.locator('tr[data-row]')).to_have_count(2)
+            stored = verify()
+            page.screenshot(path=str(artifacts/'historical-snapshots.png'),full_page=True)
+            current = next(item for item in page.request.get(base+'/workwear/api/ui/metadata/').json()['items'] if item['id']==item_id)
+            assert (current['name'],current['category'],current['validity_days'],current['is_active']) == ('Новое имя позиции','Новая категория',90,False)
+            admin.close()
+            return {'individual_snapshots':stored,'catalog':current,'closed_and_reloaded':True}
+
+        def accessibility():
+            open_matrix()
+            structure = page.locator('table.matrix').evaluate('''table => ({
+                rowHeaders:table.querySelectorAll('tbody th[scope="row"]').length,
+                rows:table.tBodies[0].rows.length,
+                colHeaders:table.querySelectorAll('thead th[scope="col"]').length,
+                groups:table.querySelectorAll('th[scope="colgroup"]').length,
+                colgroups:table.querySelectorAll('colgroup').length,
+                caption:table.caption?.textContent,
+                missingHeaders:[...table.querySelectorAll('tbody td[headers]')].filter(td=>
+                    td.headers.split(' ').some(id=>!table.querySelector('[id="'+id+'"]'))).length,
+                missingNames:[...table.querySelectorAll('button')].filter(b=>!b.textContent.trim()&&!b.getAttribute('aria-label')).length
+            })''')
+            assert structure['rowHeaders'] == structure['rows'] == 100, structure
+            assert structure['colHeaders'] == 32 and structure['colgroups'] == structure['groups']+2, structure
+            assert structure['missingHeaders'] == structure['missingNames'] == 0 and structure['caption'], structure
+            snapshot = page.locator('table.matrix').aria_snapshot()
+            assert 'rowheader' in snapshot and 'columnheader' in snapshot
+            (artifacts/'matrix-accessibility.txt').write_text(snapshot,encoding='utf-8')
+            if axe_script:
+                page.add_script_tag(path=str(Path(axe_script).resolve()))
+                result = page.evaluate('''async () => {
+                    const result=await axe.run('#editorTable',{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}});
+                    return {version:axe.version,violations:result.violations.map(v=>({id:v.id,impact:v.impact,
+                        description:v.description,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),
+                        incomplete:result.incomplete.map(v=>({id:v.id,count:v.nodes.length})),passed:result.passes.length};
+                }''')
+                (artifacts/'accessibility.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
+                assert not result['violations'], result['violations']
+                structure['axe'] = result
+            return structure
+
         def benchmarks():
             measurements=[]
             page.set_viewport_size({"width":1440,"height":900})
             for size,request_id in data["benchmarks"].items():
-                before=len(requests);started=perf_counter()
+                before=len(requests);before_sql=len(sql_samples);started=perf_counter()
                 page.goto(base+f'/workwear/?request={request_id}')
                 expect(page.locator('tr[data-row]')).to_have_count(min(100,size))
                 opening=perf_counter()-started
@@ -744,13 +862,14 @@ def check_matrix(actor, executable, artifacts):
                 assert len(database_call(lambda:persisted(request_id))['pairs'])==size*30-1-min(size,100)
                 measurements.append({"employees":size,"assignments_before":size*30,"opening_seconds":round(opening,3),
                     "matrix_seconds":round(matrix,3),"page_seconds":round(paging,3),"cell_seconds":round(mutation,3),
-                    "batch_seconds":round(batch,3),"batch_employees":min(size,100),"save_seconds":round(saving,3),"requests":len(requests)-before,"api_requests":len([r for r in requests[before:] if "/workwear/api/" in r["url"]]),"dom_cells":min(100,size)*30,
+                    "batch_seconds":round(batch,3),"batch_employees":min(size,100),"save_seconds":round(saving,3),"requests":len(requests)-before,"api_requests":len([r for r in requests[before:] if "/workwear/api/" in r["url"]]),"dom_cells":min(100,size)*30,"dom_elements":page.locator("#veq-app *").count(),"server_sql_queries":sum(sql_samples[before_sql:]),
                     "request_counts":dict(Counter(r["method"]+" "+urlsplit(r["url"]).path for r in requests[before:]))})
                 print(f"Нагрузка матрицы: {size} × 30 — " + str({k:v for k,v in measurements[-1].items() if k!='request_counts'}),flush=True)
             (artifacts/'matrix-performance.json').write_text(json.dumps(measurements,ensure_ascii=False,indent=2))
             return {"measurements":measurements}
 
         run("headers-and-data", headers)
+        run("accessibility", accessibility)
         run("keyboard-navigation", keyboard)
         run("responsive-geometry", geometry)
         run("cells-modes-save", cells_and_modes)
@@ -760,11 +879,12 @@ def check_matrix(actor, executable, artifacts):
         run("network-and-conflict", network_and_conflict)
         run("close-history-reader", close_history_reader)
         run("event-journal", event_journal)
+        run("historical-snapshots", historical_snapshots)
         run("large-requests", benchmarks)
         summary = {
             "results": results, "completed": True,
             "passed": all(r['status']=='passed' for r in results) and not errors and sorted(failures)==sorted(expected_http),
-            "browser_version": browser.version, "engines_available": engines,
+            "browser_engine": engine, "browser_version": browser.version, "engines_available": engines,
             "javascript_errors": errors, "console": console,
             "expected_http_errors": [{"status":status,"path":urlsplit(url).path} for status,url in expected_http],
             "observed_http_errors": [{"status":status,"path":urlsplit(url).path} for status,url in failures],

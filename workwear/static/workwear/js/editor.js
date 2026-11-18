@@ -18,7 +18,6 @@ export function installEditor(ctx) {
     const norm = (...args) => ctx.norm(...args);
     const byItem = (...args) => ctx.byItem(...args);
     const esc = (...args) => ctx.esc(...args);
-    const itemNames = (...args) => ctx.itemNames(...args);
     const icon = (...args) => ctx.icon(...args);
     const plural = (...args) => ctx.plural(...args);
     const editable = (...args) => ctx.editable(...args);
@@ -173,7 +172,7 @@ export function installEditor(ctx) {
                     if (!item) continue;
                     const repeated = !!warning(member.employee_id, itemId);
                     button.classList.toggle('warn', repeated);
-                    button.setAttribute('aria-label', `${item.name}: назначено — ${member.full_name}${repeated ? ' — повтор' : ''}`);
+                    button.setAttribute('aria-label', cellLabel(member, item));
                     content(button, `${['pending', 'failed'].includes(settings.repeatState) ? '<span aria-hidden="true">…</span>' : '<span class="vq-cell-check" aria-hidden="true"></span>'}${repeated ? '<sup aria-hidden="true">!</sup>' : ''}`);
                 }
             } else {
@@ -210,7 +209,7 @@ export function installEditor(ctx) {
         });
     }
     function rowTags(m, items = new Map(byItem().map(it => [it.id, it]))) {
-        return m.assignments.length ? m.assignments.map(a => { const item = a.name ? a : items.get(a.item_id); return `<span class="vitem ${warning(m.employee_id, a.item_id) ? 'warn' : ''}" title="${esc(item?.name || '')}">${esc(item?.name || 'Позиция')}</span>`; }).join('') : '<span class="quiet">Не назначены</span>';
+        return m.assignments.length ? m.assignments.map(a => { const item = a.name ? a : items.get(a.item_id); return `<span class="vitem ${warning(m.employee_id, a.item_id) ? 'warn' : ''}" title="${esc(item ? ctx.itemDescription(item) : '')}">${esc(item?.name || 'Позиция')}</span>`; }).join('') : '<span class="quiet">Не назначены</span>';
     }
     function rowWarning(m) {
         const ws = m.assignments.filter(a => warning(m.employee_id, a.item_id));
@@ -224,7 +223,7 @@ export function installEditor(ctx) {
             return `<button type="button" class="vq-name-action" data-action="retry-repeat">Проверка недоступна · Повторить</button>`;
         if (!ws.length)
             return '<span class="vq-no-repeat">Без повторов</span>';
-        const names = itemNames(ws.map(x => x.item_id));
+        const names = ws.map(a => a.name || byItem().find(it => it.id === a.item_id)?.name).filter(Boolean);
         return `<div class="warning-names"><button type="button" class="vq-repeat-trigger" data-person="${m.employee_id}">${icon('alert')} ${ws.length} ${plural(ws.length, ['повтор', 'повтора', 'повторов'])} ${icon('chev')}</button><span class="vq-repeat-items">${esc(names.slice(0, 3).join(' · '))}</span></div>`;
     }
     function memberList(rows, locked) {
@@ -246,10 +245,16 @@ export function installEditor(ctx) {
             (item.is_active || member.assignments.some(a => a.item_id === item.id)) &&
             !settings.pendingAssignments.has(ctx.assignmentKey(member.employee_id, item.id));
     }
-    function cell(m, it, locked) {
+    function cellLabel(member, item) {
+        const assigned = member.assignments.some(a => a.item_id === item.id);
+        const description = ctx.itemDescription(ctx.assignmentItem(member, item));
+        return `${description}: ${assigned ? 'назначено' : 'не назначено'} — ${member.full_name}${warning(member.employee_id, item.id) ? ' — повтор' : ''}`;
+    }
+    function cell(m, it, locked, groupHeader) {
         const assigned = m.assignments.some(a => a.item_id === it.id), w = warning(m.employee_id, it.id);
         const tab = settings.matrixFocus?.employeeId === m.employee_id && settings.matrixFocus?.itemId === it.id ? 0 : -1;
-        return `<td><button type="button" class="gridpick ${assigned ? 'on' : ''} ${assigned && w ? 'warn' : ''}" data-cell="${m.employee_id}:${it.id}" tabindex="${tab}" aria-pressed="${assigned}" aria-label="${esc(it.name)}: ${assigned ? 'назначено' : 'не назначено'} — ${esc(m.full_name)}${w ? ' — повтор' : ''}" ${locked || !cellAvailable(m, it) ? 'disabled aria-disabled="true"' : ''}>${assigned ? (settings.repeatState === 'pending' || settings.repeatState === 'failed' ? '<span aria-hidden="true">…</span>' : '<span class="vq-cell-check" aria-hidden="true"></span>') : ''}${assigned && w ? '<sup aria-hidden="true">!</sup>' : ''}${!assigned ? '<span aria-hidden="true">—</span>' : ''}</button></td>`;
+        const description = ctx.itemDescription(ctx.assignmentItem(m, it));
+        return `<td headers="matrix-person-${m.employee_id} ${groupHeader} matrix-item-${it.id}"><button type="button" class="gridpick ${assigned ? 'on' : ''} ${assigned && w ? 'warn' : ''}" data-cell="${m.employee_id}:${it.id}" tabindex="${tab}" aria-pressed="${assigned}" title="${esc(description)}" aria-label="${esc(cellLabel(m, it))}" ${locked || !cellAvailable(m, it) ? 'disabled aria-disabled="true"' : ''}>${assigned ? (settings.repeatState === 'pending' || settings.repeatState === 'failed' ? '<span aria-hidden="true">…</span>' : '<span class="vq-cell-check" aria-hidden="true"></span>') : ''}${assigned && w ? '<sup aria-hidden="true">!</sup>' : ''}${!assigned ? '<span aria-hidden="true">—</span>' : ''}</button></td>`;
     }
     function matrix(rows, locked) {
         const visibleItems = ctx.matrixItems(), gg = [];
@@ -260,7 +265,8 @@ export function installEditor(ctx) {
             if (last?.[0] === category) last[1].push(item);
             else gg.push([category, [item]]);
         }
-        return `<div class="vq-matrix-legend">✓ Назначено · ✓! Назначено с повтором · — Не назначено · … Проверяется история.</div><div class="vq-tablewrap" tabindex="0" role="region" aria-label="Матрица назначений. Горизонтальная прокрутка для всех столбцов."><table class="matrix"><thead><tr><th class="sticky" rowspan="2" style="text-align:left"><span style="display:inline-flex;align-items:center;gap:10px">${locked ? '' : `<input type="checkbox" data-check="all" aria-label="Выбрать сотрудников показанной страницы" ${rows.length && rows.every(m => settings.selected.has(m.employee_id)) ? 'checked' : ''}>`} Сотрудник</span></th>${gg.map(([name, items]) => `<th class="matrix-group" scope="colgroup" colspan="${items.length}">${esc(name)}</th>`).join('')}<th rowspan="2" class="sumcol">Всего</th></tr><tr>${visibleItems.map(it => `<th class="matrix-leaf" scope="col" title="${esc(it.name)}">${esc(it.name)}<small>${it.validity_days} дн.</small></th>`).join('')}</tr></thead><tbody>${rows.map(m => `<tr data-row="${m.employee_id}" class="${settings.selected.has(m.employee_id) ? 'selected' : ''}"><td class="sticky"><span style="display:flex;align-items:center;gap:9px">${locked ? '' : `<input type="checkbox" data-check="${m.employee_id}" aria-label="Выбрать ${esc(m.full_name)}" ${settings.selected.has(m.employee_id) ? 'checked' : ''}>`}<span><button type="button" class="vq-name-action" data-person="${m.employee_id}">${esc(m.full_name)}</button><span class="secondary" style="display:block">${esc(m.personnel_number)}</span></span></span></td>${visibleItems.map(it => cell(m, it, locked)).join('')}<td class="sumcol">${m.assignments.length}</td></tr>`).join('')}</tbody></table></div>`;
+        const groupHeaders = new Map(gg.flatMap(([, items]) => items.map(item => [item.id, `matrix-group-${items[0].id}`])));
+        return `<div class="vq-matrix-legend">✓ Назначено · ✓! Назначено с повтором · — Не назначено · … Проверяется история.</div><div class="vq-tablewrap" tabindex="0" role="region" aria-label="Матрица назначений. Горизонтальная прокрутка для всех столбцов."><table class="matrix"><caption class="vq-sr-only">Назначения сотрудников. Заголовки — текущий каталог; сведения назначения — в подсказке ячейки и карточке сотрудника.</caption><colgroup span="1"></colgroup>${gg.map(([, items]) => `<colgroup span="${items.length}"></colgroup>`).join('')}<colgroup span="1"></colgroup><thead><tr><th class="sticky" scope="col" rowspan="2" style="text-align:left"><span style="display:inline-flex;align-items:center;gap:10px">${locked ? '' : `<input type="checkbox" data-check="all" aria-label="Выбрать сотрудников показанной страницы" ${rows.length && rows.every(m => settings.selected.has(m.employee_id)) ? 'checked' : ''}>`} Сотрудник</span></th>${gg.map(([name, items]) => `<th id="matrix-group-${items[0].id}" class="matrix-group" scope="colgroup" colspan="${items.length}">${esc(name)}</th>`).join('')}<th rowspan="2" scope="col" class="sumcol">Всего</th></tr><tr>${visibleItems.map(it => `<th id="matrix-item-${it.id}" class="matrix-leaf" scope="col" title="${esc(it.name)}">${esc(it.name)}${it.validity_days ? `<small>${it.validity_days} дн. · каталог</small>` : ''}</th>`).join('')}</tr></thead><tbody>${rows.map(m => `<tr data-row="${m.employee_id}" class="${settings.selected.has(m.employee_id) ? 'selected' : ''}"><th id="matrix-person-${m.employee_id}" scope="row" class="sticky"><span style="display:flex;align-items:center;gap:9px">${locked ? '' : `<input type="checkbox" data-check="${m.employee_id}" aria-label="Выбрать ${esc(m.full_name)}" ${settings.selected.has(m.employee_id) ? 'checked' : ''}>`}<span><button type="button" class="vq-name-action" data-person="${m.employee_id}">${esc(m.full_name)}</button><span class="secondary" style="display:block">${esc(m.personnel_number)}</span></span></span></th>${visibleItems.map(it => cell(m, it, locked, groupHeaders.get(it.id))).join('')}<td class="sumcol">${m.assignments.length}</td></tr>`).join('')}</tbody></table></div>`;
     }
     function selectionBar() {
         if (!settings.selected.size || !editable())

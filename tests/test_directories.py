@@ -149,6 +149,36 @@ class DirectoryTests(TestCase):
             actor=self.actor, expected_version=self.req.version)
         self.assertFalse(RequestAssignment.objects.filter(pk=assignment.pk).exists())
 
+    def test_two_assignments_keep_individual_snapshots_after_admin_changes(self):
+        self.save()
+        item = self.items[0]
+        self.assertEqual(self.client.post(f"/admin/workwear/workwearitem/{item.pk}/change/", {
+            "code": item.code, "name": "Изменённое имя", "category": "Изменённая категория",
+            "validity_days": 90, "sort_order": 0, "is_active": "on", "_save": "Сохранить",
+        }).status_code, 302)
+        self.req.refresh_from_db()
+        members = [{"employee_id": person.pk, "item_ids": [item.pk]} for person in self.people]
+        result = save_draft(request_id=self.req.pk, actor=self.actor,
+            expected_version=self.req.version, members=members)
+        WorkwearItem.objects.filter(pk=item.pk).update(is_active=False)
+        save_draft(request_id=self.req.pk, actor=self.actor,
+            expected_version=result.version, members=members, finish=True)
+        data = self.client.get(f"/workwear/api/requests/{self.req.pk}/").json()["request"]
+        snapshots = {m["employee_id"]: m["assignments"][0] for m in data["members"]}
+        expected = [(item.name, item.category, item.validity_days),
+                    ("Изменённое имя", "Изменённая категория", 90)]
+        for person, values in zip(self.people, expected):
+            snapshot = snapshots[person.pk]
+            self.assertEqual((snapshot["name"], snapshot["category"], snapshot["validity_days"]), values)
+            stored = RequestAssignment.objects.get(request_employee__request=self.req,
+                request_employee__employee=person)
+            self.assertEqual((stored.snapshot_item_name, stored.snapshot_item_category,
+                              stored.snapshot_validity_days), values)
+        metadata = self.client.get("/workwear/api/ui/metadata/").json()["items"]
+        current = next(row for row in metadata if row["id"] == item.pk)
+        self.assertEqual((current["name"], current["category"], current["validity_days"], current["is_active"]),
+                         ("Изменённое имя", "Изменённая категория", 90, False))
+
     def test_postgresql_fills_snapshot_instead_of_trusting_insert_values(self):
         member = services.add_employee(request_id=self.req.pk, employee_id=self.people[0].pk,
             actor=self.actor, expected_version=1)

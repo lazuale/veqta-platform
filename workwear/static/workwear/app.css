@@ -83,16 +83,16 @@
   min-width: 253px;
 }
 
-.vq-workwear th.sticky {
+.vq-workwear thead th.sticky {
   background: var(--vq-bg);
   z-index: 6;
 }
 
-.vq-workwear tbody tr.selected td.sticky {
+.vq-workwear tbody tr.selected .sticky {
   background: var(--vq-bg);
 }
 
-.vq-workwear tbody tr:hover td.sticky {
+.vq-workwear tbody tr:hover .sticky {
   background: var(--vq-bg);
 }
 
@@ -181,7 +181,7 @@
   font-size: 17px;
 }
 
-.vq-workwear .matrix th {
+.vq-workwear .matrix thead th {
   padding: 9px 6px;
   text-align: center;
   border-right: 1px solid var(--vq-border);
@@ -212,13 +212,13 @@
   font-weight: 450;
 }
 
-.vq-workwear .matrix td {
+.vq-workwear .matrix tbody :is(td, th) {
   padding: 9px 5px;
   text-align: center;
   border-right: 1px solid var(--vq-border);
 }
 
-.vq-workwear .matrix td.sticky {
+.vq-workwear .matrix tbody .sticky {
   padding: 13px 18px;
   text-align: left;
 }
@@ -563,7 +563,7 @@
     margin-bottom: 11px;
   }
 
-  .vq-workwear .matrix td {
+  .vq-workwear .matrix tbody :is(td, th) {
     padding-top: 6px;
     padding-bottom: 6px;
   }
@@ -1226,13 +1226,13 @@
   color: var(--vq-text-muted);
 }
 
-#veq-app .matrix tbody td {
+#veq-app .matrix tbody :is(td, th) {
   height: 54px;
   padding-top: 7px;
   padding-bottom: 7px;
 }
 
-#veq-app .matrix tbody td.sticky {
+#veq-app .matrix tbody .sticky {
   padding: 7px 14px;
   min-width: 270px;
   max-width: 320px;
@@ -1407,13 +1407,13 @@
     margin-bottom: 11px;
   }
 
-  #veq-app .matrix tbody td {
+  #veq-app .matrix tbody :is(td, th) {
     height: 50px;
     padding-top: 5px;
     padding-bottom: 5px;
   }
 
-  #veq-app .matrix tbody td.sticky {
+  #veq-app .matrix tbody .sticky {
     height: 50px;
     padding-top: 5px;
     padding-bottom: 5px;
@@ -1733,7 +1733,7 @@
 @media (max-width:760px) {
   #veq-app .matrix {--vq-matrix-name-width:clamp(132px,38vw,200px)}
   #veq-app .matrix thead th.sticky,
-  #veq-app .matrix tbody td.sticky {
+  #veq-app .matrix tbody .sticky {
     width:var(--vq-matrix-name-width);
     min-width:var(--vq-matrix-name-width);
     max-width:var(--vq-matrix-name-width);
@@ -1747,3 +1747,11 @@
 #veq-app .vq-event-list li {padding-block:var(--vq-space-3);border-bottom:1px solid var(--vq-border);overflow-wrap:anywhere}
 #veq-app .vq-event-list li:last-child {border-bottom:0}
 #veq-app .vq-event-list p {margin-block:var(--vq-space-2) 0}
+
+/* Заголовок строки сохраняет оформление сотрудника и нативную семантику th. */
+#veq-app .matrix tbody th {
+  font-weight: normal;
+  color: var(--vq-text);
+  text-transform: none;
+  letter-spacing: normal;
+}

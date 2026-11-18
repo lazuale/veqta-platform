@@ -79,17 +79,20 @@ export function installCore(ctx) {
         for (const member of settings.base?.members || []) for (const a of member.assignments) {
             if (a.name && !assigned.has(a.item_id)) assigned.set(a.item_id, a);
         }
-        const items = catalog.filter(it => (isDraft() && it.is_active) || assigned.has(it.id)).map(it => {
-            const snapshot = assigned.get(it.id);
-            return snapshot ? { ...it, name: snapshot.name, category: snapshot.category,
-                validity_days: snapshot.validity_days, code: snapshot.code } : it;
-        });
+        // Колонка описывает текущую позицию каталога. Снимки относятся только
+        // к отдельным назначениям; у одной позиции они могут различаться.
+        const items = catalog.filter(it => (isDraft() && it.is_active) || assigned.has(it.id));
         const known = new Set(items.map(it => it.id));
-        for (const [id, snapshot] of assigned) if (!known.has(id))
-            items.push({ ...snapshot, id, is_active: false });
+        for (const [id] of assigned) if (!known.has(id))
+            items.push({ id, name: `Позиция № ${id}`, category: 'Назначения', is_active: false });
         catalogCache = { catalog, base: settings.base, items };
         return items.slice();
     };
+    const assignmentItem = (member, item) => {
+        const snapshot = member.assignments.find(a => a.item_id === item.id);
+        return snapshot?.name ? { ...item, ...snapshot, id: item.id } : item;
+    };
+    const itemDescription = item => `${item.name}${item.category ? ' · ' + item.category : ''}${item.validity_days ? ' · ' + item.validity_days + ' дней' : ''}`;
     const currentMembers = () => settings.request?.members || [];
     const importSummary = () => {
         const data = settings.meta?.import;
@@ -158,7 +161,7 @@ export function installCore(ctx) {
                     : err.message || 'Ошибка операции', true);
     }
     Object.assign(ctx, {
-        root, main, overlays, feedback, API, $, $$, esc, copy, plural, fmt, fmtTime, norm, icon, btn, field, settings, can, historyKey, assignmentKey, controlSelector, setBusy, byItem, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable, newSelection, itemNames, assignments, assignedCount, emptyCount, normalizedDraft, dirty, notice, api, fail
+        root, main, overlays, feedback, API, $, $$, esc, copy, plural, fmt, fmtTime, norm, icon, btn, field, settings, can, historyKey, assignmentKey, controlSelector, setBusy, byItem, assignmentItem, itemDescription, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable, newSelection, itemNames, assignments, assignedCount, emptyCount, normalizedDraft, dirty, notice, api, fail
     });
     return true;
 }

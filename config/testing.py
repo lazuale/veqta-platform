@@ -10,3 +10,4 @@ ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]
 # Браузерные тесты используют временный HTTP-сервер на localhost.
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
+MIDDLEWARE = ["tests.browser_support.QueryCountMiddleware", *MIDDLEWARE]

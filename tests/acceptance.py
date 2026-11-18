@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import secrets
 from threading import Barrier
+from time import perf_counter
 from uuid import uuid4
 from .browser_support import live_server
 
@@ -24,11 +25,14 @@ def check_race(actor, people, items):
     from workwear.sync import save_draft
     req = services.create_request(organization_id=people[0].organization_id, actor=actor)
     barrier = Barrier(2)
+    from .factories import make_user
+    users = [actor.pk, make_user().pk]
 
-    def worker(person):
+    def worker(arguments):
         """Работать через отдельное соединение и закрыть его после транзакции."""
         try:
-            user = get_user_model().objects.get(pk=actor.pk)
+            person, user_id = arguments
+            user = get_user_model().objects.get(pk=user_id)
             barrier.wait(timeout=10)
             save_draft(request_id=req.pk, actor=user, expected_version=1,
                        members=[{"employee_id": person.pk, "item_ids": [items[0].pk]}])
@@ -39,15 +43,58 @@ def check_race(actor, people, items):
             connections.close_all()
 
     with ThreadPoolExecutor(max_workers=2) as pool:
-        results = list(pool.map(worker, people[:2]))
+        results = list(pool.map(worker, zip(people[:2], users)))
     assert sorted(results) == ["conflict", "saved"], results
     req.refresh_from_db()
     assert req.version == 2 and req.members.count() == 1
     assert WorkwearEvent.objects.filter(request_number=req.pk).count() == 2
-    print("Конкурентное сохранение: одна успешная запись и один конфликт; частичных изменений нет")
+    print("Конкурентное сохранение двух пользователей: одна успешная запись и один конфликт; частичных изменений нет")
 
 
-def check_browser(actor, people, executable):
+def check_parallel_load(organization_id, employee_ids, item_ids, users=8):
+    """Отдельные прикладные соединения; каждый пользователь сохраняет свою заявку."""
+    from django.db import connections
+    from django.contrib.auth import get_user_model
+    from django.test.utils import CaptureQueriesContext
+    from workwear import services
+    from workwear.models import RequestAssignment, WorkwearEvent
+    from workwear.sync import save_draft
+    from .factories import make_user
+    actors = [make_user() for _ in range(users)]
+    requests = [(user.pk, services.create_request(organization_id=organization_id, actor=user).pk) for user in actors]
+    barrier = Barrier(users)
+    members = [{"employee_id": person, "item_ids": item_ids} for person in employee_ids]
+
+    def worker(arguments):
+        connection = connections["default"]
+        connection.settings_dict = {**connection.settings_dict, "USER": "veqta_dev",
+                                    "PASSWORD": os.environ["DB_RUNTIME_PASSWORD"]}
+        try:
+            user_id, request_id = arguments
+            user = get_user_model().objects.get(pk=user_id)
+            barrier.wait(timeout=15)
+            started = perf_counter()
+            with CaptureQueriesContext(connection) as queries:
+                result = save_draft(request_id=request_id, actor=user, expected_version=1, members=members)
+            seconds = perf_counter() - started
+            count = RequestAssignment.objects.filter(request_employee__request_id=request_id).count()
+            assert count == len(employee_ids) * len(item_ids) and result.version == 2
+            assert WorkwearEvent.objects.filter(request_number=request_id).count() == 2
+            return {"seconds": round(seconds, 3), "sql_queries": len(queries), "assignments": count}
+        finally:
+            connections.close_all()
+
+    started = perf_counter()
+    with ThreadPoolExecutor(max_workers=users) as pool:
+        results = list(pool.map(worker, requests))
+    report = {"users": users, "employees_per_user": len(employee_ids), "items_per_employee": len(item_ids),
+              "total_seconds": round(perf_counter()-started, 3), "sessions": results,
+              "scope": "concurrent application-role service transactions; local PostgreSQL"}
+    print(f"Параллельные прикладные сеансы: {users} × {len(employee_ids)} × {len(item_ids)} — успешно", flush=True)
+    return report
+
+
+def check_browser(actor, people, executable, engine="chromium"):
     """Пройти вход, массовый подбор, назначение, сохранение, завершение и возврат."""
     from playwright.sync_api import sync_playwright, expect
     password = secrets.token_urlsafe(32)
@@ -57,7 +104,7 @@ def check_browser(actor, people, executable):
         options = {"headless": True}
         if executable:
             options["executable_path"] = executable
-        browser = playwright.chromium.launch(**options)
+        browser = getattr(playwright, engine).launch(**options)
         page = browser.new_page(viewport={"width": 1440, "height": 1000})
         page.set_default_timeout(10000)
         errors, failures = [], []
@@ -163,8 +210,10 @@ def check_browser(actor, people, executable):
         page.goto(closed_url)
         expect(page.locator('.vq-assignment-tags .vitem')).to_have_text("Позиция из браузерного теста")
         page.locator('[data-mode="matrix"]').click()
-        expect(page.locator('.matrix-leaf')).to_contain_text("Позиция из браузерного теста")
-        expect(page.locator('.matrix-leaf')).to_contain_text("90 дн.")
+        expect(page.locator('.matrix-leaf')).to_contain_text("Изменённое название после завершения")
+        expect(page.locator('.matrix-leaf')).to_contain_text("1095 дн. · каталог")
+        expect(page.locator('[data-cell]')).to_have_attribute('title',
+            "Позиция из браузерного теста · Новая категория из Admin · 90 дней")
         # Отсутствие доступных справочников проверяем через реальные формы Admin.
         metadata = page.request.get(base + "/workwear/api/ui/metadata/").json()
         for org in metadata["organizations"]:
@@ -231,6 +280,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--browser", action="store_true")
     parser.add_argument("--browser-executable")
+    parser.add_argument("--engine", choices=["chromium", "firefox", "webkit"], default="chromium")
+    parser.add_argument("--axe-script", help="Локальный axe.min.js для расширенной проверки доступности")
     parser.add_argument("--matrix", action="store_true", help="Расширенная приёмка матрицы и профилей нагрузки")
     parser.add_argument("--artifacts", default="test-results/rc", help="Скриншоты и измерения браузера")
     args = parser.parse_args()
@@ -240,7 +291,9 @@ def main():
     from config.database import require_target
     from django.db import connection
     from .factories import make_user, make_import, make_employees, make_items
-    require_target("dev", "veqta_dev")
+    require_target("dev", "veqta_dev", owner=True)
+    if (args.browser or args.matrix) and not os.environ.get("DB_RUNTIME_PASSWORD"):
+        raise RuntimeError("Браузерный сервер требует DB_RUNTIME_PASSWORD прикладной роли")
     with connection._nodb_cursor() as cursor:
         cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", ["test_veqta_dev"])
         if cursor.fetchone():
@@ -248,14 +301,16 @@ def main():
     original_name = connection.settings_dict["NAME"]
     connection.creation.create_test_db(verbosity=0, autoclobber=False, serialize=False)
     try:
+        from .database_roles import grant_test_runtime_access
+        grant_test_runtime_access()
         actor, snapshot = make_user(), make_import()
         people, items = make_employees(snapshot), make_items()
         check_race(actor, people, items)
         if args.browser:
-            check_browser(actor, people, args.browser_executable)
+            check_browser(actor, people, args.browser_executable, args.engine)
         if args.matrix:
             from .browser_matrix import check_matrix
-            check_matrix(actor, args.browser_executable, Path(args.artifacts))
+            check_matrix(actor, args.browser_executable, Path(args.artifacts), args.engine, args.axe_script)
     finally:
         connection.creation.destroy_test_db(original_name, verbosity=0)
 
