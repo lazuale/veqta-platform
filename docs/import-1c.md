@@ -1,6 +1,6 @@
 # Приём справочника 1С
 
-Импорт ведёт список сотрудников для подбора в Workwear. Интерфейс показывает подтверждённую календарную дату выгрузки `source_export_date` и время её приёма `accepted_at`. Период табеля в контракте отсутствует.
+Импорт обновляет справочник сотрудников для Workwear. Интерфейс отдельно показывает дату источника `source_export_date` и время приёма `accepted_at`. Период табеля в контракт не входит.
 
 ## Формат источника
 
@@ -25,7 +25,7 @@ tar -czf private/source.tar.gz -C private/source Employees.csv Positions.csv Uni
 python manage.py workwear_import_1c private/source.tar.gz --environment dev --database-name veqta_dev
 ```
 
-В отчёте сверьте `unique_current_employees` и `publication_review`. Для удобства первичной проверки первый аргумент может быть каталогом с CSV. Для публикации используйте тот же проверенный архив.
+Сверьте в отчёте `unique_current_employees` и `publication_review`. Для проверки можно передать каталог с CSV. Для публикации используйте уже проверенный архив.
 
 ```bash
 read -r -p 'Подтверждённое число сотрудников: ' EMPLOYEE_COUNT
