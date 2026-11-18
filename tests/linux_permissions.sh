@@ -43,6 +43,18 @@ fi
 chown root "$APP/.venv/lib/dependency.py"
 veqta_check_trusted_code
 
+# Root-owned checkout с group-writable родителем нельзя считать доверенным.
+unsafe_parent=$(mktemp -d /opt/veqta-parent-test.XXXXXXXX)
+mkdir -p "$unsafe_parent/app/.git" "$unsafe_parent/app/.venv"
+chmod 0755 "$unsafe_parent/app"
+chmod g+w "$unsafe_parent"
+if (APP="$unsafe_parent/app"; veqta_check_trusted_code >/dev/null 2>&1); then
+  echo 'FAIL: доступный для подмены родительский каталог принят' >&2
+  rm -rf -- "$unsafe_parent"
+  exit 1
+fi
+rm -rf -- "$unsafe_parent"
+
 # Root-owned symlink не может направлять доверенный импорт в world-writable /tmp.
 ln -s /tmp "$APP/workwear/unsafe_python_modules"
 if veqta_check_trusted_code >/dev/null 2>&1; then

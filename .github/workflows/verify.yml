@@ -58,7 +58,8 @@ jobs:
           python - <<'PY'
           import os, secrets
           with open(os.environ['GITHUB_ENV'], 'a') as stream:
-              for name in ('DJANGO_SECRET_KEY', 'DB_PASSWORD', 'DB_OWNER_PASSWORD'):
+              for name in ('DJANGO_SECRET_KEY', 'DJANGO_PROD_SECRET_KEY', 'DB_PASSWORD', 'DB_OWNER_PASSWORD',
+                           'DB_PROD_PASSWORD', 'DB_PROD_OWNER_PASSWORD'):
                   value = secrets.token_urlsafe(64)
                   print(f'::add-mask::{value}')
                   stream.write(f'{name}={value}\n')
@@ -67,6 +68,63 @@ jobs:
         run: |
           psql -X -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres -f deploy/postgresql/dev.sql
           DB_RUNTIME_PASSWORD="$DB_PASSWORD" DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" python -m tests.coldstart
+      - name: Independent PROD Cold Start and cross-contour isolation
+        run: |
+          DB_PASSWORD="$DB_PROD_PASSWORD" DB_OWNER_PASSWORD="$DB_PROD_OWNER_PASSWORD" \
+            psql -X -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres -f deploy/postgresql/prod.sql
+          VEQTA_ENV=prod DB_NAME=veqta_prod DB_USER=veqta_prod_owner DB_PASSWORD="$DB_PROD_OWNER_PASSWORD" \
+            DJANGO_SECRET_KEY="$DJANGO_PROD_SECRET_KEY" DJANGO_DEBUG=0 DJANGO_TRUST_PROXY=1 \
+            DJANGO_SECURE_COOKIES=1 DJANGO_ALLOWED_HOSTS=localhost \
+            DJANGO_CSRF_TRUSTED_ORIGINS=https://localhost \
+            python manage.py veqta_initialize --environment prod --database-name veqta_prod
+          VEQTA_ENV=prod DB_NAME=veqta_prod DB_USER=veqta_prod DB_PASSWORD="$DB_PROD_PASSWORD" \
+            DJANGO_SECRET_KEY="$DJANGO_PROD_SECRET_KEY" DJANGO_DEBUG=0 DJANGO_TRUST_PROXY=1 \
+            DJANGO_SECURE_COOKIES=1 DJANGO_ALLOWED_HOSTS=localhost \
+            DJANGO_CSRF_TRUSTED_ORIGINS=https://localhost \
+            python manage.py migrate --check
+          python - <<'PY'
+          import os
+          import psycopg
+
+          db = dict(host=os.environ["DB_HOST"], port=os.environ["DB_PORT"],
+                    connect_timeout=5, sslmode="disable")
+          passwords = {
+              "veqta_dev": os.environ["DB_PASSWORD"],
+              "veqta_dev_owner": os.environ["DB_OWNER_PASSWORD"],
+              "veqta_prod": os.environ["DB_PROD_PASSWORD"],
+              "veqta_prod_owner": os.environ["DB_PROD_OWNER_PASSWORD"],
+          }
+          for contour in ("dev", "prod"):
+              database = f"veqta_{contour}"
+              role = database
+              with psycopg.connect(**db, dbname=database, user=role, password=passwords[role]) as conn:
+                  with conn.cursor() as cursor:
+                      cursor.execute("""
+                          SELECT current_database(), current_user,
+                              has_database_privilege(current_user,current_database(),'CREATE'),
+                              has_schema_privilege(current_user,'public','CREATE')
+                      """)
+                      assert cursor.fetchone() == (database, role, False, False)
+                      cursor.execute("SELECT count(*) FROM pg_trigger WHERE tgname LIKE 'ww_%' AND NOT tgisinternal")
+                      assert cursor.fetchone()[0] == 13
+                      try:
+                          cursor.execute(f"SET ROLE veqta_{contour}_owner")
+                      except psycopg.errors.InsufficientPrivilege as error:
+                          assert error.sqlstate == "42501"
+                      else:
+                          raise AssertionError(f"Unexpected owner privilege: {role}")
+          for role, other in (
+              ("veqta_dev", "veqta_prod"), ("veqta_dev_owner", "veqta_prod"),
+              ("veqta_prod", "veqta_dev"), ("veqta_prod_owner", "veqta_dev")
+          ):
+              try:
+                  psycopg.connect(**db, dbname=other, user=role, password=passwords[role]).close()
+              except psycopg.errors.InsufficientPrivilege as error:
+                  assert error.sqlstate == "42501", (role, other, error.sqlstate)
+              else:
+                  raise AssertionError(f"Cross-contour CONNECT was granted: {role} -> {other}")
+          print("Independent DEV/PROD: migrations, runtime access and cross-contour SQLSTATE 42501: PASS")
+          PY
       - name: Django and PostgreSQL regression
         run: |
           python manage.py check

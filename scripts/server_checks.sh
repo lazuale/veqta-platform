@@ -83,11 +83,19 @@ veqta_check_trusted_code() {
   [[ ! -L "$APP" && -d "$APP/.git" && ! -L "$APP/.git" && ! -L "$APP/.venv" ]] || {
     echo 'STOP: недоверенный checkout или симлинк' >&2; return 1;
   }
-  [[ "$(stat -c %U:%G "$APP")" == root:root && "$(stat -c %U "$APP/..")" == root ]] || {
-    echo 'STOP: код и родительский каталог должны принадлежать root' >&2; return 1;
+  [[ "$(stat -c %U:%G "$APP")" == root:root && "$(readlink -f -- "$APP")" == "$APP" ]] || {
+    echo 'STOP: checkout должен принадлежать root и не иметь симлинков в родительском пути' >&2; return 1;
   }
-  local bad
-  bad=$(find "$APP" -xdev \( ! -user root -o -perm /022 \) -print -quit) || {
+  local bad part="$APP"
+  while [[ "$part" != / ]]; do
+    bad=$(find "$part" -maxdepth 0 \( ! -user root -o -perm /022 \) -print -quit) || return 1
+    [[ -z "$bad" ]] || {
+      echo "STOP: недоверенный каталог пути checkout: $bad" >&2; return 1;
+    }
+    part=${part%/*}
+    [[ -n "$part" ]] || part=/
+  done
+  bad=$(find "$APP" \( ! -user root -o -perm /022 \) -print -quit) || {
     echo 'STOP: проверка прав исходников завершилась ошибкой' >&2; return 1;
   }
   [[ -z "$bad" ]] || {
@@ -109,7 +117,7 @@ veqta_check_trusted_code() {
       part=${part%/*}
       [[ -n "$part" ]] || part=/
     done
-  done < <(find "$APP" -xdev -type l -print0)
+  done < <(find "$APP" -type l -print0)
 }
 
 # Явное административное исполнение из root-owned кода. Окружение очищено:
