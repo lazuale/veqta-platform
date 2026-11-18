@@ -61,9 +61,7 @@ config="/etc/veqta/${target}.env"
 database="veqta_${target}"
 domain=$4
 migration_config="/etc/veqta/${target}-migrate.env"
-source "$source_repo/scripts/server_checks.sh"
-DOMAIN=$domain
-veqta_check_hostname
+# Не source из операторского staging: его рабочее дерево принадлежит не root.
 [[ ! -e "$app" && ! -L "$app" && ! -e "$config" && ! -L "$config" && ! -e "$migration_config" && ! -L "$migration_config" ]]
 if id "$actor" >/dev/null 2>&1; then
     echo 'STOP: пользователь уже существует; проверьте частичную установку по operations.md' >&2
@@ -75,7 +73,6 @@ SELECT EXISTS(SELECT FROM pg_database WHERE datname = :'target')
 VEQTA_SQL
 )
 [[ "$existing" == f ]] || { echo 'STOP: роль или база уже существует'; exit 1; }
-useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$actor"
 install -d -o root -g root -m 0755 "$app"
 git -c safe.directory="$source_repo" clone --no-local --no-checkout "$source_repo" "$app"
 git -C "$app" remote set-url origin https://github.com/lazuale/veqta-platform.git
@@ -83,6 +80,11 @@ git -C "$app" checkout --detach "$revision"
 [[ "$(git -C "$app" rev-parse HEAD)" == "$revision" ]]
 status=$(git -C "$app" status --porcelain)
 [[ -z "$status" ]]
+# Только здесь разрешён source: проверенный SHA находится в root-owned checkout.
+source "$app/scripts/server_checks.sh"
+DOMAIN=$domain
+veqta_check_hostname
+useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$actor"
 python3.14 "$app/scripts/create_config.py" --environment "$target" --hostname "$domain"
 install -d -o root -g root -m 0755 /etc/veqta
 install -o root -g "$actor" -m 0640 "$app/.env.$target" "$config"
@@ -100,7 +102,6 @@ python3.14 -m venv "$app/.venv"
 "$app/.venv/bin/python" -m pip check
 runuser -u "$actor" -- test -r "$app/manage.py"
 runuser -u "$actor" -- test -x "$app/.venv/bin/python"
-source "$app/scripts/server_checks.sh"
 veqta_target "$target"
 veqta_check_trusted_code
 veqta_load_config
@@ -109,6 +110,10 @@ VEQTA_BOOTSTRAP
 ```
 
 Генератор требует `--hostname` для обоих контуров и создаёт пару файлов: приложение и миграции. Он не печатает секреты и отказывается от повторного запуска, если любой файл уже существует. Пароль владельца не попадает в env службы. Владелец создаёт схему штатным `migrate`, а default privileges дают приложению DML, последовательности и вызов функций без владения объектами, DDL, TRUNCATE или членства в роли владельца. Только владелец DEV имеет CREATEDB для одноразовых тестовых баз. В обоих серверных контурах DEBUG=0, proxy=1 и Secure cookies=1. При частичном отказе не генерируйте новый пароль поверх уже созданной роли: порядок продолжения — в operations.md. SQL рассчитан на один запуск, initialize — только на пустую БД. Shell `nologin` сохранён. Рабочий UID не владеет кодом, не выполняет привилегированные миграции и не получает пароль владельца PostgreSQL. Для Cold Start используется штатный `veqta_initialize`, который вызывает Django `migrate`.
+
+### Граница доверия staging
+
+Операторский `VEQTA_SOURCE` не является доверенным местом исполнения от root: даже совпадение `git rev-parse HEAD` не запрещает редактирование рабочего файла другим Unix UID. При Cold Start административные функции загружаются **только после** получения конкретного SHA в новый root-owned checkout и проверки чистого рабочего дерева. При обновлении перед `source` отдельно проверяются владелец/права самого скрипта и всех каталогов на его прямом пути; затем запускается расширенная `veqta_check_trusted_code`. Не выполняйте `sudo source`, `sudo bash` или `python` напрямую из операторского staging.
 
 ## 4. Первичный HTTPS без остановки общего Nginx
 
@@ -209,7 +214,15 @@ revision=$2
 target=$3
 [[ "$target" == dev || "$target" == prod ]]
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
-source "/opt/veqta-$target/scripts/server_checks.sh"
+app="/opt/veqta-$target"
+# До исполнения административного скрипта проверяем его и весь прямой путь.
+[[ ! -L "$app" && ! -L "$app/scripts" && ! -L "$app/scripts/server_checks.sh" ]]
+for part in /opt "$app" "$app/scripts" "$app/scripts/server_checks.sh"; do
+    [[ -z "$(find "$part" -maxdepth 0 \( ! -user root -o -perm /022 \) -print -quit)" ]] || {
+        echo "STOP: недоверенный административный скрипт или путь: $part" >&2; exit 2;
+    }
+done
+source "$app/scripts/server_checks.sh"
 veqta_target "$target"
 veqta_check_trusted_code
 veqta_clean_checkout
