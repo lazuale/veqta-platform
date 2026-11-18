@@ -423,7 +423,7 @@ raise SystemExit(1 if os.environ.get('VEQTA_TEST_MODE')=='broken-new-site' and c
         self.script("find", "#!/bin/sh\necho /opt/veqta-prod/config/settings.py\n")
         result = self.apply()
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("недоверенные владелец или права", result.stderr)
+        self.assertIn("недоверенный каталог пути checkout", result.stderr)
         self.assertFalse((self.path / "systemctl.log").exists())
 
     def test_nginx_failure_removes_only_new_site_and_link(self):
