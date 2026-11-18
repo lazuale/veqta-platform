@@ -1,23 +1,15 @@
-"""Единое правило нового включения сотрудника в заявку.
-
-Нужны последняя принятая выгрузка и точное совпадение организации. Старые
-участники сохраняют историю; повторное новое включение проверяется заново.
-Сервисы берут общий advisory lock с публикацией 1С; прямой сторонний writer
-обязан соблюдать тот же протокол, что остаётся отдельным gate интеграции."""
+"""Новое включение требует последней принятой выгрузки и совпадения организации. Старые участники сохраняются при обновлении справочника."""
 from django.core.exceptions import ValidationError
 
 from .models import EmployeeImport
 
 
 def latest_import():
-    """Вернуть последний EmployeeImport по accepted_at, pk или None; только чтение."""
     return EmployeeImport.objects.order_by("-accepted_at", "-pk").first()
 
 
 def is_current(employee, *, organization_id, latest):
-    """Проверить точную организацию и last_seen_import относительно переданного latest.
-
-    Чистый предикат; отсутствие последней выгрузки означает False."""
+    """Сверяем сотрудника с уже выбранной выгрузкой, не перечитывая справочник."""
     return (
         latest is not None
         and employee.organization_id == organization_id
@@ -26,12 +18,9 @@ def is_current(employee, *, organization_id, latest):
 
 
 def require_current(employee, *, organization_id, latest=None):
-    # Вызывающий сервис явно передаёт snapshot из своей транзакции.
-    # None означает отсутствие принятой выгрузки, а не команду перечитать БД.
-    """Проверить допуск нового включения к переданной организации и latest.
-
-    Отсутствие выгрузки, другая организация или старый snapshot — ValidationError.
-    Вызывающий сервис удерживает shared advisory lock; здесь записи нет."""
+    # Сервис передаёт данные из своей транзакции.
+    # Отсутствие выгрузки не требует повторного чтения БД.
+    """Вызывающий сервис удерживает блокировку импорта на время проверки."""
     if latest is None:
         raise ValidationError("Нет успешно принятой выгрузки сотрудников 1С")
     if employee.organization_id != organization_id:

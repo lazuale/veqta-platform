@@ -1,9 +1,4 @@
-"""Атомарная публикация справочников Employees/Positions/Units.
-
-Каждый GUID в Employees считается присутствующим в принятой выгрузке.
-Отсутствующие GUID не удаляются из истории. Подтверждённая дата и полнота
-приходят извне; дата приёма не выдаётся за дату источника. Смена организации
-одного GUID отвергается существующим контрактом составных внешних ключей."""
+"""Публикуем справочники одной транзакцией. Пропавшие GUID не удаляем, данные заявок не меняем."""
 from dataclasses import dataclass
 from datetime import date
 import hashlib
@@ -16,7 +11,6 @@ from ..models import Employee, EmployeeImport, Organization
 
 @dataclass(frozen=True)
 class AcceptanceResult:
-    """Агрегированный результат публикации с import_id и признаком идемпотентного приёма."""
     import_id: int
     created: int
     updated: int
@@ -27,10 +21,7 @@ class AcceptanceResult:
 
 @dataclass(frozen=True)
 class PublicationReview:
-    """План сверки: предыдущий import, количество и digest выпавших GUID.
-
-    missing_current_guids содержит кадровые идентификаторы для уполномоченного
-    оператора; это не обезличенный внешний отчёт."""
+    """Список отсутствующих GUID содержит кадровые данные. Не включайте его в публичные отчёты."""
     previous_import_id: int
     employee_count: int
     missing_current_count: int
@@ -50,10 +41,7 @@ def _review(batch, previous):
 
 @transaction.atomic
 def review(batch: ParsedBatch) -> PublicationReview:
-    """Прочитать план публикации под shared advisory lock в atomic-транзакции.
-
-    batch — ParsedBatch; возвращает PublicationReview, БД не изменяется.
-    План стабилен только на время вызова: accept заново проверяет previous id."""
+    """План действителен только до следующего импорта. При публикации проверяем его заново."""
     lock_for_membership()
     previous = EmployeeImport.objects.order_by('-accepted_at', '-pk').first()
     return _review(batch, previous)
@@ -68,14 +56,7 @@ def _chunks(items, size=500):
 def accept(batch: ParsedBatch, *, source_export_date: date,
            expected_employee_count=None, expected_previous_import_id=None,
            confirmed_missing_sha256=None) -> AcceptanceResult:
-    """Опубликовать ParsedBatch атомарно под exclusive advisory lock.
-
-    Нужна подтверждённая календарная source_export_date, точный employee_count,
-    expected_previous_import_id (0 для первого), подтверждение digest выпадений.
-    Возвращает AcceptanceResult; ValidationError/IntegrityError отменяют всё.
-    Повтор последней тройки хешей с той же датой идемпотентен;
-    изменённая выгрузка того же календарного дня допустима. Snapshot-поля
-    заявок не изменяются; отсутствующие GUID остаются в историческом справочнике."""
+    """Блокируем новые включения на время публикации справочника. При ошибке откатываем весь импорт."""
     if type(source_export_date) is not date:
         raise ValidationError("Укажите только дату выгрузки YYYY-MM-DD без времени")
     if not batch.people:

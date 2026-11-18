@@ -1,9 +1,4 @@
-"""Заменяемый адаптер трёх справочников 1С без обращений к Django/БД.
-
-Employees.csv + Positions.csv + Units.csv: UTF-8/BOM, разделитель «;».
-Парсер читает каталог или выбранные обычные файлы tar.gz без распаковки,
-проверяет лимиты, GUID и согласованность непустых атрибутов дублей.
-Timesheets и выдуманный трёхмесячный период в этом контракте отсутствуют."""
+"""Читаем Employees.csv, Positions.csv и Units.csv без обращения к БД. Проверяем GUID, ссылки и повторяющиеся строки."""
 from __future__ import annotations
 
 import csv
@@ -16,7 +11,6 @@ from uuid import UUID
 
 
 class ImportRejected(ValueError):
-    """Ошибка формата/связей исходных справочников до любых записей в базу."""
     pass
 
 
@@ -73,7 +67,7 @@ def _sources(source):
     with tarfile.open(p, "r:gz") as archive:
         for item in archive.getmembers():
             if item.name not in SOURCES:
-                continue  # Без распаковки; посторонние метаданные не используются.
+                continue  # В архиве используем только обычные файлы.
             if item.name in result or not item.isfile() or item.size > MAX_FILE_BYTES:
                 raise ImportRejected(f"Unsafe/duplicate archive source: {item.name}")
             with archive.extractfile(item) as f:
@@ -108,7 +102,7 @@ def _rows(data, name, required):
 
 @dataclass(frozen=True)
 class Person:
-    """Проверенная запись сотрудника из адаптера; GUID — постоянная идентичность."""
+    """GUID остаётся постоянным ключом сотрудника."""
     guid: UUID
     personnel_number: str
     full_name: str
@@ -119,7 +113,6 @@ class Person:
 
 @dataclass(frozen=True)
 class ParsedBatch:
-    """Неизменяемый контейнер записей, исходных SHA-256, количества и агрегатов разбора."""
     people: tuple[Person, ...]
     sha256: dict[str, str]
     source_row_count: int
@@ -128,12 +121,7 @@ class ParsedBatch:
 
 
 def parse(path):
-    """Прочитать три CSV из path и вернуть ParsedBatch без побочных записей.
-
-    path — каталог либо tar.gz/tgz с обычными файлами в корне. Невалидные GUID,
-    конфликтующие непустые атрибуты дублей, сломанные ссылки и лимиты вызывают
-    ImportRejected; ошибки доступа к файлу передаются вызывающей CLI. Дату
-    выгрузки и полноту адаптер не изобретает."""
+    """Принимаем каталог или tar.gz. Ошибки чтения файлов передаём вызывающей команде."""
     data = _sources(path)
     hashes = {name: hashlib.sha256(raw).hexdigest() for name, raw in data.items()}
     anomalies = {
@@ -226,7 +214,7 @@ def parse(path):
             ukey = (_guid(row["unitExtId"], f"Employees.csv:{uid}:unitExtId"), org_id.casefold())
             if ukey not in units:
                 # Строка подразделения без организации не разрешает брать
-                # имя чужого юрлица или произвольную first().
+                # название из другого юрлица.
                 # Неизвестный GUID означает нарушенную ссылку.
                 matches = [k for k in units if k[0] == ukey[0]]
                 if not matches:
