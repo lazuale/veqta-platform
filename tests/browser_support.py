@@ -103,6 +103,26 @@ def live_server(*, stack="runserver", nginx_executable=None, artifacts=None):
             stop_process(server)
 
 
+
+def expose_fixture_static(folder):
+    """Разрешить воркеру Nginx чтение только публичной статики HTTPS-стенда.
+
+    TemporaryDirectory и umask 077 закрывают временный корень и CSS даже
+    от непривилегированного www-data. Секретный private.key не затрагивается.
+    """
+    public = folder / "static"
+    if folder.is_symlink() or not public.is_dir() or public.is_symlink():
+        raise RuntimeError("Некорректный каталог статики HTTPS-стенда")
+    paths = [public, *public.rglob("*")]
+    if any(path.is_symlink() or not (path.is_file() or path.is_dir()) for path in paths):
+        raise RuntimeError("Неожиданная ссылка или тип объекта в тестовой статике")
+    # Временный каталог остаётся недоступен для перечисления: только проход.
+    # Полностью открыта для чтения лишь раздаваемая статика.
+    for path in paths:
+        path.chmod(0o755 if path.is_dir() else 0o644)
+    folder.chmod(0o711)
+
+
 @contextmanager
 def https_server(environment, nginx_executable, artifacts):
     """Приватные Gunicorn/Nginx, свой сертификат и стандартный шаблон сайта."""
@@ -131,6 +151,8 @@ def https_server(environment, nginx_executable, artifacts):
         with (folder / "collectstatic.log").open("wb") as log:
             subprocess.run([sys.executable, "manage.py", "collectstatic", "--noinput"],
                 cwd=root, env=runtime, stdout=log, stderr=log, check=True)
+        key.chmod(0o600)
+        expose_fixture_static(folder)
         site = (root / "deploy/nginx/veqta.conf").read_text()
         site = site.replace("__HOSTNAME__", "127.0.0.1").replace("__PORT__", str(app_port))
         site = site.replace("__STATIC_ROOT__", str(folder / "static"))
