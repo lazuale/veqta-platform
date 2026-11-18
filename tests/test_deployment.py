@@ -211,6 +211,45 @@ exit 0
         self.assertEqual((self.path / "hook.log").read_text().splitlines(), ["nginx"])
 
 
+class HttpsStaticPermissionsTests(unittest.TestCase):
+    """Приватный ключ остаётся закрытым, а CSS доступен воркеру Nginx."""
+
+    def test_public_static_traversable_with_private_key_protected(self):
+        from .browser_support import expose_fixture_static
+        with tempfile.TemporaryDirectory(prefix="veqta-https-test-") as temporary:
+            folder = Path(temporary)
+            static = folder / "static" / "admin" / "css"
+            static.mkdir(parents=True)
+            css = static / "base.css"
+            css.write_text("body {}")
+            key = folder / "private.key"
+            key.write_text("synthetic secret")
+            key.chmod(0o600)
+            for path in [folder, folder / "static", folder / "static" / "admin", static]:
+                path.chmod(0o700)
+            css.chmod(0o600)
+            expose_fixture_static(folder)
+            self.assertEqual(folder.stat().st_mode & 0o777, 0o711)
+            self.assertEqual(key.stat().st_mode & 0o777, 0o600)
+            self.assertEqual(css.stat().st_mode & 0o777, 0o644)
+            for directory in [folder / "static", folder / "static" / "admin", static]:
+                self.assertEqual(directory.stat().st_mode & 0o777, 0o755)
+
+    def test_public_static_symlink_is_rejected_without_exposing_private_key(self):
+        from .browser_support import expose_fixture_static
+        with tempfile.TemporaryDirectory(prefix="veqta-https-test-") as temporary:
+            folder = Path(temporary)
+            (folder / "static").mkdir()
+            secret = folder / "private.key"
+            secret.write_text("synthetic secret")
+            secret.chmod(0o600)
+            (folder / "static" / "bad.css").symlink_to(secret)
+            with self.assertRaisesRegex(RuntimeError, "ссылка"):
+                expose_fixture_static(folder)
+            self.assertEqual(folder.stat().st_mode & 0o777, 0o700)
+            self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
+
+
 class InstallationConfigurationTests(unittest.TestCase):
     script = DeploymentChecks.script
     shell = DeploymentChecks.shell
