@@ -1,5 +1,4 @@
-/* Точка композиции Workwear: модули подключаются явно, без глобального store.
- * Общие функции UI берутся из Portal. Предметные инварианты проверяет сервер. */
+/* Подключаем модули интерфейса. Бизнес-правила проверяет сервер. */
 import { installCore } from './js/core.js';
 import { installBatching } from './js/batching.js';
 import { installPaging } from './js/paging.js';

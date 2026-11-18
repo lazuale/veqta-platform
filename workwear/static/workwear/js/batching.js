@@ -1,15 +1,6 @@
-/* Ограниченные read-only пакеты Workwear, без внешнего scheduler/state manager.
- * Пакетами и отменой владеет вызов readChunks; общий бюджет ctx — два Fetch.
- * Данные полного черновика не разбиваются при записи: sync остаётся атомарным.
- * Контекст и AbortSignal задаёт вызывающий модуль. При первой ошибке новые
- * пакеты не запускаются, выполняющиеся отменяются, все Promise дожидаются
- * завершения. Частичный результат никогда не выдаётся за полный.
- */
+/* Читаем данные пакетами, не более двух запросов одновременно. При ошибке отменяем остальные пакеты. */
 
-/** Разделить JSON-массив с точным бюджетом UTF-8 тела и количеством элементов.
- * buildData([]) содержит остальные неизменные поля; вход — JSON-совместимые
- * строки/объекты без toJSON. Подсчёт линейный, без повторной сериализации префиксов.
- */
+/** Ограничиваем пакет размером JSON в байтах, а не числом символов. */
 function partitionRequests(rows, buildData, maxItems, maxBytes) {
     if (!Number.isInteger(maxItems) || maxItems < 1 || !Number.isInteger(maxBytes) || maxBytes < 1)
         throw new Error('Неверные ограничения пакета');
@@ -29,11 +20,10 @@ function partitionRequests(rows, buildData, maxItems, maxBytes) {
     return batches;
 }
 
-/** Подключить readChunks/repeatPairs к одному экземпляру Workwear ctx. */
 export function installBatching(ctx) {
     const aborted = () => Object.assign(new Error('Проверка отменена'), { name: 'AbortError' });
-    // Общий бюджет двух пакетных запросов между всеми read jobs одного ctx.
-    // Ожидающий permit снимается по AbortSignal, не занимая сетевой слот.
+    // Все операции чтения используют общий предел: два одновременных запроса.
+    // Отменённый запрос не занимает сетевой слот.
     let active = 0;
     const waiting = new Set();
     function takePermit(signal) {
@@ -90,10 +80,7 @@ export function installBatching(ctx) {
             return results;
         } finally { signal?.removeEventListener('abort', cancel); }
     }
-    /** Проверить до1000×30 уникальных пар; server batch/64KiB предел не увеличивается.
-     * Результат применим только после всех ответов одной календарной даты.
-     * Автоматических retry нет; повторный запуск чтения безопасен по действию пользователя.
-     */
+    /** Используем результат только после получения всех пакетов одной проверки. */
     async function repeatPairs(pairs, options = {}) {
         const cap = limits();
         if (pairs.length > cap.request_members * cap.items_per_member ||

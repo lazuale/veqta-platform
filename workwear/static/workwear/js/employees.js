@@ -1,9 +1,4 @@
-/* Поиск и пакетный подбор сотрудников Workwear. installEmployees(ctx) публикует
- * single/bulk операции; выбранные picked/pickedEmployees принадлежат settings
- * и переживают смену запроса. searchEpoch и dialogEpoch отменяют старые ответы,
- * bulkEpoch инвалидируется изменением текста. Разрешение списка не пишет в БД;
- * addLocals меняет локальный состав, окончательная проверка выполняется sync.
- * Ошибка сети сохраняет выбор и текст; DOM обновляется внутри панели подбора. */
+/* Подбор сотрудников не записывает данные в БД. Отмена поиска сохраняет уже сделанный выбор. */
 export function installEmployees(ctx) {
     const {
         settings, overlays, api, notice, $, currentMembers, esc, refreshMemberRows,
@@ -87,7 +82,7 @@ export function installEmployees(ctx) {
             apply.textContent = `Добавить (${picked.length})`;
         }
     }
-    /** Подготовить весь список без записи; смена текста/диалога отменяет очередь. */
+    /** Смена текста или диалога отменяет незавершённый поиск. */
     async function resolveBulk() {
         settings.bulkAbort?.abort();
         const controller = new AbortController(); settings.bulkAbort = controller;
@@ -125,7 +120,6 @@ export function installEmployees(ctx) {
             settings.bulkChecked = true; ctx.renderOverlay();
         } catch (err) { if (valid()) throw err; }
     }
-    /** Единый список уникальных готовых кандидатов для счётчика и применения. */
     function bulkCandidates() {
         const existing = new Set(currentMembers().map(m => m.employee_id)), result = [];
         for (const row of settings.resolved) {
@@ -145,7 +139,7 @@ export function installEmployees(ctx) {
         return currentMembers().filter(m => settings.selected.has(m.employee_id))
             .every(m => new Set([...m.assignments.map(a => a.item_id), ...wanted]).size <= ctx.limits().items_per_member);
     }
-    /** Применить массовое локальное действие ко всем выбранным, включая другие страницы. */
+    /** Применяем выбранных сотрудников со всех страниц. */
     function batchChange(operation) {
         if (settings.saving || !settings.choice.size) return;
         const items = new Set(settings.choice);

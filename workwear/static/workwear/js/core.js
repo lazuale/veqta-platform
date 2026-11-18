@@ -1,10 +1,4 @@
-/* Ядро локального UI Workwear. installCore(ctx) создаёт settings, DOM-ссылки и
- * HTTP-клиент; остальные install-функции получают их явно через ctx. settings
- * принадлежит этому сеансу страницы, base — последнему подтверждённому снимку.
- * api передаёт CSRF; dirty сравнивает нормализованный черновик без записи в БД.
- * busy блокирует ввод только во время сохранения и восстанавливает фокус.
- * page/search/refresh/bulk/dialog/history/repeat Epoch отбрасывают поздние ответы.
- * Описание публичного ctx и инвалидации: docs/architecture.md. */
+/* Храним локальный черновик отдельно от сохранённого снимка. Поздний ответ сервера не должен менять новый экран. */
 import { iconSvg as icon } from '../../portal/ui.js';
 
 export function installCore(ctx) {
@@ -71,16 +65,14 @@ export function installCore(ctx) {
     let catalogCache = null;
     const byItem = () => {
         const catalog = settings.meta?.items || [];
-        // Снимок сервера меняется при загрузке/сохранении. Индекс строится один раз,
-        // чтобы отрисовка каждой строки не сканировала до 30 000 назначений.
+        // Строим индекс после загрузки, чтобы не перебирать все назначения при отрисовке строки.
         if (catalogCache?.catalog === catalog && catalogCache?.base === settings.base)
             return catalogCache.items.slice();
         const assigned = new Set();
         for (const member of settings.base?.members || []) for (const a of member.assignments) {
             if (a.name) assigned.add(a.item_id);
         }
-        // Колонка описывает текущую позицию каталога. Снимки относятся только
-        // к отдельным назначениям; у одной позиции они могут различаться.
+        // Колонка отражает каталог; сохранённые назначения могут содержать разные снимки.
         const items = catalog.filter(it => (isDraft() && it.is_active) || assigned.has(it.id));
         const known = new Set(items.map(it => it.id));
         for (const id of assigned) if (!known.has(id))

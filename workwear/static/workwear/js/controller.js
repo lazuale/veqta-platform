@@ -1,9 +1,4 @@
-/* Делегированные события Workwear. installController(ctx) связывает действия
- * DOM с публичными функциями модулей; владелец данных — settings из core.
- * Один обработчик на контейнер позволяет заменять строку без перевешивания
- * listeners. Таймеры поиска и epochs защищают контекст; клавиатура матрицы
- * поддерживает один tabindex=0, стрелки и видимость активной ячейки.
- * Сохранение блокирует изменение черновика, beforeunload предупреждает о dirty. */
+/* События делегируем контейнеру, чтобы не менять обработчики при замене строк. В матрице оставляем один активный tabindex. */
 import { cycleFocus } from '../../portal/ui.js';
 
 export function installController(ctx) {
@@ -17,9 +12,7 @@ export function installController(ctx) {
     } = ctx;
     const view = root.ownerDocument.defaultView;
     let memberFrame = null;
-    // Локальные фильтр и поиск используют последний ввод к следующему кадру.
-    // Нет сетевого запроса, поэтому отдельная пауза debounce здесь не нужна.
-    // Несколько изменений до отрисовки объединяются в одно обновление таблицы.
+    // Объединяем изменения фильтра в одно обновление таблицы за кадр.
     function scheduleMemberRows() {
         if (memberFrame !== null) view.cancelAnimationFrame(memberFrame);
         const request = settings.request;
@@ -59,7 +52,7 @@ export function installController(ctx) {
         const button = event.target.closest('[data-cell]');
         if (button && !button.disabled) rememberMatrixFocus(button);
     });
-    // Делегирование сохраняет обработчики при адресной замене компонента.
+    
     root.addEventListener('click', async (e) => {
         const target = e.target.closest('button,[data-open],[data-person],[data-prior]');
         if (!target || target.disabled)

@@ -1,11 +1,4 @@
-/* Редактор Workwear: локальный состав, назначения и отправка полного черновика.
- * installEditor(ctx) публикует render/open/save/scan/chooseAssignment; зависимости
- * приходят через ctx, состояние принадлежит settings из core. repeatEpoch
- * отбрасывает старый общий scan. pendingAssignments хранит последнее намерение
- * на пару; save ждёт его завершения. Подтверждение COMMIT отделено от GET
- * обновления: ошибка GET не превращает успешную запись в несохранённую.
- * patchOneEmployee меняет одну строку; общий scan обновляет только предупреждения.
- * renderEditor сохраняет прокрутку/фокус только при той же заявке. */
+/* Черновик редактируется локально. Успешное сохранение не повторяем, даже если последующее чтение не удалось. */
 export function installEditor(ctx) {
     const {
         settings, main, overlays, api, copy, syncUrl, fail, currentMembers, notice, norm, byItem,
@@ -19,9 +12,7 @@ export function installEditor(ctx) {
         settings.eventLog?.abort.abort(); settings.eventLog = null;
         settings.assignmentAbort?.abort(); settings.assignmentAbort = new AbortController();
         settings.bulkAbort?.abort(); settings.batchAbort?.abort();
-        // После Save сервер возвращает строки по PK включения. Отображаемая
-        // локальная последовательность сохраняется, чтобы сотрудник не переехал
-        // на другую страницу только из-за первого получения server IDs.
+        // После сохранения оставляем порядок сотрудников, выбранный пользователем.
         if (!resetView && settings.request?.id === request.id) {
             const rank = new Map(settings.request.members.map((m, i) => [m.employee_id, i]));
             request = { ...request, members: [...request.members].sort((a, b) =>
@@ -128,10 +119,7 @@ export function installEditor(ctx) {
         }
     }
     const warning = (employeeId, itemId) => settings.warnings.get(`${employeeId}:${itemId}`);
-    /** Обновляет результат общего scan, сохраняя строки, фокус и прокрутку.
-     * Только фильтр «С повторами» меняет состав видимых строк и требует rebuild.
-     * Ответ уже проверен по request id и repeatEpoch; бизнес-решений здесь нет.
-     */
+    /** Обновляем предупреждения без перестройки строк. Фильтр повторов — исключение. */
     function refreshRepeatView() {
         if (settings.screen !== 'editor' || !settings.request) return;
         if (settings.memberFilter === 'warn') {
@@ -161,9 +149,7 @@ export function installEditor(ctx) {
         updateEditorSummary();
     }
     const warningsCount = () => currentMembers().reduce((n, m) => n + m.assignments.filter(a => warning(m.employee_id, a.item_id)).length, 0);
-    // Нормализация не зависит от фильтра, страницы, назначений и выбора.
-    // WeakMap не удерживает участников уже закрытой вкладки. Сверка исходного
-    // текста сохраняет корректность и при обновлении кадровых подписей.
+    // WeakMap не удерживает удалённые строки. При изменении ФИО кэш обновляется.
     const searchText = new WeakMap();
     function memberVisible() {
         const q = norm(settings.memberQuery);
@@ -478,8 +464,7 @@ export function installEditor(ctx) {
                 const scan = await ctx.repeatPairs([{ employee_id: employeeId, item_id: itemId }], { signal, valid: () => settings.request === request && currentMembers().includes(member) && !settings.saving });
                 if (settings.request !== request || !currentMembers().includes(member) || settings.saving) return false;
                 if (operation.desired && !member.assignments.some(a => a.item_id === itemId)) {
-                    // Другая ожидавшая проверка могла занять последнюю позицию.
-                    // Решение проверяется вновь непосредственно перед локальным commit.
+                    // Перед локальной записью ещё раз проверяем доступность позиции.
                     if (member.assignments.length >= ctx.limits().items_per_member) {
                         notice('У сотрудника уже назначено максимальное число позиций.', true); return false;
                     }
@@ -503,7 +488,6 @@ export function installEditor(ctx) {
         })();
         return operation.promise;
     }
-    /** Добавить проверенный набор локально целиком; запись выполняется только sync. */
     function addLocals(people) {
         if (!editable() || settings.saving) return 0;
         const existing = new Set(currentMembers().map(m => m.employee_id)), pending = [];
