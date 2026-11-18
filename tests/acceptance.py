@@ -233,6 +233,76 @@ def check_http_load(server, organization_id, employee_ids, item_ids):
     return report
 
 
+def check_registry(page, base, actor, organization_id, organization_name):
+    """Сверить общее число совпадений, текущую страницу и ошибку фильтра."""
+    from playwright.sync_api import expect
+    from workwear.models import Request
+    from workwear.services import create_request
+    from .browser_support import database_call, delayed_requests
+
+    page_size = 30
+
+    def seed():
+        previous_count = Request.objects.count()
+        for _ in range(page_size):
+            create_request(organization_id=organization_id, actor=actor)
+        return previous_count + page_size
+
+    total = database_call(seed)
+    page.goto(base + "/workwear/")
+    counter = page.locator("#registryCount")
+    footer = page.locator("#registryFooter")
+    rows = page.locator("tr.registry-row")
+    organization = page.get_by_role("combobox", name="Организация", exact=True)
+    status = page.get_by_role("combobox", name="Состояние")
+    search = page.get_by_role("textbox", name="Номер, ФИО или табельный")
+
+    def expect_results(matched, shown):
+        expect(counter).to_have_text(f"Найдено: {matched}")
+        expect(rows).to_have_count(shown)
+
+    expect_results(total, page_size)
+    expect(footer).to_contain_text(f"Показано 1–{page_size} из {total}")
+    next_page = page.get_by_role("button", name="Далее →")
+    with delayed_requests(page, "**/ui/requests/?*"):
+        next_page.dblclick()
+        expect(next_page).to_be_disabled()
+    expect_results(total, total - page_size)
+    expect(footer).to_contain_text(f"Показано {page_size + 1}–{total} из {total}")
+    page.get_by_role("button", name="← Назад").click()
+    expect_results(total, page_size)
+    organization.select_option(str(organization_id))
+    expect_results(page_size, page_size)
+    status.select_option("closed")
+    expect_results(0, 0)
+    expect(footer).to_have_text("")
+    organization.select_option("")
+    expect_results(1, 1)
+    status.select_option("")
+    expect_results(total, page_size)
+    search.fill(organization_name)
+    expect_results(page_size, page_size)
+    search.fill("Учебный запрос без совпадений")
+    expect_results(0, 0)
+    page.get_by_role("button", name="Сбросить фильтры").click()
+    expect_results(total, page_size)
+
+    page.get_by_role("button", name="Период и сортировка").click()
+    page.get_by_label("Начало периода").fill("2000-01-02")
+    with page.expect_response(lambda response: "/ui/requests/?" in response.url
+                              and "date_to=2000-01-01" in response.url) as invalid_period:
+        page.get_by_label("Конец периода").fill("2000-01-01")
+    response = invalid_period.value
+    assert response.status == 400
+    expect(page.get_by_text("Не удалось загрузить заявки")).to_be_visible()
+    expect(counter).to_have_text("")
+    expect(footer).to_have_text("")
+    page.get_by_role("button", name="Сбросить период и порядок").click()
+    expect_results(total, page_size)
+    print("Реестр: счётчик, страницы, фильтры, поиск, пустой результат и ошибка периода — успешно", flush=True)
+    return response.status, response.url
+
+
 def check_browser(actor, people, executable, engine="chromium", server_options=None):
     """Пройти вход, массовый подбор, назначение, сохранение, завершение и возврат."""
     from playwright.sync_api import sync_playwright, expect
@@ -350,6 +420,8 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
         expect(page.locator('.matrix-leaf')).to_contain_text("1095 дн. · каталог")
         expect(page.locator('[data-cell]')).to_have_attribute('title',
             "Позиция из браузерного теста · Новая категория из Admin · 90 дней")
+        expected_failure = check_registry(page, base, actor, added_org["value"], added_org["label"])
+        failures.remove(expected_failure)
         # Отсутствие доступных справочников проверяем через реальные формы Admin.
         metadata = page.request.get(base + "/workwear/api/ui/metadata/").json()
         for org in metadata["organizations"]:

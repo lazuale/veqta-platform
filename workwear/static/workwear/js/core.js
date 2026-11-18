@@ -29,7 +29,7 @@ export function installCore(ctx) {
     const settings = {
         screen: 'registry', session: null, meta: null, request: null, base: null,
         registry: { q: '', status: '', organization_id: '', date_basis: 'created', date_from: '', date_to: '', sort: 'newest', offset: 0, limit: 30 },
-        registryOpen: false, registryData: null, pageEpoch: 0, searchEpoch: 0, refreshEpoch: 0,
+        registryOpen: false, pageEpoch: 0, searchEpoch: 0, refreshEpoch: 0,
         bulkEpoch: 0, dialogEpoch: 0, historyEpoch: 0, matrixFocus: null, pendingAssignments: new Map(),
         memberQuery: '', memberFilter: 'all', tableMode: 'list', memberPageIndex: 0, columnPageIndex: 0, actionEpoch: 0, selected: new Set(),
         warnings: new Map(), repeatState: 'idle', repeatEpoch: 0, repeatAbort: null, repeatProgress: null, bulkAbort: null, batchAbort: null, singleAbort: null,
