@@ -357,7 +357,7 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
         expect(page.locator('h1')).to_have_text("Состав заявки")
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Горизонтальный выход страницы за экран"
         draft_url = page.url
-        
+
         page.set_viewport_size({"width": 1440, "height": 1000})
         page.goto(base + "/admin/workwear/organization/add/")
         page.locator('[name="name"]').fill("Организация из браузерного теста")
@@ -414,7 +414,7 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
             "Позиция из браузерного теста · Новая категория из Admin · 90 дней")
         expected_failure = check_registry(page, base, actor, added_org["value"], added_org["label"])
         failures.remove(expected_failure)
-        
+
         metadata = page.request.get(base + "/workwear/api/ui/metadata/").json()
         for org in metadata["organizations"]:
             page.goto(base + f'/admin/workwear/organization/{org["value"]}/change/')
@@ -435,7 +435,7 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
         page.goto(draft_url)
         expect(page.locator('h1')).to_have_text("Состав заявки")
         expect(page.locator('.vq-banner[role="status"]')).to_contain_text("Нет активных позиций спецодежды")
-        
+
         page.goto(base + "/admin/auth/group/add/")
         page.locator('[name="name"]').fill("Группа браузерного теста")
         options = page.locator('#id_permissions_from option').evaluate_all("nodes => nodes.map(n => ({value:n.value,label:n.textContent}))")

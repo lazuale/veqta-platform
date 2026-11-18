@@ -147,7 +147,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         )
     completion = None
     if finish:
-        
+
         completion = asdict(services.complete_request(
             request_id=req.pk, actor=actor, expected_version=req.version,
         ))

@@ -435,7 +435,7 @@ class CatalogCommandTests(TestCase):
                     writer.writerow(["code", "name", "category", "validity_days", "sort_order", "is_active"])
                     writer.writerows([[f"CLI-{i}", f"{name} {i}", "Категория", 90, i, 1] for i in range(5)])
             write()
-            
+
             with patch("workwear.management.commands.workwear_load_catalog.require_target"):
                 options = dict(environment="dev", database_name="veqta_dev", expected_count=5, stdout=StringIO())
                 call_command("workwear_load_catalog", str(source), **options)

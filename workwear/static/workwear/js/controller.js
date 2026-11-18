@@ -52,7 +52,7 @@ export function installController(ctx) {
         const button = event.target.closest('[data-cell]');
         if (button && !button.disabled) rememberMatrixFocus(button);
     });
-    
+
     root.addEventListener('click', async (e) => {
         const target = e.target.closest('button,[data-open],[data-person],[data-prior]');
         if (!target || target.disabled)

@@ -144,7 +144,7 @@ def remove_employee(*, request_id, member_id, actor, expected_version):
     _authorize(actor, "change_request")
     req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
     member = RequestEmployee.objects.get(pk=member_id, request_id=req.pk)
-    
+
     employee_id = member.employee_id
     member.delete()
     _bump_draft_version(req)
@@ -237,7 +237,7 @@ def complete_request(*, request_id, actor, expected_version):
 
 @transaction.atomic
 def reopen_request(*, request_id, actor, expected_version, reason=""):
-    
+
     """Возврат требует отдельного права и актуальной версии заявки."""
     _authorize(actor, "reopen_request")
     if not isinstance(reason, str) or len(reason) > 500:
@@ -262,6 +262,6 @@ def delete_draft(*, request_id, actor, expected_version):
     """История удаления сохраняется после самого черновика."""
     _authorize(actor, "delete_request")
     req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
-    
+
     _audit(req.pk, actor, "draft_deleted", version=req.version)
     req.delete()

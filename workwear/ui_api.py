@@ -343,7 +343,7 @@ def repeat_scan(request, request_id):
     people = dict(Employee.objects.filter(pk__in={x[0] for x in wanted}).values_list("pk", "organization_id"))
     if len(people) != len({x[0] for x in wanted}) or any(org != req.organization_id for org in people.values()):
         raise ValidationError("Недопустимая организация сотрудника")
-    
+
     reference_date = timezone.localdate()
     warnings = scan_repeats(
         pairs=wanted,
