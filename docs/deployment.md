@@ -9,14 +9,14 @@
 | Параметр | DEV | PROD |
 |---|---|---|
 | Домен | своё DNS-имя DEV в `VEQTA_HOSTNAME` | отдельное DNS-имя PROD |
-| Checkout | `/opt/veqta-dev` | `/opt/veqta-prod` |
+| Checkout, Git и venv: root:root | `/opt/veqta-dev` | `/opt/veqta-prod` |
 | Linux-пользователь / группа | `veqta-dev` | `veqta-prod` |
 | Env, root:группа 0640 | `/etc/veqta/dev.env` | `/etc/veqta/prod.env` |
 | База / прикладная роль PostgreSQL | `veqta_dev` | `veqta_prod` |
 | Владелец схемы / миграции | `veqta_dev_owner` | `veqta_prod_owner` |
 | Env миграций, root:root 0600 | `/etc/veqta/dev-migrate.env` | `/etc/veqta/prod-migrate.env` |
 | Gunicorn | `127.0.0.1:8767` | `127.0.0.1:8765` |
-| Статика | `/var/www/veqta/dev-static` | `/var/www/veqta/prod-static` |
+| Статика: root:www-data, чтение Nginx | `/var/www/veqta/dev-static` | `/var/www/veqta/prod-static` |
 | Systemd | `veqta-dev.service` | `veqta-prod.service` |
 
 Команды предполагают PostgreSQL 18 на локальном сокете `/var/run/postgresql`, порту 5432 и административную роль `postgres`. До создания объектов проверьте, что это выбранный кластер. Общие PostgreSQL/Nginx не останавливаются. Каталоги, роли, БД и hostnames не должны быть заняты другой системой. Работающие контуры обновляются по разделу 7, а не повторным cold start.
@@ -49,7 +49,7 @@ VEQTA_TARGET=dev
 read -r -p 'DNS-имя HTTPS выбранного контура: ' VEQTA_HOSTNAME
 sudo bash -s -- "$VEQTA_SOURCE" "$VEQTA_REVISION" "$VEQTA_TARGET" "$VEQTA_HOSTNAME" <<'VEQTA_BOOTSTRAP'
 set -Eeuo pipefail
-umask 027
+umask 022
 source_repo=$1
 revision=$2
 target=$3
@@ -76,13 +76,12 @@ VEQTA_SQL
 )
 [[ "$existing" == f ]] || { echo 'STOP: роль или база уже существует'; exit 1; }
 useradd --system --user-group --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin "$actor"
-install -d -o "$actor" -g "$actor" -m 0750 "$app"
+install -d -o root -g root -m 0755 "$app"
 git -c safe.directory="$source_repo" clone --no-local --no-checkout "$source_repo" "$app"
-chown -R "$actor:$actor" "$app"
-runuser -u "$actor" -- git -C "$app" remote set-url origin https://github.com/lazuale/veqta-platform.git
-runuser -u "$actor" -- git -C "$app" checkout --detach "$revision"
-[[ "$(runuser -u "$actor" -- git -C "$app" rev-parse HEAD)" == "$revision" ]]
-status=$(runuser -u "$actor" -- git -C "$app" status --porcelain)
+git -C "$app" remote set-url origin https://github.com/lazuale/veqta-platform.git
+git -C "$app" checkout --detach "$revision"
+[[ "$(git -C "$app" rev-parse HEAD)" == "$revision" ]]
+status=$(git -C "$app" status --porcelain)
 [[ -z "$status" ]]
 python3.14 "$app/scripts/create_config.py" --environment "$target" --hostname "$domain"
 install -d -o root -g root -m 0755 /etc/veqta
@@ -96,21 +95,20 @@ rm -- "$app/.env.$target" "$app/.env.$target-migrate"
     # Оба пароля передаются psql только в окружении этого дочернего процесса.
     runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres < "$app/deploy/postgresql/$target.sql"
 )
-runuser -u "$actor" -- python3.14 -m venv "$app/.venv"
-runuser -u "$actor" -- "$app/.venv/bin/python" -m pip install --no-cache-dir --require-hashes -r "$app/requirements.lock"
-runuser -u "$actor" -- "$app/.venv/bin/python" -m pip check
-(
-    set -a; source "$migration_config"; set +a
-    runuser -u "$actor" -- bash -c '
-        set -Eeuo pipefail
-        cd "$1"
-        exec .venv/bin/python manage.py veqta_initialize --environment "$2" --database-name "veqta_$2"
-    ' bash "$app" "$target"
-)
+python3.14 -m venv "$app/.venv"
+"$app/.venv/bin/python" -m pip install --no-cache-dir --require-hashes -r "$app/requirements.lock"
+"$app/.venv/bin/python" -m pip check
+runuser -u "$actor" -- test -r "$app/manage.py"
+runuser -u "$actor" -- test -x "$app/.venv/bin/python"
+source "$app/scripts/server_checks.sh"
+veqta_target "$target"
+veqta_check_trusted_code
+veqta_load_config
+veqta_owner_django veqta_initialize --environment "$target" --database-name "$database"
 VEQTA_BOOTSTRAP
 ```
 
-Генератор требует `--hostname` для обоих контуров и создаёт пару файлов: приложение и миграции. Он не печатает секреты и отказывается от повторного запуска, если любой файл уже существует. Пароль владельца не попадает в env службы. Владелец создаёт схему штатным `migrate`, а default privileges дают приложению DML, последовательности и вызов функций без владения объектами, DDL, TRUNCATE или членства в роли владельца. Только владелец DEV имеет CREATEDB для одноразовых тестовых баз. В обоих серверных контурах DEBUG=0, proxy=1 и Secure cookies=1. При частичном отказе не генерируйте новый пароль поверх уже созданной роли: порядок продолжения — в operations.md. SQL рассчитан на один запуск, initialize — только на пустую БД. Наличие shell `nologin` не мешает явному `runuser ... bash -c` для административных команд.
+Генератор требует `--hostname` для обоих контуров и создаёт пару файлов: приложение и миграции. Он не печатает секреты и отказывается от повторного запуска, если любой файл уже существует. Пароль владельца не попадает в env службы. Владелец создаёт схему штатным `migrate`, а default privileges дают приложению DML, последовательности и вызов функций без владения объектами, DDL, TRUNCATE или членства в роли владельца. Только владелец DEV имеет CREATEDB для одноразовых тестовых баз. В обоих серверных контурах DEBUG=0, proxy=1 и Secure cookies=1. При частичном отказе не генерируйте новый пароль поверх уже созданной роли: порядок продолжения — в operations.md. SQL рассчитан на один запуск, initialize — только на пустую БД. Shell `nologin` сохранён. Рабочий UID не владеет кодом, не выполняет привилегированные миграции и не получает пароль владельца PostgreSQL. Для Cold Start используется штатный `veqta_initialize`, который вызывает Django `migrate`.
 
 ## 4. Первичный HTTPS без остановки общего Nginx
 
@@ -159,7 +157,7 @@ sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_apply.sh" "$VEQTA_TARGET"
 sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_verify.sh" "$VEQTA_TARGET"
 ```
 
-Выполните отдельно для dev и prod. Apply не скачивает код и не создаёт БД. Он проверяет чистоту Git с обязательным успешным status, env/сертификат, ставит зависимости, проверяет схему, собирает статику, проверяет **все активные include Nginx** через `nginx -t` и отвергает конфликт целевого server_name даже при коде 0. Соседние сайты не отключаются. Общая lock-файл блокировка не позволяет двум контурам применять Nginx одновременно.
+Выполните отдельно для dev и prod. Apply не скачивает код и не создаёт БД. Проверка root-owned исходников и зависимостей предшествует административной установке; `collectstatic` исполняется root с прикладными реквизитами БД. Он проверяет чистоту Git с обязательным успешным status, env/сертификат, ставит зависимости, проверяет схему, собирает статику, проверяет **все активные include Nginx** через `nginx -t` и отвергает конфликт целевого server_name даже при коде 0. Соседние сайты не отключаются. Общая lock-файл блокировка не позволяет двум контурам применять Nginx одновременно.
 
 Gunicorn и оба HTTPS-ресурса ожидаются до 20 попыток каждый: connect timeout 2 с, весь запрос 3 с, пауза 1 с. Поэтому ожидание одного ресурса ограничено примерно 80 с, а не ровно 20 с. Curl отключает `.curlrc` и proxy environment; TLS-сертификат проверяется с правильным SNI, без `-k`. Login обязан вернуть 200 и Secure CSRF-cookie именно выбранного контура; 3xx не принимается. CSS обязан вернуть 200. Финальная read-only проверка PostgreSQL подтверждает базу и роль под пользователем приложения, ограничена 15 с плюс до 2 с на принудительное завершение.
 
@@ -213,16 +211,19 @@ target=$3
 [[ "$revision" =~ ^[0-9a-f]{40}$ ]]
 source "/opt/veqta-$target/scripts/server_checks.sh"
 veqta_target "$target"
+veqta_check_trusted_code
 veqta_clean_checkout
-# root может читать закрытый staging оператора; изменения получает только выбранный checkout.
+[[ "$(git -c safe.directory="$source_repo" -C "$source_repo" rev-parse HEAD)" == "$revision" ]]
+# Git-объекты и checkout изменяет только доверенный root.
 bundle=$(mktemp /run/veqta-source.XXXXXXXX.bundle)
 trap 'rm -f -- "$bundle"' EXIT
 git -c safe.directory="$source_repo" -C "$source_repo" bundle create "$bundle" HEAD
-chown "$ACTOR:$ACTOR" "$bundle"
 chmod 0600 "$bundle"
-runuser -u "$ACTOR" -- git -C "$APP" fetch "$bundle" HEAD
-runuser -u "$ACTOR" -- git -C "$APP" checkout --detach "$revision"
-[[ "$(runuser -u "$ACTOR" -- git -C "$APP" rev-parse HEAD)" == "$revision" ]]
+git -c safe.directory="$APP" -C "$APP" fetch "$bundle" HEAD
+git -c safe.directory="$APP" -C "$APP" checkout --detach "$revision"
+[[ "$(git -c safe.directory="$APP" -C "$APP" rev-parse HEAD)" == "$revision" ]]
+veqta_check_trusted_code
+veqta_clean_checkout
 VEQTA_UPDATE
 ```
 
@@ -237,4 +238,4 @@ sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_verify.sh" "$VEQTA_TARGET"
 
 Если миграций нет, `--migrate` не нужен. Без него apply откажет при неприменённых миграциях. Обновление venv/статики происходит на месте, перезапуск может кратковременно прервать запросы; согласуйте окно. Автоматического отката схемы нет. Возврат к предыдущему проверенному SHA и повторный apply допустим лишь при совместимости кода с текущей схемой. `--fake`, `flush` и удаление рабочей БД не являются штатным откатом.
 
-`server_apply.sh --migrate` загружает закрытый env владельца только в дочерний процесс. До migrate проверяются контур, имя БД, роль, host, port, SSL и фактическое подключение. Обычный apply не читает этот файл. Скрипт рендерит один из двух шаблонов Nginx по `VEQTA_HOSTNAME`; пути и loopback-порты контуров остаются фиксированным техническим контрактом. При ошибке Nginx восстанавливается только сайт выбранного контура.
+`server_apply.sh --migrate` загружает закрытый env владельца только в дочерний root-процесс (`env -i`), а не в Unix UID работающего приложения. До migrate проверяются контур, имя БД, роль, host, port, SSL и фактическое подключение. Обычный apply не читает этот файл. Скрипт рендерит один из двух шаблонов Nginx по `VEQTA_HOSTNAME`; пути и loopback-порты контуров остаются фиксированным техническим контрактом. При ошибке Nginx восстанавливается только сайт выбранного контура.

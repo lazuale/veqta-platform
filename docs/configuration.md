@@ -30,7 +30,7 @@
 
 Для удалённой PostgreSQL сертификат проверяется по имени сервера при `DB_SSLMODE=verify-full`. Корневой сертификат libpq можно задать стандартной переменной `PGSSLROOTCERT`; файл хранится вне репозитория. В поставке проверено локальное подключение, а не удалённый сервер БД.
 
-`veqta_initialize`, `workwear_import_1c` и `workwear_load_catalog` требуют `--environment` и `--database-name`. Команды сверяют их с настройками, ролью подключения, `current_database()` и `current_user`. Ошибка происходит до чтения источника и записи рабочих данных. `veqta_initialize` требует роль владельца; импорт и каталог — прикладную роль. Роль другого контура и postgres не принимаются. `server_apply.sh --migrate` отдельно сверяет DB_HOST, DB_PORT и DB_SSLMODE обеих конфигураций, затем фактические имя БД и роль владельца.
+`veqta_initialize`, `workwear_import_1c` и `workwear_load_catalog` требуют `--environment` и `--database-name`. Команды сверяют их с настройками, ролью подключения, `current_database()` и `current_user`. Ошибка происходит до чтения источника и записи рабочих данных. `veqta_initialize` требует роль владельца; импорт и каталог — прикладную роль. Роль другого контура и postgres не принимаются. `server_apply.sh --migrate` отдельно сверяет DB_HOST, DB_PORT и DB_SSLMODE обеих конфигураций, затем фактические имя БД и роль владельца. Checkout/venv — `root:root`, без записи группе и остальным; env приложения — `root:veqta-ENV 0640`, env миграций — `root:root 0600`. Административные команды не наследуют PYTHONPATH, PYTHONHOME и LD_PRELOAD.
 
 Штатные команды Django `migrate`, `createsuperuser`, `collectstatic` работают с уже выбранным окружением. Перед их запуском проверьте несекретные значения:
 

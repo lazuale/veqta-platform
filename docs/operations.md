@@ -1,6 +1,6 @@
 # Эксплуатация и восстановление
 
-DEV и PROD независимы по checkout, Linux-пользователю, БД, секретам, static root и unit. Общий Nginx/PostgreSQL обслуживает другие приложения; ни одно из них не удаляется и не останавливается при обслуживании VEQTA. Первичная установка — [deployment.md](deployment.md).
+DEV и PROD независимы по checkout, Linux-пользователю, БД, секретам, static root и unit. Исполняемый код, Git и virtualenv принадлежат root; рабочий UID имеет только чтение/исполнение. Root запускает миграции с отдельным закрытым env и очищенным окружением. Общий Nginx/PostgreSQL обслуживает другие приложения; ни одно из них не удаляется и не останавливается при обслуживании VEQTA. Первичная установка — [deployment.md](deployment.md).
 
 ## Контракт этой версии
 
@@ -45,7 +45,7 @@ sudo -u postgres psql -X -h /var/run/postgresql -p 5432 -U postgres -d postgres 
 sudo -u postgres psql -X -h /var/run/postgresql -p 5432 -U postgres -d postgres -c "SELECT datname, pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname IN ('veqta_dev','veqta_prod');"
 ```
 
-При частичном DEV/PROD cold start выполняйте только оставшиеся строки `deploy/postgresql/<контур>.sql` после сравнения с этим состоянием. План миграций можно читать под прикладной ролью с `/etc/veqta/<контур>.env`, как в примере ниже. Применение схемы требует закрытого env владельца `/etc/veqta/<контур>-migrate.env`; штатный порядок — `server_apply.sh --migrate` или первоначальный bootstrap из deployment.md. Не добавляйте пароль владельца в env службы. Пример чтения плана:
+При отказе проверки прав не выдавайте checkout рабочему пользователю и не применяйте `chmod 777`. Остановите выбранную службу, проверьте доверенный SHA и восстановите root-owned код/venv после выяснения причины. При частичном DEV/PROD cold start выполняйте только оставшиеся строки `deploy/postgresql/<контур>.sql` после сравнения с этим состоянием. План миграций можно читать под прикладной ролью с `/etc/veqta/<контур>.env`, как в примере ниже. Применение схемы требует закрытого env владельца `/etc/veqta/<контур>-migrate.env`; штатный порядок — `server_apply.sh --migrate` или первоначальный bootstrap из deployment.md. Не добавляйте пароль владельца в env службы. Пример чтения плана:
 
 ```bash
 sudo -u veqta-prod bash -c '
@@ -80,7 +80,7 @@ install -d -o root -g root -m 0700 "$backup_dir"
 backup="$backup_dir/${DB_NAME}_$stamp.dump"
 [[ ! -e "$backup" ]]
 PGPASSWORD="$DB_PASSWORD" /usr/lib/postgresql/18/bin/pg_dump --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$DB_NAME" --format=custom --file="$backup"
-runuser -u "$ACTOR" -- git -C "$APP" rev-parse HEAD > "$backup.sha"
+git -c safe.directory="$APP" -C "$APP" rev-parse HEAD > "$backup.sha"
 /usr/lib/postgresql/18/bin/pg_restore --list "$backup" >/dev/null
 ```
 
@@ -126,7 +126,7 @@ VEQTA_RESTORE_CHECK
 [[ "$restore_db" == "veqta_${VEQTA_TARGET}_restore_check_"* ]]
 restore_revision=$(cat "$backup.sha")
 [[ "$restore_revision" =~ ^[0-9a-f]{40}$ ]]
-runuser -u "$ACTOR" -- git -C "$APP" cat-file -e "${restore_revision}^{commit}"
+git -c safe.directory="$APP" -C "$APP" cat-file -e "${restore_revision}^{commit}"
 veqta_clean_checkout
 retained_db="veqta_${VEQTA_TARGET}_before_restore_$(date -u +%Y%m%dT%H%M%SZ)"
 systemctl stop "$SERVICE"
@@ -136,7 +136,8 @@ WHERE datname IN (:'working', :'restored') AND pid <> pg_backend_pid();
 ALTER DATABASE :"working" RENAME TO :"retained";
 ALTER DATABASE :"restored" RENAME TO :"working";
 VEQTA_SWITCH
-runuser -u "$ACTOR" -- git -C "$APP" checkout --detach "$restore_revision"
+git -c safe.directory="$APP" -C "$APP" checkout --detach "$restore_revision"
+veqta_check_trusted_code
 bash "$APP/scripts/server_apply.sh" "$VEQTA_TARGET"
 bash "$APP/scripts/server_verify.sh" "$VEQTA_TARGET"
 exit
