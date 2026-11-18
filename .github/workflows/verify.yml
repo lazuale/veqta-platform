@@ -1,0 +1,110 @@
+name: Verify VEQTA
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:18.7
+        env:
+          # Только одноразовый контейнер CI, доступный через loopback runner.
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      VEQTA_ENV: dev
+      DB_NAME: veqta_dev
+      DB_USER: veqta_dev
+      DB_HOST: 127.0.0.1
+      DB_PORT: '5432'
+      DB_SSLMODE: disable
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
+      DJANGO_DEBUG: '1'
+      DJANGO_TRUST_PROXY: '0'
+      DJANGO_SECURE_COOKIES: '0'
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version-file: .python-version
+      - name: Install locked dependencies
+        run: |
+          python -m pip install --require-hashes -r requirements-browser.lock
+          python -m pip check
+          python - <<'PY'
+          from pathlib import Path
+          import re
+          def pins(name):
+              return {re.sub(r'[-_.]+', '-', k).lower(): v for k, v in
+                      re.findall(r'^([\w.-]+)==([^\s\\]+)', Path(name).read_text(), re.M)}
+          assert pins('requirements.txt') == pins('requirements.lock')
+          PY
+      - name: Create isolated roles and database
+        run: |
+          python - <<'PY'
+          import os, secrets
+          with open(os.environ['GITHUB_ENV'], 'a') as stream:
+              for name in ('DJANGO_SECRET_KEY', 'DB_PASSWORD', 'DB_OWNER_PASSWORD'):
+                  value = secrets.token_urlsafe(64)
+                  print(f'::add-mask::{value}')
+                  stream.write(f'{name}={value}\n')
+          PY
+      - name: Bootstrap and Cold Start with runtime permissions
+        run: |
+          psql -X -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres -f deploy/postgresql/dev.sql
+          DB_RUNTIME_PASSWORD="$DB_PASSWORD" DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" python -m tests.coldstart
+      - name: Django and PostgreSQL regression
+        run: |
+          python manage.py check
+          python manage.py makemigrations --check --dry-run
+          python manage.py migrate --check
+          DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" python manage.py test tests --noinput --verbosity 2
+          DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" python -m tests.acceptance
+      - name: Source and syntax
+        run: |
+          python scripts/check_source.py
+          python -m compileall -q config portal workwear tests scripts
+          bash -n scripts/server_checks.sh scripts/server_apply.sh scripts/server_verify.sh
+          sh -n deploy/letsencrypt/renew-nginx.sh
+          for script in portal/static/portal/*.js workwear/static/workwear/*.js workwear/static/workwear/js/*.js; do
+            node --input-type=module --check < "$script"
+          done
+          git diff --check
+      - name: Install browsers for manual RC acceptance
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          python -m playwright install --with-deps chromium firefox webkit
+          npm install --prefix "$RUNNER_TEMP/veqta-axe" --no-save --ignore-scripts --no-audit --no-fund axe-core@4.11.0
+      - name: RC acceptance in three engines
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          failed=0
+          for engine in chromium firefox webkit; do
+            if ! DB_RUNTIME_PASSWORD="$DB_PASSWORD" DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
+                python -m tests.acceptance --browser --matrix --engine "$engine" \
+                --axe-script "$RUNNER_TEMP/veqta-axe/node_modules/axe-core/axe.min.js" \
+                --artifacts "test-results/rc/$engine"; then
+              failed=1
+            fi
+          done
+          exit "$failed"
+      - uses: actions/upload-artifact@v7
+        if: always() && github.event_name == 'workflow_dispatch'
+        with:
+          name: rc-browser-evidence
+          path: test-results/rc/
+          retention-days: 7

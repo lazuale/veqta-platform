@@ -8,7 +8,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parent.parent
 EXCLUDED = {".git", ".venv", "venv", "__pycache__", "node_modules", "staticfiles", "media", "private", "data", "backups", "test-results", ".pytest_cache"}
-ALLOWED_SUFFIXES = {".sh", ".py", ".js", ".css", ".html", ".md", ".sql", ".txt", ".lock", ".service", ".conf", ".example"}
+ALLOWED_SUFFIXES = {".sh", ".py", ".js", ".css", ".html", ".md", ".sql", ".txt", ".lock", ".service", ".conf", ".example", ".yml"}
 ALLOWED_NAMES = {".gitignore", ".gitattributes", ".python-version"}
 
 
