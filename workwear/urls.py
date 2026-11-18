@@ -1,4 +1,3 @@
-"""Публичные JSON-маршруты Workwear, включённые в config.urls под /workwear/api/."""
 from django.urls import path
 from . import api, ui_api
 

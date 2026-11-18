@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Проверить публикуемые файлы без чтения исключённых рабочих данных и секретов."""
+"""Проверяем исходники на секреты, приватные ключи и адреса внутренних сетей."""
 import argparse
 from pathlib import Path
 import re
@@ -13,7 +13,7 @@ ALLOWED_NAMES = {".gitignore", ".gitattributes", ".python-version"}
 
 
 def inspect(path, data):
-    """Проверить тип файла, кодировку, приватные ключи и адреса закрытых сетей."""
+    """Не читаем исключённые файлы при проверке публикации."""
     problems = []
     if path.suffix not in ALLOWED_SUFFIXES and path.name not in ALLOWED_NAMES:
         problems.append("Недопустимый тип публикуемого файла")
@@ -35,7 +35,7 @@ def inspect(path, data):
 
 
 def main():
-    """Проверить подготовленные для commit байты либо исходную папку до git init."""
+    """Проверяем индекс Git, а до первого коммита — рабочий каталог."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--staged", action="store_true")
     args = parser.parse_args()

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Создать отдельные настройки приложения и миграций для нового контура."""
+"""Создаём настройки приложения и миграций для нового контура."""
 import argparse
 import os
 from pathlib import Path
@@ -8,7 +8,7 @@ import secrets
 
 
 def valid_hostname(value):
-    """Явное DNS-имя HTTPS без схемы, порта, wildcard и Nginx-директив."""
+    """DNS-имя не должно содержать схему, порт, шаблон или директивы Nginx."""
     return bool(len(value) <= 253 and "." in value and re.search("[a-z]", value) and all(
         re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label)
         for label in value.split(".")
