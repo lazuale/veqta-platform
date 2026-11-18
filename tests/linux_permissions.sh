@@ -3,8 +3,8 @@
 set -Eeuo pipefail
 [[ $EUID -eq 0 ]] || { echo 'Требуется root' >&2; exit 2; }
 umask 022
-# /opt на CI runner может быть group-writable; нужен доверенный системный путь.
-APP=$(mktemp -d /usr/share/veqta-permissions.XXXXXXXX)
+# /opt и /usr/share на hosted runner могут быть group-writable; / — доверенный родитель.
+APP=$(mktemp -d /veqta-permissions.XXXXXXXX)
 trap 'rm -rf -- "$APP"' EXIT
 chmod 0755 "$APP"
 mkdir -p "$APP/.git" "$APP/.venv/lib" "$APP/config" "$APP/scripts" "$APP/workwear/management/commands"
@@ -20,6 +20,8 @@ chown -R root:root "$APP"
 chmod -R go-w "$APP"
 source "$(dirname "$0")/../scripts/server_checks.sh"
 veqta_check_trusted_code
+runuser -u nobody -- test -r "$APP/manage.py"
+runuser -u nobody -- test -r "$APP/.venv/lib/dependency.py"
 for file in manage.py config/settings.py scripts/server_checks.sh \
             workwear/management/commands/veqta_initialize.py .venv/lib/dependency.py; do
   if runuser -u nobody -- sh -c 'printf malicious >> "$1"' sh "$APP/$file" 2>/dev/null; then
@@ -45,7 +47,7 @@ chown root "$APP/.venv/lib/dependency.py"
 veqta_check_trusted_code
 
 # Root-owned checkout с group-writable родителем нельзя считать доверенным.
-unsafe_parent=$(mktemp -d /usr/share/veqta-parent-test.XXXXXXXX)
+unsafe_parent=$(mktemp -d /veqta-parent-test.XXXXXXXX)
 mkdir -p "$unsafe_parent/app/.git" "$unsafe_parent/app/.venv"
 chmod 0755 "$unsafe_parent/app"
 chmod g+w "$unsafe_parent"
