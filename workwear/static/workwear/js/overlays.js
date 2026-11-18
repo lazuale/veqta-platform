@@ -1,9 +1,4 @@
-/* Панели, подтверждения и история Workwear. installOverlays(ctx) публикует
- * функции через ctx; modal/drawer/history/choice принадлежат settings. История
- * кэшируется по заявке, версии и сотруднику; historyEpoch/dialogEpoch
- * отвергают ответы закрытого контекста. Функции Portal
- * управляют доступностью, overlayReturn возвращает фокус после закрытия.
- * Панель не выдаёт права: разрешения API остаются независимой защитой. */
+/* Ответ закрытого диалога не должен открывать его снова. История не даёт права изменять заявку. */
 import { syncModalInert } from '../../portal/ui.js';
 
 export function installOverlays(ctx) {
@@ -32,7 +27,7 @@ export function installOverlays(ctx) {
         settings.reloadAck = false;
         renderOverlay();
     }
-    /** Отменить только чтение/локальный диалог; подтверждённая запись не повторяется. */
+    /** Подтверждённую запись не повторяем при закрытии диалога. */
     function cancelDialog() {
         if (settings.saving) return;
         settings.eventLog?.abort.abort(); settings.eventLog = null;
@@ -65,7 +60,6 @@ export function installOverlays(ctx) {
         }
         return '';
     }
-    /** Читать только текущую страницу журнала; закрытый диалог не принимает поздний ответ. */
     async function loadEvents(offset = 0) {
         if (settings.modal !== 'events' || !modalAllowed('events') || !settings.request) return;
         settings.eventLog?.abort.abort();

@@ -1,5 +1,3 @@
-/* Единая оболочка, header и навигация; рабочую область задаёт приложение.
- * Порядок загрузки и адаптивные уровни: docs/architecture.md. */
 .vq-shell {width:100%;height:100vh;height:100dvh;min-height:0;display:flex;flex-direction:column;background:var(--vq-bg);position:relative;isolation:isolate;overflow:hidden}
 .vq-header {height:var(--vq-header-height);min-height:var(--vq-header-height);background:var(--vq-surface);border-bottom:1px solid var(--vq-border);display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 var(--vq-page-x);z-index:20;flex:none}
 .vq-brand {display:inline-flex;align-items:center;gap:10px;white-space:nowrap;flex:none;color:var(--vq-text);text-decoration:none}
@@ -39,7 +37,7 @@
 @media(max-width:900px) {.vq-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}.vq-header-start,.vq-header-right{gap:12px}}
 @media(max-width:680px) {.vq-header-start,.vq-header-right{gap:6px}.vq-account-name{display:none}.vq-appname{max-width:180px}.vq-header-start>.vq-menu>.vq-menu-trigger{font-size:0;gap:4px}.vq-header-start>.vq-menu>.vq-menu-trigger::before{content:"Приложения";font-size:12px}.vq-header-start>.vq-menu>.vq-menu-trigger::after{font-size:13px}.vq-logo{font-size:14px}.vq-brand{gap:7px}.vq-head .vq-actions{gap:6px}.vq-error-page{margin:36px auto}}
 
-/* Каталог приложений — общая навигация портала и демонстрационных экранов. */
+
 .vq-app-list {display:flex;flex-direction:column;border:1px solid var(--vq-border);border-radius:var(--vq-radius-panel);background:var(--vq-surface);overflow:hidden}
 .vq-app-entry {display:flex;align-items:center;gap:20px;padding:24px;border-bottom:1px solid var(--vq-border);color:var(--vq-text);min-width:0}
 .vq-app-entry:last-child {border-bottom:0}

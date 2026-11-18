@@ -1,8 +1,4 @@
-/* Реестр и URL-навигация Workwear. installRegistry(ctx) публикует функции
- * маршрутизации/загрузки/фильтрации через ctx; DOM меняется только внутри main.
- * settings.registry хранит поиск, фильтры и страницу. pageEpoch защищает
- * ответы списка, refreshEpoch отменяет открытие заявки после перехода назад.
- * Несохранённые изменения требуют явного решения; историю URL ведёт History API. */
+/* Поздние ответы не должны открывать заявку после перехода назад. Состояние списка хранится отдельно. */
 export function installRegistry(ctx) {
     const {
         settings, main, can, btn, icon, field, allOrgOptions, esc, $, api, fmt, fmtTime, tone,

@@ -1,5 +1,3 @@
-/* Только компоновка домашней страницы и auth. Общие компоненты принадлежат components.css.
- * Порядок загрузки и адаптивные уровни: docs/architecture.md. */
 .vq-portal-home {width:100%;margin:0 auto}
 .vq-portal-home .vq-head {margin-bottom:28px}
 .vq-portal-home .vq-welcome {margin-bottom:var(--vq-stack-gap)}
@@ -22,5 +20,5 @@
 
 .vq-title-row{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}.vq-title-row h2{margin:0}.vq-app-entry-content .vq-title-row{justify-content:flex-start}.vq-app-entry-content h2{font-size:16px}
 
-/* Общая мобильная компоновка Portal одинакова в Django и автономном эталоне. */
+
 @media(max-width:680px){.vq-welcome{padding:22px}.vq-welcome-mark{display:none}.vq-title-row{gap:8px}}
