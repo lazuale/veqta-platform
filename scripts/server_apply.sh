@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Применяет уже проверенный checkout; не загружает код и не создаёт/удаляет БД.
 set -Eeuo pipefail
-umask 027
+umask 022
 
 usage() { echo 'Использование: sudo bash scripts/server_apply.sh dev|prod [--migrate]' >&2; exit 2; }
 [[ $# -ge 1 && $# -le 2 ]] || usage
@@ -47,6 +47,8 @@ fi
 "$APP/.venv/bin/python" -m pip install \
   --no-cache-dir --disable-pip-version-check --require-hashes -r "$APP/requirements.lock"
 "$APP/.venv/bin/python" -m pip check
+runuser -u "$ACTOR" -- test -r "$APP/manage.py"
+runuser -u "$ACTOR" -- test -x "$APP/.venv/bin/python"
 veqta_check_trusted_code
 veqta_clean_checkout
 [[ "$(git -c safe.directory="$APP" -C "$APP" rev-parse HEAD)" == "$REVISION" ]] || {

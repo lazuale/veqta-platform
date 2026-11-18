@@ -336,9 +336,10 @@ class ServerApplyTests(unittest.TestCase):
         (self.app / ".venv/bin").mkdir(parents=True)
         shutil.copytree(ROOT / "deploy", self.app / "deploy")
         (self.app / "requirements.lock").write_text("")
+        (self.app / "manage.py").write_text("# synthetic\n")
         python = self.app / ".venv/bin/python"
         python.write_text('#!/bin/sh\nexit 0\n')
-        python.chmod(0o700)
+        python.chmod(0o755)
         self.scripts = self.path / "scripts"
         self.scripts.mkdir()
         for name in ("server_checks.sh", "server_apply.sh"):

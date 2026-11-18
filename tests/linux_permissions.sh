@@ -2,6 +2,7 @@
 # Негативные проверки Unix UID на одноразовом изолированном пути GitHub runner.
 set -Eeuo pipefail
 [[ $EUID -eq 0 ]] || { echo 'Требуется root' >&2; exit 2; }
+umask 022
 APP=$(mktemp -d /opt/veqta-permissions.XXXXXXXX)
 trap 'rm -rf -- "$APP"' EXIT
 chmod 0755 "$APP"
