@@ -18,10 +18,13 @@ chmod 0600 "$APP/owner.env"
 # Синтетическая кодовая база повторяет контракт root-owned checkout независимо от ACL runner.
 chown -R root:root "$APP"
 chmod -R go-w "$APP"
+# Стандартный Linux venv создаёт root-owned symlink lib64 (mode 0777).
+ln -s lib "$APP/.venv/lib64"
 source "$(dirname "$0")/../scripts/server_checks.sh"
 veqta_check_trusted_code
 runuser -u nobody -- test -r "$APP/manage.py"
 runuser -u nobody -- test -r "$APP/.venv/lib/dependency.py"
+runuser -u nobody -- test -r "$APP/.venv/lib64/dependency.py"
 for file in manage.py config/settings.py scripts/server_checks.sh \
             workwear/management/commands/veqta_initialize.py .venv/lib/dependency.py; do
   if runuser -u nobody -- sh -c 'printf malicious >> "$1"' sh "$APP/$file" 2>/dev/null; then
