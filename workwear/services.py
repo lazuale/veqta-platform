@@ -23,6 +23,7 @@ from .models import (
 
 
 class WorkwearConflict(Exception):
+    """Конфликт версии заявки."""
 
 
 @dataclass(frozen=True)
