@@ -1,4 +1,4 @@
-"""Проверка реального прикладного подключения после изолированного Cold Start."""
+"""Проверяем подключение под прикладной ролью после чистой установки."""
 from django.db import connection, DatabaseError, transaction
 from workwear import services
 from workwear.models import Request, WorkwearEvent
@@ -6,7 +6,7 @@ from .factories import make_employees, make_import, make_items, make_organizatio
 
 
 def grant_test_runtime_access():
-    """Выдать DML после migrate только в одноразовой базе приёмки Django."""
+    """Права приложения выдаём только в одноразовой базе тестов."""
     with connection.cursor() as cursor:
         cursor.execute("SELECT current_database(), current_user")
         assert cursor.fetchone() == ("test_veqta_dev", "veqta_dev_owner")
@@ -72,7 +72,7 @@ def check_runtime_permissions():
     items = make_items()
     req = services.create_request(organization_id=organization.pk, actor=actor)
     services.add_employee(request_id=req.pk, employee_id=people[0].pk, actor=actor, expected_version=1)
-    # Публичные сервисы проверяются через тот же sync-контракт, что и UI.
+    # Запись проверяем через тот же сервис, что использует интерфейс.
     from workwear.sync import save_draft
     req.refresh_from_db()
     save_draft(request_id=req.pk, actor=actor, expected_version=req.version,

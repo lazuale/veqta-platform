@@ -1,9 +1,4 @@
-"""Проверка установки только в новой пустой veqta_dev отдельного кластера.
-
-Запуск: python -m tests.coldstart. Существующую схему не очищает.
-Создаёт синтетического администратора, справочники, сотрудников и одну заявку.
-Не запускать в рабочем DEV: результаты остаются в проверяемой базе.
-"""
+"""Проверяем чистую установку в одноразовой базе."""
 from io import StringIO
 import os
 from pathlib import Path
@@ -58,8 +53,7 @@ def main():
         assert "snapshot_organization_name" in columns and "organization_name" not in columns
     print("Cold Start: одна начальная миграция, пустые справочники, 10 функций, 13 триггеров и составные FK — успешно")
 
-    # Схему создаёт владелец. Все дальнейшие ORM/Admin/API-операции выполняет
-    # реальное отдельное подключение приложения, а не SET ROLE владельца.
+    # Схему создаёт владелец, а ORM и API проверяем через отдельную прикладную роль.
     connection.close()
     connection.settings_dict.update(USER="veqta_dev", PASSWORD=runtime_password)
     require_target("dev", "veqta_dev")

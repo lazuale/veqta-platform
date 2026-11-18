@@ -1,4 +1,4 @@
-"""Общий временный сервер и безопасное чтение БД для синхронного Playwright."""
+"""Временный HTTPS-сервер и подключения к БД для браузерных тестов."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -17,7 +17,6 @@ import urllib.request
 
 
 class QueryCountMiddleware:
-    """Число SQL-запросов для измерений временного сервера config.testing."""
     def __init__(self, get_response):
         self.get_response = get_response
 
@@ -58,7 +57,6 @@ def stop_process(process):
 
 
 def sign_in(page, base, username, password):
-    """Дождаться ответа входа и установки сессии перед следующей навигацией."""
     from playwright.sync_api import expect
     page.goto(base + "/login/")
     page.locator('[name="username"]').fill(username)
@@ -105,19 +103,14 @@ def live_server(*, stack="runserver", nginx_executable=None, artifacts=None):
 
 
 def expose_fixture_static(folder):
-    """Разрешить воркеру Nginx чтение только публичной статики HTTPS-стенда.
-
-    TemporaryDirectory и umask 077 закрывают временный корень и CSS даже
-    от непривилегированного www-data. Секретный private.key не затрагивается.
-    """
+    """Для HTTPS-теста открываем на чтение только публичную статику."""
     public = folder / "static"
     if folder.is_symlink() or not public.is_dir() or public.is_symlink():
         raise RuntimeError("Некорректный каталог статики HTTPS-стенда")
     paths = [public, *public.rglob("*")]
     if any(path.is_symlink() or not (path.is_file() or path.is_dir()) for path in paths):
         raise RuntimeError("Неожиданная ссылка или тип объекта в тестовой статике")
-    # Временный каталог остаётся недоступен для перечисления: только проход.
-    # Полностью открыта для чтения лишь раздаваемая статика.
+    # Каталог можно проходить, но читать разрешено только публичную статику.
     for path in paths:
         path.chmod(0o755 if path.is_dir() else 0o644)
     folder.chmod(0o711)
@@ -125,7 +118,7 @@ def expose_fixture_static(folder):
 
 @contextmanager
 def https_server(environment, nginx_executable, artifacts):
-    """Приватные Gunicorn/Nginx, свой сертификат и стандартный шаблон сайта."""
+    """Сертификат и конфигурация временного HTTPS-сервера не попадают в рабочие файлы."""
     executable = nginx_executable or shutil.which("nginx")
     if not executable or not shutil.which("openssl"):
         raise RuntimeError("HTTPS-приёмке нужны Nginx и OpenSSL в изолированной среде")
@@ -243,8 +236,7 @@ def https_server(environment, nginx_executable, artifacts):
 
 
 def database_call(callback):
-    # Sync Playwright держит event loop. ORM выполняется в отдельном потоке,
-    # без отключения штатной защиты Django от синхронных обращений из asyncio.
+    # ORM выполняем в отдельном потоке: Playwright уже использует цикл asyncio.
     def run():
         from django.db import connections
         try:
@@ -257,7 +249,6 @@ def database_call(callback):
 
 @contextmanager
 def delayed_requests(page, pattern):
-    """Удержать ответ до выхода из блока; одинаково работает во всех движках."""
     pending = []
     def hold(route):
         pending.append(route)

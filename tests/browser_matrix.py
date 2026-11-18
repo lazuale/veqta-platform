@@ -1,8 +1,4 @@
-"""Поведенческая приёмка матрицы на реальном браузере и PostgreSQL.
-
-Вызывается из tests.acceptance --matrix. Все данные вымышленные, артефакты
-находятся вне исходников. Ошибка любого сценария делает весь прогон неуспешным.
-"""
+"""Проверяем матрицу в браузере и сверяем изменения с PostgreSQL."""
 from collections import Counter
 from datetime import timedelta
 import json
@@ -82,7 +78,7 @@ def seed_matrix(actor):
     services.reopen_request(request_id=journal.pk, actor=actor, expected_version=completed.version, reason=journal_reason)
     extra['journal'] = journal.pk
     old_source = make_import()
-    # Сдвигаем факт старого пакета назад; последний принятый остаётся source.
+    # Датируем старую выгрузку раньше: действующей остаётся последняя принятая.
     EmployeeImport.objects.filter(pk=old_source.pk).update(accepted_at=source.accepted_at-timedelta(days=1))
     Employee.objects.create(employee_guid=uuid4(), personnel_number="RC-OLD", full_name="Устаревший Тестовый Сотрудник",
         organization=organization, last_seen_import=old_source)
@@ -288,8 +284,8 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
                 page.locator('[data-action="save"]').click()
             assert saved.value.status == 200
             expect(page.locator('[data-action="save"]')).to_be_disabled()
-            # POST 200 may precede the final UI reconciliation of a large matrix.
-            # Keep a bounded wait and still assert exact PostgreSQL/API contents.
+            # HTTP 200 может прийти до обновления большой матрицы.
+# Ждём с ограничением и сверяем результат по БД и API.
             expect(page.locator('#veq-app')).to_have_attribute(
                 'aria-busy', 'false', timeout=completion_timeout_ms)
             page.wait_for_function("!document.querySelector('[data-cell].on')?.textContent.includes('…')")
@@ -517,7 +513,7 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             expect(page.locator('#veq-app')).to_have_attribute('aria-busy','false')
             expect(page.locator('[data-action="save"]')).to_be_disabled()
             assert database_call(lambda: persisted(request_id))["pairs"] == original["pairs"]
-            # COMMIT успешен, последующее чтение оборвано: повторный POST не требуется.
+            # После успешного сохранения ошибка чтения не должна вызвать повторный POST.
             page.locator(selector).click()
             expect(page.locator(selector)).to_have_attribute('aria-pressed','true')
             page.route(base+f'/workwear/api/requests/{request_id}/',lambda route:route.abort('connectionfailed'),times=1)
@@ -726,7 +722,7 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
                 page.locator(f'[data-person="{person}"]').first.click()
                 page.locator(f'[data-item="{item_id}"]').check()
                 page.locator('[data-action="close-drawer"]').last.click()
-                # Ответ 200, завершение busy и чтение БД важнее состояния disabled.
+                # Успех записи проверяем по HTTP и БД, а не по состоянию кнопки.
                 save_and_check(request_id, {(data['people'][i], item_id) for i in range(index+1)})
 
             add_and_assign(0)

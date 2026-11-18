@@ -1,10 +1,4 @@
-"""Проверки конкуренции и браузера в отдельной временной БД.
-
-Запуск: python -m tests.acceptance [--browser] [--matrix] [--artifacts test-results/rc].
-Свой браузер: --browser-executable /usr/bin/chromium.
-База test_veqta_dev создаётся перед проверками и удаляется целиком после них.
-Существующая тестовая база не перезаписывается. Рабочий справочник не изменяется.
-"""
+"""Приёмочные проверки конкурентной записи и интерфейса на временной базе."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import os
@@ -17,7 +11,7 @@ from .browser_support import live_server, sign_in
 
 
 def check_race(actor, people, items):
-    """Две транзакции одной версии: ровно одна сохраняет состав, другая получает конфликт."""
+    """Из двух конкурентных записей одна должна получить конфликт версии."""
     from django.db import connections
     from django.contrib.auth import get_user_model
     from workwear import services
@@ -29,7 +23,6 @@ def check_race(actor, people, items):
     users = [actor.pk, make_user().pk]
 
     def worker(arguments):
-        """Работать через отдельное соединение и закрыть его после транзакции."""
         try:
             person, user_id = arguments
             user = get_user_model().objects.get(pk=user_id)
@@ -52,7 +45,6 @@ def check_race(actor, people, items):
 
 
 def check_parallel_load(organization_id, employee_ids, item_ids, users=8):
-    """Отдельные прикладные соединения; каждый пользователь сохраняет свою заявку."""
     from django.db import connections
     from django.contrib.auth import get_user_model
     from django.test.utils import CaptureQueriesContext
@@ -95,7 +87,6 @@ def check_parallel_load(organization_id, employee_ids, item_ids, users=8):
 
 
 def check_http_load(server, organization_id, employee_ids, item_ids):
-    """Восемь HTTP-сессий с настоящими входом, CSRF, API и сверкой PostgreSQL."""
     from http.cookiejar import CookieJar
     import json
     import ssl
@@ -203,7 +194,7 @@ def check_http_load(server, organization_id, employee_ids, item_ids):
         stored = database_call(lambda: persisted(request_id))
         assert stored["pairs"] == expected and stored["version"] == 2 and stored["events"] == 2
 
-    # Разные сессии одной версии должны дать 200 и осмысленный 409, без частичного состава.
+    # Конкурентные сессии должны получить 200 и 409 без частичной записи.
     shared = results[0][0].create()
     race = Barrier(2)
     def race_worker(index):
@@ -234,7 +225,6 @@ def check_http_load(server, organization_id, employee_ids, item_ids):
 
 
 def check_registry(page, base, actor, organization_id, organization_name):
-    """Сверить общее число совпадений, текущую страницу и ошибку фильтра."""
     from playwright.sync_api import expect
     from workwear.models import Request
     from workwear.services import create_request
@@ -307,7 +297,6 @@ def check_registry(page, base, actor, organization_id, organization_name):
 
 
 def check_browser(actor, people, executable, engine="chromium", server_options=None):
-    """Пройти вход, массовый подбор, назначение, сохранение, завершение и возврат."""
     from playwright.sync_api import sync_playwright, expect
     password = secrets.token_urlsafe(32)
     actor.set_password(password)
@@ -368,7 +357,7 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
         expect(page.locator('h1')).to_have_text("Состав заявки")
         assert page.evaluate("document.documentElement.scrollWidth <= innerWidth"), "Горизонтальный выход страницы за экран"
         draft_url = page.url
-        # Добавляем справочники нативными формами и используем новую позицию в UI.
+        
         page.set_viewport_size({"width": 1440, "height": 1000})
         page.goto(base + "/admin/workwear/organization/add/")
         page.locator('[name="name"]').fill("Организация из браузерного теста")
@@ -425,7 +414,7 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
             "Позиция из браузерного теста · Новая категория из Admin · 90 дней")
         expected_failure = check_registry(page, base, actor, added_org["value"], added_org["label"])
         failures.remove(expected_failure)
-        # Отсутствие доступных справочников проверяем через реальные формы Admin.
+        
         metadata = page.request.get(base + "/workwear/api/ui/metadata/").json()
         for org in metadata["organizations"]:
             page.goto(base + f'/admin/workwear/organization/{org["value"]}/change/')
@@ -446,8 +435,7 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
         page.goto(draft_url)
         expect(page.locator('h1')).to_have_text("Состав заявки")
         expect(page.locator('.vq-banner[role="status"]')).to_contain_text("Нет активных позиций спецодежды")
-        # Штатные GroupAdmin и UserAdmin: создаём группу и пользователя,
-        # назначаем стандартное разрешение и проверяем вход в отдельном сеансе.
+        
         page.goto(base + "/admin/auth/group/add/")
         page.locator('[name="name"]').fill("Группа браузерного теста")
         options = page.locator('#id_permissions_from option').evaluate_all("nodes => nodes.map(n => ({value:n.value,label:n.textContent}))")
@@ -484,7 +472,7 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
 
 
 def main():
-    """Проверить DEV, создать временную схему и удалить её даже после ошибки теста."""
+    """Временную схему удаляем и после ошибки проверки."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--browser", action="store_true")
     parser.add_argument("--browser-executable")

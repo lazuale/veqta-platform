@@ -1,4 +1,4 @@
-"""Ошибочная конфигурация должна останавливать процесс до обращения к данным."""
+"""Неверные настройки должны останавливать запуск до обращения к базе."""
 import os
 import secrets
 import subprocess
@@ -7,11 +7,10 @@ from django.test import SimpleTestCase
 
 
 class ConfigurationTests(SimpleTestCase):
-    """Отдельный процесс исключает влияние уже загруженных настроек Django."""
+    """Проверяем настройки в отдельном процессе, не используя кэш Django."""
     def settings_process(self, *, module="config.settings", assertions="", **changes):
-        """Импортировать настройки с синтетическим ключом и явным набором переменных."""
         env = os.environ.copy()
-        # Не наследуем HTTPS-настройку сервера: проверяем defaults для DEV и PROD.
+        # Не наследуем настройки HTTPS при проверке значений по умолчанию.
         env.pop("DJANGO_SECURE_COOKIES", None)
         env.update(VEQTA_ENV="dev", DB_NAME="veqta_dev", DB_USER="veqta_dev",
                    DB_PASSWORD=secrets.token_urlsafe(32), DB_HOST="127.0.0.1", DB_PORT="5432",
