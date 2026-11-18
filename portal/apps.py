@@ -1,7 +1,6 @@
-"""Штатная регистрация приложения Portal без побочных эффектов ready()."""
+"""При запуске Portal не создаём записи в БД."""
 from django.apps import AppConfig
 
 
 class PortalConfig(AppConfig):
-    """Конфигурация Portal; startup не пишет в БД и не создаёт роли."""
     name = 'portal'

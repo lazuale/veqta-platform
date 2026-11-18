@@ -1,4 +1,4 @@
-"""Маршруты портала и штатных auth views Django; logout использует POST/CSRF."""
+"""Выход из системы требует POST и CSRF; остальные маршруты используют штатные представления Django."""
 from django.contrib.auth.views import LoginView, LogoutView, PasswordChangeView, PasswordChangeDoneView
 from django.urls import path
 

@@ -1,7 +1,6 @@
-"""Штатная регистрация Workwear без startup-записей в базу данных."""
+"""При запуске Workwear не создаём записи; миграции и права ведёт Django."""
 from django.apps import AppConfig
 
 
 class WorkwearConfig(AppConfig):
-    """Конфигурация Workwear; миграции и permissions создаются штатными средствами Django."""
     name = 'workwear'

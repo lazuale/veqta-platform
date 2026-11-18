@@ -1,11 +1,9 @@
 #!/usr/bin/env python
-"""Штатная командная строка управления Django."""
 import os
 import sys
 
 
 def main():
-    """Запустить административную команду в выбранном окружении."""
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
     try:
         from django.core.management import execute_from_command_line

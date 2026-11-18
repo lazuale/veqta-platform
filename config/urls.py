@@ -1,4 +1,4 @@
-"""Корневые маршруты монолита: native Admin, API/страницы Workwear и Portal."""
+"""Маршруты Django Admin, Portal и API Workwear."""
 from django.contrib import admin
 from django.urls import include, path
 
