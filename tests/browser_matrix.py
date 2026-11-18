@@ -283,12 +283,15 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
         def api_pairs(request_id):
             return sorted((m["employee_id"], a["item_id"]) for m in api_request(request_id)["members"] for a in m["assignments"])
 
-        def save_and_check(request_id, expected_pairs):
+        def save_and_check(request_id, expected_pairs, *, completion_timeout_ms=5_000):
             with page.expect_response(lambda response: response.request.method == "POST" and response.url.endswith(f'/requests/{request_id}/sync/')) as saved:
                 page.locator('[data-action="save"]').click()
             assert saved.value.status == 200
             expect(page.locator('[data-action="save"]')).to_be_disabled()
-            expect(page.locator('#veq-app')).to_have_attribute('aria-busy', 'false')
+            # POST 200 may precede the final UI reconciliation of a large matrix.
+            # Keep a bounded wait and still assert exact PostgreSQL/API contents.
+            expect(page.locator('#veq-app')).to_have_attribute(
+                'aria-busy', 'false', timeout=completion_timeout_ms)
             page.wait_for_function("!document.querySelector('[data-cell].on')?.textContent.includes('…')")
             assert database_call(lambda: persisted(request_id))["pairs"] == sorted(expected_pairs)
             assert api_pairs(request_id) == sorted(expected_pairs)
@@ -856,7 +859,9 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
                 expect(page.locator('.vq-modal')).to_have_count(0)
                 batch=perf_counter()-started
                 expected-={(p,batch_item) for p in data['people'][:min(size,100)]}
-                started=perf_counter();save_and_check(request_id,expected);saving=perf_counter()-started
+                started=perf_counter()
+                save_and_check(request_id, expected, completion_timeout_ms=30_000 if size >= 500 else 5_000)
+                saving=perf_counter()-started
                 assert len(database_call(lambda:persisted(request_id))['pairs'])==size*30-1-min(size,100)
                 measurements.append({"employees":size,"assignments_before":size*30,"opening_seconds":round(opening,3),
                     "matrix_seconds":round(matrix,3),"page_seconds":round(paging,3),"cell_seconds":round(mutation,3),
