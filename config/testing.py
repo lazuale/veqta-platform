@@ -1,10 +1,10 @@
-"""Настройки временного сервера для браузерных тестов; разрешены только из DEV."""
+"""Браузерные тесты запускаем только с настройками DEV."""
 from .settings import *
 
 if VEQTA_ENV != "dev":
     raise ImproperlyConfigured("Тестовый сервер разрешён только из DEV")
 DATABASES["default"]["NAME"] = "test_veqta_dev"
-# DEBUG нужен runserver для статики; при HTTPS её обслуживает настоящий Nginx.
+# runserver раздаёт статику через DEBUG; по HTTPS её отдаёт Nginx.
 _https = boolean("VEQTA_TEST_HTTPS")
 DEBUG = not _https
 ALLOWED_HOSTS = ["localhost", "127.0.0.1", "testserver"]

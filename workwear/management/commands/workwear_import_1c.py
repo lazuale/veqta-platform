@@ -1,9 +1,4 @@
-"""Штатная команда проверки и публикации трёх справочников 1С.
-
-По умолчанию dry-run; apply требует tar.gz, точной БД и даты YYYY-MM-DD,
-подтверждённого количества и previous id. Запуск имеет доступ к кадровым
-данным; stdout dry-run нельзя публиковать как обезличенный диагностический
-отчёт: review содержит GUID выпавших сотрудников. См. docs/import-1c.md."""
+"""Проверка и публикация трёх справочников 1С."""
 from dataclasses import asdict
 from datetime import date
 import json
@@ -19,13 +14,9 @@ from workwear.importers.acceptance import accept, review
 
 
 class Command(BaseCommand):
-    """Штатная management-команда: проверка целевой БД и явный dry-run/apply.
-
-    Полный порядок и параметры: docs/import-1c.md; ошибки — CommandError."""
     help = "Проверить или атомарно принять три справочника 1С"
 
     def add_arguments(self, parser):
-        """Зарегистрировать явные параметры CLI без чтения секретов и записи в БД."""
         parser.add_argument("--environment", required=True, choices=["dev", "prod"])
         parser.add_argument('source', help='Каталог с тремя CSV или архив .tar.gz')
         parser.add_argument('--source-export-date', default=None,
@@ -38,10 +29,7 @@ class Command(BaseCommand):
         parser.add_argument('--confirm-missing-current-sha256')
 
     def handle(self, *args, **options):
-        """Проверить параметры и целевую БД, разобрать источник и выполнить выбранный режим.
-
-        По умолчанию только проверка. Ошибка отклоняет запуск; публикация выполняется
-        транзакционным сервисом. Не включать кадровый stdout в публичный отчёт."""
+        """Перед публикацией проверяем контур. Без --apply команда ничего не записывает."""
         require_target(options["environment"], options["database_name"])
         exported = None
         raw_date = options["source_export_date"]

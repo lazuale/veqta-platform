@@ -1,9 +1,4 @@
-"""Настройки DEV и PROD. Секреты поступают только из окружения.
-
-Имя контура определяет базу, прикладную роль и отдельного владельца схемы.
-Файлы .env читает оболочка; служба получает только прикладные реквизиты.
-Ошибка настройки останавливает запуск до подключения к базе.
-"""
+"""Настройки DEV и PROD читаются из окружения. Секреты не храним в коде."""
 import os
 from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
@@ -12,7 +7,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 
 
 def required(name):
-    """Получить обязательное значение, не раскрывая его в сообщении об ошибке."""
+    """Не раскрываем секреты в сообщениях об отсутствующих настройках."""
     value = os.environ.get(name, '').strip()
     if not value:
         raise ImproperlyConfigured(f'Не задана переменная {name}')
@@ -20,7 +15,7 @@ def required(name):
 
 
 def boolean(name, default=False):
-    """Разобрать флаг 0/1; опечатка не должна ослаблять защиту."""
+    """Принимаем только 0 или 1, чтобы опечатка не ослабила защиту."""
     value = os.environ.get(name, '1' if default else '0')
     if value not in {'0', '1'}:
         raise ImproperlyConfigured(f'{name} должна иметь значение 0 или 1')
@@ -94,14 +89,14 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 STATIC_URL = '/static/'
 STATIC_ROOT = Path(os.environ.get('DJANGO_STATIC_ROOT', str(BASE_DIR / 'staticfiles')))
-# Почта не участвует в управлении внутренними учётными записями.
+# Учётными записями управляют без электронной почты.
 MAILERS = {}
-# Отправка писем отключена намеренно; отсутствие почтового канала не ошибка запуска.
+# Отправка писем отключена; почтовый сервер для запуска не нужен.
 SILENCED_SYSTEM_CHECKS = ["mail.W001"]
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
-# Заголовок протокола допустим только при закрытом прямом доступе к Gunicorn.
+# Доверяем заголовку протокола только при закрытом прямом доступе к Gunicorn.
 TRUST_PROXY = boolean('DJANGO_TRUST_PROXY')
 if IS_PRODUCTION and not TRUST_PROXY:
     raise ImproperlyConfigured('PROD требует доверенный прокси и DJANGO_TRUST_PROXY=1')
@@ -122,6 +117,6 @@ if SECURE_COOKIES and any(not v.startswith('https://') or '*' in v for v in CSRF
     raise ImproperlyConfigured('PROD допускает только явные HTTPS-источники CSRF')
 SESSION_COOKIE_NAME = f'veqta_{VEQTA_ENV}_session'
 CSRF_COOKIE_NAME = f'veqta_{VEQTA_ENV}_csrf'
-# HSTS относится ко всему хосту: DEV и PROD должны иметь разные имена хостов.
+# HSTS действует на весь хост: DEV и PROD нужны разные домены.
 X_FRAME_OPTIONS = 'DENY'
 SECURE_CONTENT_TYPE_NOSNIFF = True

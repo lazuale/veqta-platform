@@ -1,11 +1,11 @@
-"""Проверка адресата служебных операций до изменения рабочих данных."""
+"""Проверяем адресат служебной операции до изменения данных."""
 from django.conf import settings
 from django.core.management.base import CommandError
 from django.db import connection
 
 
 def require_target(environment, database_name, *, owner=False):
-    """Сверить явное намерение оператора, настройки и ответ самой PostgreSQL."""
+    """Настройки и фактическое соединение PostgreSQL должны указывать на одну базу."""
     expected = f"veqta_{environment}"
     expected_user = f"{expected}_owner" if owner else expected
     if environment not in {"dev", "prod"} or environment != settings.VEQTA_ENV:

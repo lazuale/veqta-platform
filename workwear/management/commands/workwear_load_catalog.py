@@ -1,8 +1,4 @@
-"""Первичная загрузка отдельно утверждённого каталога спецодежды.
-
-Это не выгрузка 1С. Dry-run не пишет; apply создаёт недостающие записи
-в atomic-транзакции и отказывается перезаписывать отличающийся каталог.
-Параметр database-name служит защитой от неверного контура."""
+"""Начальная загрузка каталога СИЗ."""
 
 import csv
 from pathlib import Path
@@ -14,13 +10,9 @@ from workwear.models import WorkwearItem
 
 
 class Command(BaseCommand):
-    """Штатная management-команда: проверка целевой БД и явный dry-run/apply.
-
-    Полный порядок и параметры: docs/directories.md; ошибки — CommandError."""
     help = "Проверить или загрузить утверждённый CSV каталога СИЗ"
 
     def add_arguments(self, parser):
-        """Зарегистрировать явные параметры CLI без чтения секретов и записи в БД."""
         parser.add_argument("--environment", required=True, choices=["dev", "prod"])
         parser.add_argument("source")
         parser.add_argument("--apply", action="store_true")
@@ -29,10 +21,7 @@ class Command(BaseCommand):
         parser.add_argument("--expected-count", type=int, required=True)
 
     def handle(self, *args, **options):
-        """Проверить параметры и целевую БД, разобрать источник и выполнить выбранный режим.
-
-        По умолчанию только проверка. Ошибка отклоняет запуск; публикация выполняется
-        транзакционным сервисом. Не включать кадровый stdout в публичный отчёт."""
+        """Перед загрузкой сверяем контур. Без --apply ничего не записываем."""
         require_target(options["environment"], options["database_name"])
         path = Path(options["source"])
         try:
@@ -56,8 +45,8 @@ class Command(BaseCommand):
                 category=row["category"].strip(), validity_days=row["validity_days"],
                 sort_order=row["sort_order"], is_active=row["is_active"] == "1")
             try:
-                # ModelForm в Admin и CLI проверяют одну модель, включая её CHECK.
-                # Уникальность существующего кода разбирается отдельно: apply идемпотентен.
+                # Admin и команда используют одинаковые проверки модели.
+                # Повторная загрузка не создаёт позиции с тем же кодом.
                 item.full_clean(validate_unique=False)
             except ValidationError as exc:
                 raise CommandError(f"Каталог, строка {idx}: {'; '.join(exc.messages)}") from exc
