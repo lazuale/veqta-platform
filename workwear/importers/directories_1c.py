@@ -99,7 +99,7 @@ def _rows(data, name, required):
         raise ImportRejected(f"{name}: missing required columns: {sorted(missing)}")
     try:
         for n, row in enumerate(reader, start=2):
-            if n > MAX_ROWS or None in row or any(v is None for v in row.values()):
+            if n - 1 > MAX_ROWS or None in row or any(v is None for v in row.values()):
                 raise ImportRejected(f"{name}:{n}: invalid CSV row")
             yield n, row
     except csv.Error as exc:

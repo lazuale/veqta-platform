@@ -4,6 +4,7 @@ from datetime import timedelta
 from pathlib import Path
 import tarfile
 import tempfile
+from unittest.mock import patch
 from uuid import uuid4
 from django.core.exceptions import ValidationError
 from django.db import connection
@@ -63,6 +64,13 @@ class ImportTests(TestCase):
             for name in ("Employees.csv", "Positions.csv", "Units.csv"):
                 archive.add(self.path/name, arcname=name)
         self.assertEqual(parse(target), parse(self.path))
+
+    @patch("workwear.importers.directories_1c.MAX_ROWS", 1)
+    def test_csv_row_limit_excludes_header(self):
+        self.assertEqual(parse(self.path).source_row_count, 1)
+        make_sources(self.path, people=self.people * 2)
+        with self.assertRaisesRegex(ImportRejected, r"Employees\.csv:3: invalid CSV row"):
+            parse(self.path)
 
     def test_same_package_is_idempotent(self):
         self.publish()
