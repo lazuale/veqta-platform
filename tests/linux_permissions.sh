@@ -3,7 +3,8 @@
 set -Eeuo pipefail
 [[ $EUID -eq 0 ]] || { echo 'Требуется root' >&2; exit 2; }
 umask 022
-APP=$(mktemp -d /opt/veqta-permissions.XXXXXXXX)
+# /opt на CI runner может быть group-writable; нужен доверенный системный путь.
+APP=$(mktemp -d /usr/share/veqta-permissions.XXXXXXXX)
 trap 'rm -rf -- "$APP"' EXIT
 chmod 0755 "$APP"
 mkdir -p "$APP/.git" "$APP/.venv/lib" "$APP/config" "$APP/scripts" "$APP/workwear/management/commands"
@@ -44,7 +45,7 @@ chown root "$APP/.venv/lib/dependency.py"
 veqta_check_trusted_code
 
 # Root-owned checkout с group-writable родителем нельзя считать доверенным.
-unsafe_parent=$(mktemp -d /opt/veqta-parent-test.XXXXXXXX)
+unsafe_parent=$(mktemp -d /usr/share/veqta-parent-test.XXXXXXXX)
 mkdir -p "$unsafe_parent/app/.git" "$unsafe_parent/app/.venv"
 chmod 0755 "$unsafe_parent/app"
 chmod g+w "$unsafe_parent"

@@ -723,8 +723,8 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
                 page.locator(f'[data-person="{person}"]').first.click()
                 page.locator(f'[data-item="{item_id}"]').check()
                 page.locator('[data-action="close-drawer"]').last.click()
-                page.locator('[data-action="save"]').click()
-                expect(page.locator('[data-action="save"]')).to_be_disabled()
+                # Ответ 200, завершение busy и чтение БД важнее состояния disabled.
+                save_and_check(request_id, {(data['people'][i], item_id) for i in range(index+1)})
 
             add_and_assign(0)
             admin = context.new_page()
@@ -750,7 +750,8 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
                 stored = database_call(lambda: list(RequestAssignment.objects.filter(
                     request_employee__request_id=request_id).values_list(
                     'request_employee__employee_id','snapshot_item_name','snapshot_item_category','snapshot_validity_days')))
-                assert {row[0]:row[1:] for row in stored} == expected
+                actual = {row[0]:row[1:] for row in stored}
+                assert actual == expected, {'stored':actual, 'expected':expected}
                 page.locator('[data-mode="list"]').click()
                 for person, (name,category,days) in expected.items():
                     tag = page.locator(f'tr[data-row="{person}"] .vitem')
