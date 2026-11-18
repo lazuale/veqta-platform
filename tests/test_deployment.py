@@ -448,6 +448,20 @@ raise SystemExit(1 if os.environ.get('VEQTA_TEST_MODE')=='broken-new-site' and c
             self.assertEqual(neighbor.read_text(), "unchanged neighbor")
         self.assertNotIn("veqta-dev", (self.path / "systemctl.log").read_text())
 
+    def test_apply_recreates_missing_virtualenv_before_readiness_check(self):
+        shutil.rmtree(self.app / ".venv")
+        self.script("python3.14", """#!/bin/sh
+set -eu
+[ "$1" = -m ] && [ "$2" = venv ]
+mkdir -p "$3/bin"
+printf '#!/bin/sh\nexit 0\n' > "$3/bin/python"
+/usr/bin/chmod +x "$3/bin/python"
+""")
+        result = self.apply()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        self.assertIn("SERVER APPLY: PASS", result.stdout)
+        self.assertTrue((self.app / ".venv/bin/python").is_file())
+
     def test_nginx_failure_restores_existing_file_without_reload(self):
         previous = "previous exact site\n"
         self.site.write_text(previous)

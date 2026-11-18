@@ -1,8 +1,13 @@
 """Штатная авторизация, права, CSRF и контракты HTTP."""
+import json
+
 from django.contrib.auth.models import Permission
-from workwear.models import EmployeeImport
 from django.test import Client, TestCase, override_settings
+
 from workwear import services
+from workwear.limits import MAX_JSON_BYTES, MAX_SYNC_JSON_BYTES
+from workwear.models import EmployeeImport, Request
+
 from .factories import make_user, make_import, make_employees, make_items, make_organization
 
 
@@ -56,6 +61,26 @@ class HttpTests(TestCase):
         for payload in ('{"organization_id":NaN}', '{"organization_id":"x","extra":1}', '[]'):
             with self.subTest(payload=payload):
                 self.assertEqual(self.client.post("/workwear/api/requests/", payload, content_type="application/json").status_code, 400)
+
+    def test_payload_budgets_return_json_errors_without_writes(self):
+        organization = self.people[0].organization
+        create = json.dumps({"organization_id": organization.pk})
+        result = self.client.post("/workwear/api/requests/", create.ljust(MAX_JSON_BYTES + 1),
+                                  content_type="application/json")
+        self.assertEqual(result.status_code, 413)
+        self.assertEqual(result.json()["error"]["code"], "payload_too_large")
+        self.assertFalse(Request.objects.exists())
+
+        request = services.create_request(organization_id=organization.pk, actor=self.actor)
+        path = f"/workwear/api/ui/requests/{request.pk}/sync/"
+        sync = json.dumps({"members": [], "expected_version": request.version, "finish": False})
+        allowed = self.client.post(path, sync.ljust(MAX_JSON_BYTES + 1), content_type="application/json")
+        self.assertEqual(allowed.status_code, 200)
+        self.assertFalse(allowed.json()["changed"])
+        rejected = self.client.post(path, sync.ljust(MAX_SYNC_JSON_BYTES + 1), content_type="application/json")
+        self.assertEqual(rejected.status_code, 413)
+        self.assertEqual(rejected.json()["error"]["code"], "payload_too_large")
+        self.assertEqual(Request.objects.get(pk=request.pk).version, request.version)
 
     def test_http_stale_version_returns_conflict(self):
         created = self.client.post("/workwear/api/requests/", {"organization_id": make_organization().pk}, content_type="application/json").json()["request"]
