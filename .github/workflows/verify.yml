@@ -11,7 +11,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:18.7
@@ -85,14 +85,14 @@ jobs:
             node --input-type=module --check < "$script"
           done
           git diff --check
-      - name: Install browsers and native servers for manual RC acceptance
-        if: github.event_name == 'workflow_dispatch'
+      - name: Install browsers and native servers for RC acceptance
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
           python -m playwright install --with-deps chromium firefox webkit
           sudo apt-get install --yes --no-install-recommends nginx openssl
           npm install --prefix "$RUNNER_TEMP/veqta-axe" --no-save --ignore-scripts --no-audit --no-fund axe-core@4.11.0
       - name: RC acceptance in three engines
-        if: github.event_name == 'workflow_dispatch'
+        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
         run: |
           failed=0
           for engine in chromium firefox webkit; do
@@ -107,7 +107,7 @@ jobs:
           done
           exit "$failed"
       - uses: actions/upload-artifact@v7
-        if: always() && github.event_name == 'workflow_dispatch'
+        if: always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
         with:
           name: rc-browser-evidence
           path: test-results/rc/
