@@ -71,6 +71,16 @@ def seed_matrix(actor):
                 {"employee_id": people[2].pk, "item_ids": []},
             ])
         extra[name] = target.pk
+    journal = services.create_request(organization_id=organization.pk, actor=actor)
+    version = journal.version
+    for index in range(28):
+        result = save_draft(request_id=journal.pk, actor=actor, expected_version=version,
+            members=[{"employee_id":people[0].pk,"item_ids":[items[0].pk]+([items[2].pk] if index % 2 else [])}])
+        version = result.version
+    completed = services.complete_request(request_id=journal.pk, actor=actor, expected_version=version)
+    journal_reason = 'Проверка <img src=x onerror="window.rcAuditXss=1">'
+    services.reopen_request(request_id=journal.pk, actor=actor, expected_version=completed.version, reason=journal_reason)
+    extra['journal'] = journal.pk
     old_source = make_import()
     # Сдвигаем факт старого пакета назад; последний принятый остаётся source.
     EmployeeImport.objects.filter(pk=old_source.pk).update(accepted_at=source.accepted_at-timedelta(days=1))
@@ -90,7 +100,7 @@ def seed_matrix(actor):
     reader.set_password(reader_password)
     reader.save(update_fields=["password"])
     return {"request": req.pk, "previous_request": prior.pk, "people": [p.pk for p in people],
-        "organization": organization.pk, "extra": extra, "items": [{"id": i.pk, "name": i.name, "category": i.category,
+        "organization": organization.pk, "extra": extra, "journal_reason":journal_reason, "items": [{"id": i.pk, "name": i.name, "category": i.category,
             "validity_days": i.validity_days} for i in items], "benchmarks": benchmarks,
         "username": actor.username, "password": password, "reader": reader.username, "reader_password": reader_password}
 
@@ -199,6 +209,12 @@ def check_matrix(actor, executable, artifacts):
             expect(page.locator(f'[data-cell="{second}:{first_item}"]')).to_be_focused()
             page.keyboard.press('End')
             expect(page.locator(f'[data-cell="{second}:{data["items"][-1]["id"]}"]')).to_be_focused()
+            page.keyboard.press('Control+End')
+            last = page.locator(f'[data-cell="{data["people"][209]}:{data["items"][-1]["id"]}"]')
+            expect(last).to_be_focused()
+            page.keyboard.press('ArrowRight')
+            page.keyboard.press('ArrowDown')
+            expect(last).to_be_focused()
             page.keyboard.press('Control+Home')
             expect(page.locator(f'[data-cell="{first}:{first_item}"]')).to_be_focused()
             page.keyboard.press('PageDown')
@@ -223,7 +239,7 @@ def check_matrix(actor, executable, artifacts):
             assert page.locator('[data-cell][tabindex="0"]:not(:disabled)').count() == 1
             assert page.locator('[data-cell]:focus:not(:disabled)').count() == 1
             open_matrix()
-            return {"keys":["Tab","Shift+Tab","arrows","Home","End","Ctrl+Home","PageUp","PageDown"],"horizontal_focus_visible":True}
+            return {"keys":["Tab","Shift+Tab","arrows","Home","End","Ctrl+Home","Ctrl+End","PageUp","PageDown"],"horizontal_focus_visible":True}
 
         def geometry():
             measurements = []
@@ -594,6 +610,103 @@ def check_matrix(actor, executable, artifacts):
             assert {"created","draft_synced","completed","reopened"}<={event['event_type'] for event in events}
             return {"excluded_empty":1,"history_immutable":True,"reader_write_status":403}
 
+        def event_journal():
+            from workwear.models import WorkwearEvent
+            from django.contrib.auth import get_user_model
+            from django.contrib.auth.models import Permission
+            request_id=data['extra']['journal']
+            original=database_call(lambda:persisted(request_id))
+            expected_ids=database_call(lambda:list(WorkwearEvent.objects.filter(request_number=request_id)
+                .order_by('-occurred_at','-pk').values_list('pk',flat=True)))
+            assert len(expected_ids)==31
+            open_matrix(request_id)
+            selector=f'[data-cell="{data["people"][0]}:{data["items"][4]["id"]}"]'
+            page.locator(selector).click()
+            expect(page.locator('[data-action="save"]')).to_be_enabled()
+            page.evaluate('window.rcJournalMain=document.querySelector("#main")')
+            page.locator('[data-action="events"]').click()
+            expect(page.locator('#modalTitle')).to_have_text('История операций')
+            expect(page.locator('[data-event]')).to_have_count(25)
+            assert page.locator('[data-event]').evaluate_all('nodes=>nodes.map(n=>Number(n.dataset.event))')==expected_ids[:25]
+            expect(page.locator('.vq-modal-body')).to_contain_text('Заявка возвращена в работу')
+            expect(page.locator('.vq-modal-body')).to_contain_text('Заявка завершена')
+            expect(page.locator('.vq-modal-body')).to_contain_text(data['journal_reason'])
+            expect(page.locator('.vq-modal-body')).to_contain_text(data['username'])
+            assert page.locator('.vq-modal img,.vq-modal script').count()==0
+            assert page.evaluate('window.rcAuditXss===undefined')
+            # Tab не выходит из журнала; сам журнал не изменяет черновик.
+            page.locator('.vq-modal').focus()
+            page.keyboard.press('Shift+Tab')
+            expect(page.locator('[data-action="cancel"]')).to_be_focused()
+            page.keyboard.press('Tab')
+            expect(page.locator('[data-action="events-next"]')).to_be_focused()
+            page.screenshot(path=str(artifacts/'event-journal-desktop.png'),full_page=True)
+            page.locator('[data-action="events-next"]').click()
+            expect(page.locator('[data-event]')).to_have_count(6)
+            assert page.locator('[data-event]').evaluate_all('nodes=>nodes.map(n=>Number(n.dataset.event))')==expected_ids[25:]
+            expect(page.locator('.vq-modal-body')).to_contain_text('Заявка создана')
+            expect(page.locator('[data-action="events-next"]')).to_be_disabled()
+            page.locator('[data-action="events-prev"]').click()
+            expect(page.locator('[data-event]')).to_have_count(25)
+            page.set_viewport_size({'width':390,'height':844})
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            page.screenshot(path=str(artifacts/'event-journal-mobile.png'),full_page=True)
+            page.keyboard.press('Escape')
+            expect(page.locator('[data-action="events"]')).to_be_focused()
+            expect(page.locator(selector)).to_have_attribute('aria-pressed','true')
+            expect(page.locator('[data-action="save"]')).to_be_enabled()
+            assert page.evaluate('window.rcJournalMain===document.querySelector("#main")')
+            assert database_call(lambda:persisted(request_id))==original
+            # Ошибка чтения и её повтор не записывают событие и не меняют состав.
+            endpoint=base+f'/workwear/api/ui/requests/{request_id}/events/?offset=0&limit=25'
+            expected_http.append((500,endpoint))
+            page.route(endpoint,lambda route:route.fulfill(status=500,content_type='application/json',body='{}'),times=1)
+            page.locator('[data-action="events"]').click()
+            expect(page.get_by_role('alert')).to_contain_text('Историю не удалось загрузить')
+            page.locator('[data-action="events-retry"]').click()
+            expect(page.locator('[data-event]')).to_have_count(25)
+            page.keyboard.press('Escape')
+            page.route(endpoint,lambda route:route.fulfill(status=200,content_type='application/json',body='{}'),times=1)
+            page.locator('[data-action="events"]').click()
+            expect(page.get_by_role('alert')).to_contain_text('Историю не удалось загрузить')
+            page.locator('[data-action="events-retry"]').click()
+            expect(page.locator('[data-event]')).to_have_count(25)
+            page.keyboard.press('Escape')
+            # Отмена чтения во время задержки не открывает диалог повторно.
+            client=page.context.new_cdp_session(page);client.send('Network.enable')
+            client.send('Network.emulateNetworkConditions',{'offline':False,'latency':1000,'downloadThroughput':-1,'uploadThroughput':-1})
+            page.locator('[data-action="events"]').click()
+            expect(page.get_by_role('status').filter(has_text='Загрузка истории')).to_be_visible()
+            page.keyboard.press('Escape')
+            client.send('Network.emulateNetworkConditions',{'offline':False,'latency':0,'downloadThroughput':-1,'uploadThroughput':-1});client.detach()
+            page.locator('[data-action="events"]').click()
+            expect(page.locator('[data-event]')).to_have_count(25)
+            page.keyboard.press('Escape')
+            assert database_call(lambda:persisted(request_id))==original
+            # У читателя с view_workwearevent есть журнал без права изменения.
+            reader_context=browser.new_context(viewport={'width':1440,'height':900})
+            reader=reader_context.new_page()
+            reader.goto(base+'/login/')
+            reader.locator('[name="username"]').fill(data['reader'])
+            reader.locator('[name="password"]').fill(data['reader_password'])
+            reader.locator('button[type="submit"]').click()
+            reader.goto(base+f'/workwear/?request={request_id}')
+            reader.locator('[data-action="events"]').click()
+            expect(reader.locator('[data-event]')).to_have_count(25)
+            assert reader.locator('[data-action="save"]').count()==0
+            def remove_history_permission():
+                user=get_user_model().objects.get(username=data['reader'])
+                user.user_permissions.remove(Permission.objects.get(content_type__app_label='workwear',codename='view_workwearevent'))
+            database_call(remove_history_permission)
+            reader.reload()
+            expect(reader.locator('h1')).to_have_text('Состав заявки')
+            assert reader.locator('[data-action="events"]').count()==0
+            assert reader.request.get(endpoint).status==403
+            reader_context.close()
+            page.set_viewport_size({'width':1440,'height':900})
+            return {'events':31,'pages':2,'database_unchanged':True,'unsaved_preserved':True,
+                'retry_and_cancel':True,'malformed_response_rejected':True,'escaped_reason':True,'reader_and_denied_permissions':True}
+
         def benchmarks():
             measurements=[]
             page.set_viewport_size({"width":1440,"height":900})
@@ -646,6 +759,7 @@ def check_matrix(actor, executable, artifacts):
         run("unsaved-navigation", unsaved_navigation)
         run("network-and-conflict", network_and_conflict)
         run("close-history-reader", close_history_reader)
+        run("event-journal", event_journal)
         run("large-requests", benchmarks)
         summary = {
             "results": results, "completed": True,

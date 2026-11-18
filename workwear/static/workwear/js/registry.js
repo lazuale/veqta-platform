@@ -48,6 +48,7 @@ export function installRegistry(ctx) {
         ++settings.bulkEpoch;
         settings.history.clear();
         settings.pendingAssignments.clear();
+        settings.eventLog?.abort.abort(); settings.eventLog = null;
         settings.error = null;
         settings.screen = 'registry';
         settings.request = null;

@@ -146,7 +146,19 @@ export function installController(ctx) {
                     (isDraft() || !can('reopen_request'))) return;
             if (['create', 'create-now'].includes(action) && !can('add_request')) return;
             if (action === 'retry-repeat' && !can('view_employee')) return;
+            if (['events', 'events-prev', 'events-next', 'events-retry'].includes(action) && !can('view_workwearevent')) return;
             switch (action) {
+                case 'events':
+                    showOverlay('events');
+                    await ctx.loadEvents();
+                    break;
+                case 'events-prev':
+                case 'events-next':
+                case 'events-retry':
+                    if (settings.modal === 'events' && !settings.eventLog?.loading)
+                        await ctx.loadEvents(Math.max(0, (settings.eventLog?.offset || 0) +
+                            (action === 'events-next' ? 25 : action === 'events-prev' ? -25 : 0)));
+                    break;
                 case 'members-prev':
                 case 'members-next':
                     settings.memberPageIndex += action === 'members-next' ? 1 : -1;

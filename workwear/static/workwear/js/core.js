@@ -33,7 +33,7 @@ export function installCore(ctx) {
         bulkEpoch: 0, dialogEpoch: 0, historyEpoch: 0, matrixFocus: null, pendingAssignments: new Map(),
         memberQuery: '', memberFilter: 'all', tableMode: 'list', memberPageIndex: 0, columnPageIndex: 0, actionEpoch: 0, selected: new Set(),
         warnings: new Map(), repeatState: 'idle', repeatEpoch: 0, repeatAbort: null, repeatProgress: null, bulkAbort: null, batchAbort: null, singleAbort: null,
-        history: new Map(), historyShown: null, archive: null,
+        history: new Map(), historyShown: null, archive: null, eventLog: null,
         modal: null, drawer: null, tab: 'bulk', bulkText: '', bulkChecked: false, resolved: [], singleQuery: '', singleResults: [], singleTotal: 0, singleHasMore: false, singleLoading: false, picked: new Set(), pickedEmployees: new Map(),
         choice: new Set(), choiceMode: 'add', ack: false, reopenReason: '', reloadAck: false,
         saving: false, error: null, remote: null, busy: false, pendingRoute: null, toastTimer: null, overlayReturn: null,

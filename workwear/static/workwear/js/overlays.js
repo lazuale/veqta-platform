@@ -32,11 +32,13 @@ export function installOverlays(ctx) {
         if (modal === 'create') return can('add_request');
         if (modal === 'delete-draft') return editable() && can('delete_request');
         if (modal === 'reopen') return !isDraft() && can('reopen_request');
+        if (modal === 'events') return can('view_request') && can('view_workwearevent');
         if (['add', 'batch', 'finish', 'remove', 'remove-one', 'leave'].includes(modal)) return editable();
         return true;
     }
     function showOverlay(modal) {
         if (!modalAllowed(modal)) return;
+        settings.eventLog?.abort.abort(); settings.eventLog = null;
         settings.bulkAbort?.abort(); settings.batchAbort?.abort(); settings.singleAbort?.abort();
         ++settings.dialogEpoch;
         ++settings.bulkEpoch;
@@ -49,6 +51,7 @@ export function installOverlays(ctx) {
     /** Отменить только чтение/локальный диалог; подтверждённая запись не повторяется. */
     function cancelDialog() {
         if (settings.saving) return;
+        settings.eventLog?.abort.abort(); settings.eventLog = null;
         settings.bulkAbort?.abort(); settings.batchAbort?.abort(); settings.singleAbort?.abort();
         ++settings.dialogEpoch; ++settings.bulkEpoch; ++settings.actionEpoch;
         settings.modal = null; renderOverlay(); ctx.setBusy(false);
@@ -56,13 +59,76 @@ export function installOverlays(ctx) {
     function rosterHint() {
         return `<div class="vq-picker-source"><span><strong>${esc(settings.request.snapshot_organization_name)}</strong></span><span>Справочник 1С · ${esc(ctx.importSummary())}</span></div>`;
     }
+    const eventLabels = {
+        created: 'Заявка создана', draft_synced: 'Черновик сохранён',
+        completed: 'Заявка завершена', reopened: 'Заявка возвращена в работу',
+        member_added: 'Сотрудник добавлен', member_removed: 'Сотрудник исключён',
+        assignment_added: 'Позиция назначена', assignment_removed: 'Назначение снято',
+        draft_deleted: 'Черновик удалён',
+    };
+    const eventTime = new Intl.DateTimeFormat('ru-RU', { timeZone: 'Europe/Moscow', dateStyle: 'short', timeStyle: 'medium' });
+    function eventDescription(event) {
+        const d = event.details || {};
+        if (event.event_type === 'created') return d.snapshot_organization_name || '';
+        if (event.event_type === 'reopened') return d.reason ? `Причина: ${d.reason}` : 'Причина не указана';
+        if (event.event_type === 'completed')
+            return `Сотрудников: ${d.final_members}. Назначений: ${d.final_assignments}. Исключено без позиций: ${d.excluded_members}.`;
+        if (event.event_type === 'draft_synced') {
+            const changes = d.changes || {};
+            return `Сотрудников: ${d.members}. Назначений: ${d.assignments}. ` +
+                `Добавлено / исключено сотрудников: ${changes.members_added?.length || 0} / ${changes.members_removed?.length || 0}. ` +
+                `Добавлено / снято назначений: ${changes.assignments_added?.length || 0} / ${changes.assignments_removed?.length || 0}.`;
+        }
+        return '';
+    }
+    /** Читать только текущую страницу журнала; закрытый диалог не принимает поздний ответ. */
+    async function loadEvents(offset = 0) {
+        if (settings.modal !== 'events' || !modalAllowed('events') || !settings.request) return;
+        settings.eventLog?.abort.abort();
+        const log = { requestId: settings.request.id, offset, results: [], count: 0,
+            loading: true, error: null, abort: new AbortController() };
+        settings.eventLog = log;
+        const current = () => settings.eventLog === log && settings.modal === 'events' && settings.request?.id === log.requestId;
+        renderOverlay();
+        try {
+            const data = await api(`ui/requests/${log.requestId}/events/?offset=${offset}&limit=25`, { signal: log.abort.signal });
+            if (!current()) return;
+            if (!Array.isArray(data.results) || data.results.length > 25 ||
+                    !Number.isSafeInteger(data.count) || data.count < 0 || data.offset !== offset ||
+                    typeof data.has_more !== 'boolean' || data.results.some(event =>
+                        !Number.isSafeInteger(event.id) || typeof event.event_type !== 'string' ||
+                        typeof event.actor_username !== 'string' || !Number.isFinite(Date.parse(event.occurred_at))))
+                throw new Error('Некорректный ответ журнала');
+            Object.assign(log, {results:data.results, count:data.count, offset:data.offset, has_more:data.has_more});
+        } catch (err) {
+            if (current()) log.error = 'Историю не удалось загрузить. Повторите попытку.';
+        } finally {
+            if (current()) {
+                log.loading = false;
+                renderOverlay();
+                const body = overlays.querySelector('.vq-modal-body');
+                if (body) body.scrollTop = 0;
+            }
+        }
+    }
     function modalMarkup() {
         const m = settings.modal;
         if (!m || !modalAllowed(m))
             return '';
         let title = '', subtitle = '', body = '', footer = '', tabs = '', size = '';
         const actions = (...buttons) => `<span></span><div class="vq-actions">${buttons.join('')}</div>`;
-        if (m === 'create') {
+        if (m === 'events') {
+            const log = settings.eventLog;
+            title = 'История операций';
+            subtitle = `Заявка № ${settings.request.id}. Только сохранённые действия, время московское.`;
+            body = log?.error ? `<div class="vq-notice error" role="alert">${esc(log.error)}</div>${btn('Повторить загрузку', 'events-retry')}` :
+                !log || log.loading ? '<p role="status">Загрузка истории…</p>' :
+                !log.results.length ? '<p class="vq-caption">Сохранённых операций пока нет.</p>' :
+                `<ol class="vq-event-list">${log.results.map(event => `<li data-event="${event.id}"><strong>${esc(eventLabels[event.event_type] || event.event_type)}</strong><div class="secondary"><time datetime="${esc(event.occurred_at)}">${esc(eventTime.format(new Date(event.occurred_at)))}</time> · ${esc(event.actor_username)}</div><p class="vq-caption">${esc(eventDescription(event))}</p></li>`).join('')}</ol>`;
+            const ready = log && !log.loading && !log.error;
+            footer = `<span class="note" role="status">${ready ? `Показано ${log.results.length ? log.offset + 1 : 0}–${log.offset + log.results.length} из ${log.count}` : ''}</span><div class="vq-actions">${btn('Назад', 'events-prev', 'small', !ready || !log.offset ? 'disabled' : '')}${btn('Далее', 'events-next', 'small', !ready || !log.has_more ? 'disabled' : '')}${btn('Закрыть', 'cancel', 'primary')}</div>`;
+        }
+        else if (m === 'create') {
             size = 'sm';
             title = 'Новая заявка';
             subtitle = 'Для начала работы выберите организацию. Черновик создаётся без вложений и дополнительных полей.';
@@ -247,6 +313,6 @@ export function installOverlays(ctx) {
         }
     }
     Object.assign(ctx, {
-        showOverlay, cancelDialog, rosterHint, modalMarkup, loadHistory, drawerMarkup, renderOverlay, openDrawer
+        showOverlay, cancelDialog, rosterHint, modalMarkup, loadHistory, drawerMarkup, renderOverlay, openDrawer, loadEvents
     });
 }

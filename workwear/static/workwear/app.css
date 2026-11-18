@@ -1741,3 +1741,9 @@
   }
   #veq-app .matrix .sumcol {width:48px;min-width:48px;max-width:48px;padding-inline:4px}
 }
+
+/* Читаемый журнал использует те же диалог и кнопки, что остальные операции. */
+#veq-app .vq-event-list {list-style:none;margin:0;padding:0}
+#veq-app .vq-event-list li {padding-block:var(--vq-space-3);border-bottom:1px solid var(--vq-border);overflow-wrap:anywhere}
+#veq-app .vq-event-list li:last-child {border-bottom:0}
+#veq-app .vq-event-list p {margin-block:var(--vq-space-2) 0}
