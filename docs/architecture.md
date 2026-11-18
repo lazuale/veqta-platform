@@ -73,7 +73,7 @@ PostgreSQL заполняет `snapshot_*` при вставке, в том чи
 | `ui/requests/<id>/sync/` | POST полного состава `members`, версии и флага `finish` |
 | `ui/requests/<id>/repeat-scan/` | POST проверки до 1200 пар сотрудник–позиция |
 | `ui/requests/<id>/events/` и `ui/requests/<id>/employees/<employee_id>/history/` | GET журнала и истории назначений сотрудника |
-| `ui/requests/<id>/reopen/` | POST возврата с причиной |
+| `ui/requests/<id>/reopen/` | POST возврата. Поле `reason` принимает строку до 500 символов, в том числе пустую |
 
 Метаданные различают `organizations` для новых заявок и `registry_organizations` для фильтра всех заявок. Каталог в метаданных зависит от `view_workwearitem`. Снимки назначений читаются вместе с заявкой.
 

@@ -4,7 +4,7 @@ VEQTA — внутренний веб-портал на Python, Django и Postgr
 
 ## Быстрый старт
 
-Нужны Git, Python 3.14 с `venv` и сервер с клиентом PostgreSQL 18. Базовые версии закреплены в `.python-version` и CI. Клонируйте проект и установите зависимости.
+Нужны Git, Python 3.14 с `venv`, серверные и клиентские утилиты PostgreSQL 18. Базовые версии закреплены в `.python-version` и CI. Клонируйте проект и установите зависимости.
 
 ```bash
 git clone https://github.com/lazuale/veqta-platform.git
@@ -14,7 +14,7 @@ source .venv/bin/activate
 python -m pip install --require-hashes -r requirements.lock
 ```
 
-Далее [создайте отдельную локальную PostgreSQL и запустите Django](docs/getting-started.md). После входа откройте [/admin/](http://127.0.0.1:8000/admin/) для настройки организаций и СИЗ и [/workwear/](http://127.0.0.1:8000/workwear/) для заявок. Чистая установка начинает работу с пустых справочников.
+Далее [создайте локальный кластер PostgreSQL и запустите Django](docs/getting-started.md). Инструкция включает пример первой заявки с вымышленным сотрудником. После входа откройте [/admin/](http://127.0.0.1:8000/admin/) для настройки организаций и СИЗ и [/workwear/](http://127.0.0.1:8000/workwear/) для заявок.
 
 Workwear устанавливается на пустую БД одной начальной миграцией. Для баз прежних версий потребуется отдельная процедура переноса. [Серверная установка](docs/deployment.md) описывает независимые DEV и PROD с Gunicorn, Nginx и systemd.
 
