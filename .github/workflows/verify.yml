@@ -119,11 +119,12 @@ jobs:
           ):
               try:
                   psycopg.connect(**db, dbname=other, user=role, password=passwords[role]).close()
-              except psycopg.errors.InsufficientPrivilege as error:
-                  assert error.sqlstate == "42501", (role, other, error.sqlstate)
+              except psycopg.OperationalError as error:
+                  # При отказе на стадии startup libpq может не выдавать SQLSTATE наружу.
+                  assert "permission denied for database" in str(error), (role, other, error)
               else:
                   raise AssertionError(f"Cross-contour CONNECT was granted: {role} -> {other}")
-          print("Independent DEV/PROD: migrations, runtime access and cross-contour SQLSTATE 42501: PASS")
+          print("Independent DEV/PROD: migrations, runtime access, SQLSTATE 42501 on SET ROLE and rejected cross-CONNECT: PASS")
           PY
       - name: Django and PostgreSQL regression
         run: |
