@@ -6,7 +6,6 @@ APPLICATIONS = (
     {
         "key": "workwear",
         "icon": "shirt",
-        "status": "working",
         "label": "Спецодежда",
         "description": "Создание заявок на спецодежду, подбор сотрудников и контроль повторных назначений.",
         "url_name": "workwear_page:index",

@@ -9,8 +9,8 @@
     <nav class="vq-app-list" aria-label="Доступные приложения">
         {% for app in platform_apps %}
         <a class="vq-app-entry" href="{{ app.url }}"><span class="vq-app-symbol" data-vq-icon="{{ app.icon }}" aria-hidden="true">V</span>
-          <div class="vq-app-entry-content"><div class="vq-title-row"><h2>{{ app.label }}</h2>{% if portal_is_demo %}<span class="vq-badge {% if app.status == 'working' %}success{% endif %}">{% if app.status == 'working' %}Рабочий интерфейс{% else %}Проектируемый модуль{% endif %}</span>{% endif %}</div><p>{{ app.description }}</p></div>
-          <span class="vq-app-entry-open"><span>Открыть</span><span aria-hidden="true">›</span></span></a>
+          <div class="vq-app-entry-content"><h2>{{ app.label }}</h2><p>{{ app.description }}</p></div>
+          <span class="vq-app-entry-open"><span>Открыть</span><span data-vq-icon="chev" aria-hidden="true"></span></span></a>
         {% endfor %}
     </nav>
     {% else %}
