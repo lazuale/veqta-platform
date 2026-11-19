@@ -443,11 +443,11 @@ export function installController(ctx) {
             const apply = $('[data-action="apply-batch"]', overlays);
             if (apply) {
                 apply.disabled = !settings.choice.size;
-                apply.textContent = `${settings.choiceMode === 'add' ? 'Добавить' : 'Убрать'} ${settings.choice.size} видов`;
+                apply.textContent = `${settings.choiceMode === 'add' ? 'Добавить' : 'Убрать'} (${settings.choice.size})`;
             }
             const note = $('#batchChoiceCount', overlays);
             if (note)
-                note.textContent = `Выбрано видов: ${settings.choice.size}`;
+                note.textContent = `Выбрано позиций: ${settings.choice.size}`;
         }
         if (target.dataset.pick && editable() && can('view_employee')) {
             const id = Number(target.dataset.pick);

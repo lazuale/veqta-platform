@@ -184,7 +184,7 @@ export function installEditor(ctx) {
         if (settings.repeatState === 'unavailable')
             return '<span class="quiet">Недоступно для этой роли</span>';
         if (settings.repeatState === 'failed')
-            return `<button type="button" class="vq-name-action" data-action="retry-repeat">Проверка недоступна · Повторить</button>`;
+            return `<button type="button" class="vq-name-action" data-action="retry-repeat">Не удалось проверить · Повторить</button>`;
         if (!ws.length)
             return '<span class="vq-no-repeat">Без повторов</span>';
         const names = ws.map(a => a.name || byItem().find(it => it.id === a.item_id)?.name).filter(Boolean);
@@ -192,7 +192,7 @@ export function installEditor(ctx) {
     }
     function memberList(rows, locked) {
         const items = new Map(byItem().map(it => [it.id, it]));
-        return `<div class="vq-tablewrap"><table><thead><tr><th class="select-col">${locked ? '' : `<input type="checkbox" data-check="all" aria-label="Выбрать сотрудников показанной страницы" ${rows.length && rows.every(m => settings.selected.has(m.employee_id)) ? 'checked' : ''}>`}</th><th>Сотрудник</th><th class="dept-col">Подразделение</th><th>Назначено</th><th>Контроль</th><th></th></tr></thead><tbody>${rows.map(m => `<tr data-row="${m.employee_id}" class="${settings.selected.has(m.employee_id) ? 'selected' : ''}"><td class="select-col">${locked ? '' : `<input type="checkbox" data-check="${m.employee_id}" aria-label="Выбрать ${esc(m.full_name)}" ${settings.selected.has(m.employee_id) ? 'checked' : ''}>`}</td><td><button type="button" class="vq-name-action" data-person="${m.employee_id}">${esc(m.full_name)}</button><div class="secondary">${esc(m.personnel_number)}<span class="small-dept"> · ${esc(m.department_name || '')}</span></div></td><td class="dept-col">${esc(m.department_name || '—')}</td><td><div class="vq-assignment-tags">${rowTags(m, items)}</div></td><td class="vq-repeat-status">${rowWarning(m)}</td><td class="quiet">›</td></tr>`).join('')}</tbody></table></div>`;
+        return `<div class="vq-tablewrap"><table><thead><tr><th class="select-col">${locked ? '' : `<input type="checkbox" data-check="all" aria-label="Выбрать сотрудников показанной страницы" ${rows.length && rows.every(m => settings.selected.has(m.employee_id)) ? 'checked' : ''}>`}</th><th>Сотрудник</th><th class="dept-col">Подразделение</th><th>Назначено</th><th>Повторы</th><th></th></tr></thead><tbody>${rows.map(m => `<tr data-row="${m.employee_id}" class="${settings.selected.has(m.employee_id) ? 'selected' : ''}"><td class="select-col">${locked ? '' : `<input type="checkbox" data-check="${m.employee_id}" aria-label="Выбрать ${esc(m.full_name)}" ${settings.selected.has(m.employee_id) ? 'checked' : ''}>`}</td><td><button type="button" class="vq-name-action" data-person="${m.employee_id}">${esc(m.full_name)}</button><div class="secondary">${esc(m.personnel_number)}<span class="small-dept"> · ${esc(m.department_name || '')}</span></div></td><td class="dept-col">${esc(m.department_name || '—')}</td><td><div class="vq-assignment-tags">${rowTags(m, items)}</div></td><td class="vq-repeat-status">${rowWarning(m)}</td><td class="quiet">›</td></tr>`).join('')}</tbody></table></div>`;
     }
     function groups() {
         const map = new Map();

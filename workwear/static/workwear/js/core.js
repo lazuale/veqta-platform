@@ -84,7 +84,7 @@ export function installCore(ctx) {
         const snapshot = member.assignments.find(a => a.item_id === item.id);
         return snapshot?.name ? { ...item, ...snapshot, id: item.id } : item;
     };
-    const itemDescription = item => `${item.name}${item.category ? ' · ' + item.category : ''}${item.validity_days ? ' · ' + item.validity_days + ' дней' : ''}`;
+    const itemDescription = item => `${item.name}${item.category ? ' · ' + item.category : ''}${item.validity_days ? ' · ' + item.validity_days + ' ' + plural(item.validity_days, ['день', 'дня', 'дней']) : ''}`;
     const currentMembers = () => settings.request?.members || [];
     const importSummary = () => {
         const data = settings.meta?.import;
