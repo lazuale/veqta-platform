@@ -183,7 +183,7 @@ export function installController(ctx) {
                     break;
                 case 'retry-refresh':
                     if (dirty()) {
-                        notice('Локальные изменения сохранены в редакторе. Сначала сохраните их.', true);
+                        notice('Есть несохранённые изменения. Сначала сохраните заявку.', true);
                     } else {
                         setBusy(true);
                         await openRequest(settings.request.id, { route: false, resetView: false });
