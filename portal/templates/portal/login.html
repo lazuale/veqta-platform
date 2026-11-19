@@ -6,7 +6,7 @@
     <main id="main" class="vq-auth-main" tabindex="-1">
         <section class="vq-auth-panel">
             <h1>Вход в систему</h1>
-            <p class="vq-sub">Используйте выданные администратором учётные данные.</p>
+            <p class="vq-sub">Введите логин и пароль, выданные администратором.</p>
             {% if form.errors %}<div class="vq-notice error" role="alert">Проверьте логин и пароль.</div>{% endif %}
             <form method="post" class="vq-form">
                 {% csrf_token %}
@@ -15,7 +15,7 @@
                 {% if next %}<input type="hidden" name="next" value="{{ next }}">{% endif %}
                 <button class="vq-btn primary" type="submit">Войти</button>
             </form>
-            <p class="vq-help">Учётные записи и доступ к приложениям выдаёт администратор.</p>
+            <p class="vq-help">Учётные записи создаёт администратор. Он же назначает права доступа.</p>
         </section>
     </main>
 </div>

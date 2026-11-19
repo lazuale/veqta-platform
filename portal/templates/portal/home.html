@@ -3,8 +3,8 @@
 {% block main_class %}flow{% endblock %}
 {% block content %}
 <div class="vq-portal-home">
-    <section class="vq-head"><div><h1>{% if portal_is_home %}Рабочее пространство{% else %}Приложения{% endif %}</h1><p class="vq-sub">Приложения, доступные вашей учётной записи.</p></div></section>
-    {% if portal_is_home %}<section class="vq-welcome"><div><span class="vq-eyebrow">VEQTA Platform</span><h2>Доступные приложения</h2><p>Выберите приложение для работы. Доступные действия определяются вашими правами.</p></div><span class="vq-welcome-mark" aria-hidden="true">V</span></section>{% endif %}
+    <section class="vq-head"><div><h1>{% if portal_is_home %}Рабочее пространство{% else %}Приложения{% endif %}</h1><p class="vq-sub">Приложения, к которым у вас есть доступ.</p></div></section>
+    {% if portal_is_home %}<section class="vq-welcome"><div><span class="vq-eyebrow">VEQTA Platform</span><h2>Доступные приложения</h2><p>Выберите приложение. Доступные действия зависят от ваших прав.</p></div><span class="vq-welcome-mark" aria-hidden="true">V</span></section>{% endif %}
     {% if platform_apps %}
     <nav class="vq-app-list" aria-label="Доступные приложения">
         {% for app in platform_apps %}
