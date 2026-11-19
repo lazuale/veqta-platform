@@ -35,18 +35,18 @@ def _guid(v, where):
     try:
         return UUID(_clean(v))
     except (ValueError, AttributeError) as exc:
-        raise ImportRejected(f"{where}: invalid UUID {v!r}") from exc
+        raise ImportRejected(f"{where}: неверный UUID {v!r}") from exc
 
 
 def _register_organization(names, identifier, name, where):
     if identifier and (len(identifier) > 255 or any(c.isspace() for c in identifier)):
-        raise ImportRejected(f"{where}: invalid orgExtId")
+        raise ImportRejected(f"{where}: некорректный orgExtId")
     if len(name) > 255:
-        raise ImportRejected(f"{where}: orgName exceeds DB limit")
+        raise ImportRejected(f"{where}: значение orgName слишком длинное")
     if identifier and name:
         previous = names.setdefault(identifier, name)
         if previous != name:
-            raise ImportRejected(f"{where}: inconsistent orgName for orgExtId {identifier}")
+            raise ImportRejected(f"{where}: разные значения orgName для orgExtId {identifier}")
 
 
 def _sources(source):
@@ -56,27 +56,27 @@ def _sources(source):
         for name in SOURCES:
             candidate = p / name
             if not candidate.is_file() or candidate.is_symlink():
-                raise ImportRejected(f"Missing/unsafe source: {name}")
+                raise ImportRejected(f"Файл отсутствует или путь небезопасен: {name}")
             if candidate.stat().st_size > MAX_FILE_BYTES:
-                raise ImportRejected(f"Source exceeds size limit: {name}")
+                raise ImportRejected(f"Файл превышает допустимый размер: {name}")
             result[name] = candidate.read_bytes()
         return result
     if not p.is_file() or not p.name.endswith((".tar.gz", ".tgz")):
-        raise ImportRejected("Expected a directory or .tar.gz with Employees/Positions/Units CSV")
+        raise ImportRejected("Ожидается каталог или архив .tar.gz с файлами Employees.csv, Positions.csv и Units.csv")
     result = {}
     with tarfile.open(p, "r:gz") as archive:
         for item in archive.getmembers():
             if item.name not in SOURCES:
                 continue  # В архиве используем только обычные файлы.
             if item.name in result or not item.isfile() or item.size > MAX_FILE_BYTES:
-                raise ImportRejected(f"Unsafe/duplicate archive source: {item.name}")
+                raise ImportRejected(f"Небезопасный или повторяющийся файл в архиве: {item.name}")
             with archive.extractfile(item) as f:
                 data = f.read(MAX_FILE_BYTES + 1)
                 if len(data) > MAX_FILE_BYTES:
-                    raise ImportRejected(f"Source exceeds size limit: {item.name}")
+                    raise ImportRejected(f"Файл превышает допустимый размер: {item.name}")
                 result[item.name] = data
     if set(result) != set(SOURCES):
-        raise ImportRejected(f"Archive must contain {', '.join(SOURCES)}")
+        raise ImportRejected(f"В архиве должны быть файлы: {', '.join(SOURCES)}")
     return result
 
 
@@ -84,20 +84,20 @@ def _rows(data, name, required):
     try:
         decoded = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
-        raise ImportRejected(f"{name}: UTF-8 with optional BOM required") from exc
+        raise ImportRejected(f"{name}: требуется кодировка UTF-8 (BOM допускается)") from exc
     reader = csv.DictReader(io.StringIO(decoded, newline=""), delimiter=";", strict=True)
     if reader.fieldnames is None or len(reader.fieldnames) != len(set(reader.fieldnames)):
-        raise ImportRejected(f"{name}: missing/duplicate CSV headers")
+        raise ImportRejected(f"{name}: отсутствуют заголовки CSV или есть повторяющиеся столбцы")
     missing = set(required) - set(reader.fieldnames)
     if missing:
-        raise ImportRejected(f"{name}: missing required columns: {sorted(missing)}")
+        raise ImportRejected(f"{name}: отсутствуют обязательные столбцы: {sorted(missing)}")
     try:
         for n, row in enumerate(reader, start=2):
             if n - 1 > MAX_ROWS or None in row or any(v is None for v in row.values()):
-                raise ImportRejected(f"{name}:{n}: invalid CSV row")
+                raise ImportRejected(f"{name}:{n}: некорректная строка CSV")
             yield n, row
     except csv.Error as exc:
-        raise ImportRejected(f"{name}: invalid CSV syntax: {exc}") from exc
+        raise ImportRejected(f"{name}: ошибка формата CSV: {exc}") from exc
 
 
 @dataclass(frozen=True)
@@ -136,14 +136,14 @@ def parse(path):
         uid = _guid(row["extId"], f"Positions.csv:{line}")
         label = _clean(row["name"])
         if not label or len(label) > 255:
-            raise ImportRejected(f"Positions.csv:{line}: invalid job title")
+            raise ImportRejected(f"Positions.csv:{line}: не указана должность или её название слишком длинное")
         if uid in positions:
             if positions[uid] != label:
-                raise ImportRejected(f"Positions.csv:{line}: conflicting position GUID {uid}")
+                raise ImportRejected(f"Positions.csv:{line}: разные названия должности для GUID {uid}")
             anomalies["duplicate_position_rows"] += 1
         positions[uid] = label
     if not positions:
-        raise ImportRejected("Positions.csv: empty dictionary")
+        raise ImportRejected("Positions.csv: справочник должностей пуст")
 
     units = {}
     organization_names = {}
@@ -153,16 +153,16 @@ def parse(path):
         _register_organization(organization_names, org, _clean(row["orgName"]), f"Units.csv:{line}")
         name = _clean(row["name"])
         if not name or len(name) > 255:
-            raise ImportRejected(f"Units.csv:{line}: invalid unit name")
+            raise ImportRejected(f"Units.csv:{line}: не указано подразделение или его название слишком длинное")
         # Один GUID подразделения может встречаться в разных юрлицах.
         key = (uid, org)
         if key in units:
             if units[key] != name:
-                raise ImportRejected(f"Units.csv:{line}: ambiguous unit and organization {key}")
+                raise ImportRejected(f"Units.csv:{line}: разные названия подразделения для GUID и организации {key}")
             anomalies["duplicate_unit_rows"] += 1
         units[key] = name
     if not units:
-        raise ImportRejected("Units.csv: empty dictionary")
+        raise ImportRejected("Units.csv: справочник подразделений пуст")
 
     employee_rows = 0
     employees = {}
@@ -182,13 +182,13 @@ def parse(path):
         for key in fields:
             oldval, newval = old[key], values[key]
             if oldval and newval and oldval != newval:
-                raise ImportRejected(f"Employees.csv:{line}: conflicting {key} for GUID {uid}")
+                raise ImportRejected(f"Employees.csv:{line}: разные значения поля {key} для GUID {uid}")
             merged[key] = oldval or newval
         if merged != old:
             anomalies["partial_employee_merges"] += 1
         employees[uid] = merged
     if not employees:
-        raise ImportRejected("Employees.csv: empty roster")
+        raise ImportRejected("Employees.csv: справочник сотрудников пуст")
 
     people = []
     for uid, row in employees.items():
@@ -196,17 +196,17 @@ def parse(path):
             row["tabNumber"], row["name"], row["orgName"])
         org_id = row["orgExtId"]
         if not (full_name and org_id and org_name):
-            raise ImportRejected(f"Employees.csv: missing identity/organization for GUID {uid}")
+            raise ImportRejected(f"Employees.csv: не указаны ФИО или организация для GUID {uid}")
         if len(number) > 64 or len(full_name) > 255 or len(org_name) > 255:
-            raise ImportRejected(f"Employees.csv: employee field exceeds DB limit for GUID {uid}")
+            raise ImportRejected(f"Employees.csv: значение поля сотрудника слишком длинное для GUID {uid}")
         if not number:
-            raise ImportRejected(f"Employees.csv: missing tabNumber for GUID {uid}")
+            raise ImportRejected(f"Employees.csv: не указан табельный номер для GUID {uid}")
         _register_organization(organization_names, org_id.casefold(), org_name, f"Employees.csv:{uid}")
         position, department = "", ""
         if row["positionExtId"]:
             pkey = _guid(row["positionExtId"], f"Employees.csv:{uid}:positionExtId")
             if pkey not in positions:
-                raise ImportRejected(f"Employees.csv: orphan positionExtId for GUID {uid}")
+                raise ImportRejected(f"Employees.csv: не найдена должность positionExtId для GUID {uid}")
             position = positions[pkey]
         else:
             anomalies["employees_without_position"] += 1
@@ -218,9 +218,9 @@ def parse(path):
                 # Неизвестный GUID означает нарушенную ссылку.
                 matches = [k for k in units if k[0] == ukey[0]]
                 if not matches:
-                    raise ImportRejected(f"Employees.csv: orphan (unitExtId, orgExtId) for GUID {uid}")
+                    raise ImportRejected(f"Employees.csv: не найдено подразделение (unitExtId, orgExtId) для GUID {uid}")
                 if any(k[1] for k in matches):
-                    raise ImportRejected(f"Employees.csv: organization mismatch for unit of GUID {uid}")
+                    raise ImportRejected(f"Employees.csv: организация подразделения не совпадает с организацией сотрудника GUID {uid}")
                 anomalies["unit_without_organization"] += 1
             else:
                 department = units[ukey]

@@ -29,16 +29,16 @@ class Command(BaseCommand):
                 reader = csv.DictReader(stream, delimiter=";")
                 expected = {"code", "name", "category", "validity_days", "sort_order", "is_active"}
                 if set(reader.fieldnames or []) != expected or len(reader.fieldnames or []) != len(expected):
-                    raise CommandError("Catalog source must have exactly: " + ", ".join(sorted(expected)))
+                    raise CommandError("В каталоге должны быть только столбцы: " + ", ".join(sorted(expected)))
                 rows = list(reader)
         except (OSError, UnicodeError, csv.Error) as exc:
             raise CommandError(str(exc)) from exc
         if len(rows) != options["expected_count"] or options["expected_count"] < 1:
-            raise CommandError("Catalog count differs from explicitly expected count")
+            raise CommandError("Число позиций каталога не совпадает с --expected-count")
         clean, codes = [], set()
         for idx, row in enumerate(rows, start=2):
             if None in row or any(v is None for v in row.values()):
-                raise CommandError(f"Malformed catalog row {idx}")
+                raise CommandError(f"Некорректная строка каталога: {idx}")
             if row["is_active"] not in ("1", "0"):
                 raise CommandError(f"is_active должен быть 0 или 1, строка {idx}")
             item = WorkwearItem(code=row["code"].strip(), name=row["name"].strip(),
@@ -55,7 +55,7 @@ class Command(BaseCommand):
             codes.add(item.code)
             clean.append({field: getattr(item, field) for field in expected})
         if not options["apply"]:
-            self.stdout.write(f"DRY_RUN catalog validated: {len(clean)} positions; database untouched")
+            self.stdout.write(f"DRY_RUN: проверено позиций: {len(clean)}; данные БД не изменены")
             return
         with transaction.atomic():
             existing = {item.code: item for item in WorkwearItem.objects.select_for_update()}
@@ -64,8 +64,8 @@ class Command(BaseCommand):
                 old = existing.get(data["code"])
                 if old:
                     if any(getattr(old, key) != value for key, value in data.items()):
-                        raise CommandError(f"Catalog conflict for code {data['code']}; refused overwrite")
+                        raise CommandError(f"Позиция с кодом {data['code']} уже существует с другими данными; изменения отклонены")
                 else:
                     to_create.append(WorkwearItem(**data))
             WorkwearItem.objects.bulk_create(to_create)
-            self.stdout.write(f"APPLIED: created {len(to_create)}; retained {len(clean)-len(to_create)} matching entries")
+            self.stdout.write(f"APPLIED: создано позиций: {len(to_create)}; без изменений: {len(clean)-len(to_create)}")

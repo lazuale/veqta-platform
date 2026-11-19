@@ -9,9 +9,9 @@ _SNAPSHOT = 1
 
 def _take(function):
     if not transaction.get_connection().in_atomic_block:
-        raise RuntimeError("1C roster lock requires transaction.atomic()")
+        raise RuntimeError("Блокировка справочника 1С требует transaction.atomic()")
     if connection.vendor != "postgresql":
-        raise RuntimeError("Workwear roster lock requires PostgreSQL")
+        raise RuntimeError("Для блокировки справочника 1С нужен PostgreSQL")
     with connection.cursor() as cursor:
         cursor.execute(f"SELECT {function}(%s, %s)", [_NAMESPACE, _SNAPSHOT])
 

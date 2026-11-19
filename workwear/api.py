@@ -60,7 +60,7 @@ def require_permission(request, codename):
 
 
 def _reject_json_constant(value):
-    raise ValueError("Non-finite numbers are not valid JSON")
+    raise ValueError("JSON не поддерживает NaN и бесконечность")
 
 
 def payload(request, *fields, optional_fields=(), max_bytes=MAX_JSON_BYTES):

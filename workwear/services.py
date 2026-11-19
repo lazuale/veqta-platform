@@ -119,7 +119,7 @@ def add_employees(*, request_id, employee_ids, actor, expected_version):
     if existing_ids.intersection(employee_ids):
         raise ValidationError("Сотрудник уже включён в заявку")
     if len(existing_ids) + len(employee_ids) > MAX_REQUEST_MEMBERS:
-        raise ValidationError("В одной заявке допускается до1000 сотрудников")
+        raise ValidationError("В одной заявке допускается до 1000 сотрудников")
     members = RequestEmployee.objects.bulk_create([RequestEmployee(
         request=req,
         employee=people[employee_id],

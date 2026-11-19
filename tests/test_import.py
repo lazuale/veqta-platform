@@ -66,7 +66,7 @@ class ImportTests(TestCase):
     def test_csv_row_limit_excludes_header(self):
         self.assertEqual(parse(self.path).source_row_count, 1)
         make_sources(self.path, people=self.people * 2)
-        with self.assertRaisesRegex(ImportRejected, r"Employees\.csv:3: invalid CSV row"):
+        with self.assertRaisesRegex(ImportRejected, r"Employees\.csv:3: некорректная строка CSV"):
             parse(self.path)
 
     def test_same_package_is_idempotent(self):
@@ -154,7 +154,7 @@ class ImportTests(TestCase):
     def test_invalid_uuid_and_orphan_rejected_before_writes(self):
         path = self.path/"Employees.csv"
         path.write_text(path.read_text().replace(self.people[0][0], "invalid-guid"))
-        with self.assertRaises(ImportRejected):
+        with self.assertRaisesRegex(ImportRejected, "неверный UUID"):
             parse(self.path)
         self.assertEqual(EmployeeImport.objects.count(), 0)
 
