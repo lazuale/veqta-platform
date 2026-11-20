@@ -24,6 +24,9 @@ CI измеряет покрытие Python-кода через `coverage.py` 7.
 Для локального воспроизведения после установки `requirements-browser.lock` и настройки одноразовой БД выполните:
 
 ```bash
+mkdir -p test-results/coverage
+export COVERAGE_FILE=test-results/coverage/.coverage
+python -m coverage erase
 DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
   python -m coverage run --branch --source=config,portal,workwear \
   --omit='*/migrations/*' manage.py test tests --noinput --verbosity 2

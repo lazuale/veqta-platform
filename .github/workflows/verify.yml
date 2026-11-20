@@ -119,7 +119,10 @@ jobs:
           print("Independent DEV/PROD: migrations, runtime access, SQLSTATE 42501 on SET ROLE and rejected cross-CONNECT: PASS")
           PY
       - name: Django and PostgreSQL regression
+        env:
+          COVERAGE_FILE: test-results/coverage/.coverage
         run: |
+          mkdir -p test-results/coverage
           python manage.py check
           python manage.py makemigrations --check --dry-run
           python manage.py migrate --check
@@ -129,7 +132,6 @@ jobs:
           DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
             python -m coverage run --append --branch --source=config,portal,workwear \
               --omit='*/migrations/*' -m tests.acceptance
-          mkdir -p test-results/coverage
           python -m coverage report -m
           python -m coverage json -o test-results/coverage/coverage.json
           python -m coverage html -d test-results/coverage/html
