@@ -243,7 +243,7 @@ def reopen_request(*, request_id, actor, expected_version, reason=""):
     if not isinstance(reason, str) or len(reason) > 500:
         raise ValidationError("Причина возврата должна содержать не более 500 символов")
     req = _lock_request(request_id, expected_version, status=RequestStatus.CLOSED)
-    old_completed_at = req.completed_at.isoformat() if req.completed_at else None
+    old_completed_at = req.completed_at.isoformat()
     old_completed_by_id = req.completed_by_id
     req.status = RequestStatus.DRAFT
     req.version += 1

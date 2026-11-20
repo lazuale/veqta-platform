@@ -70,12 +70,8 @@ def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
         key = (employee_id, item_id)
         if key not in wanted:
             continue
-        if completed_at is None:
-            continue
         completion_date = timezone.localtime(completed_at).date()
         elapsed = (reference - completion_date).days
-        if elapsed < 0:
-            continue
         if elapsed < validity:
             warnings[key] = RepeatWarning(
                 previous_request_id=request_id,
