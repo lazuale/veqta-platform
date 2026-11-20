@@ -68,13 +68,10 @@ def _sources(source):
         for item in archive.getmembers():
             if item.name not in SOURCES:
                 continue  # В архиве используем только обычные файлы.
-            if item.name in result or not item.isfile() or item.size > MAX_FILE_BYTES:
+            if item.name in result or not item.isfile() or not 0 <= item.size <= MAX_FILE_BYTES:
                 raise ImportRejected(f"Небезопасный или повторяющийся файл в архиве: {item.name}")
             with archive.extractfile(item) as f:
-                data = f.read(MAX_FILE_BYTES + 1)
-                if len(data) > MAX_FILE_BYTES:
-                    raise ImportRejected(f"Файл превышает допустимый размер: {item.name}")
-                result[item.name] = data
+                result[item.name] = f.read(item.size)
     if set(result) != set(SOURCES):
         raise ImportRejected(f"В архиве должны быть файлы: {', '.join(SOURCES)}")
     return result
