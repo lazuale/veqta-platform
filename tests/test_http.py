@@ -1,10 +1,15 @@
 """Проверяем вход, права, CSRF и HTTP API."""
 import json
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from django.contrib.auth.models import Permission
+from django.core.exceptions import RequestDataTooBig, ValidationError
+from django.db import IntegrityError
 from django.test import Client, TestCase, override_settings
 
 from workwear import services
+from workwear.api import payload
 from workwear.limits import MAX_JSON_BYTES, MAX_SYNC_JSON_BYTES
 from workwear.models import EmployeeImport, Request
 from workwear.sync import save_draft
@@ -331,6 +336,60 @@ class HttpTests(TestCase):
         empty = self.client.post(path, {"pairs": []}, content_type="application/json")
         self.assertEqual(empty.status_code, 200)
         self.assertEqual(empty.json()["warnings"], [])
+
+    def test_http_validation_handles_corrupt_length_and_integrity(self):
+        bad_length = SimpleNamespace(
+            content_type="application/json", META={"CONTENT_LENGTH": "wrong"},
+            body=b"{}",
+        )
+        with self.assertRaises(ValidationError):
+            payload(bad_length, "organization_id")
+        understated = SimpleNamespace(
+            content_type="application/json", META={"CONTENT_LENGTH": "0"},
+            body=b"x" * (MAX_JSON_BYTES + 1),
+        )
+        with self.assertRaises(RequestDataTooBig):
+            payload(understated, "organization_id")
+        with patch("workwear.services.create_request", side_effect=IntegrityError("synthetic")):
+            result = self.client.post("/workwear/api/requests/", {
+                "organization_id": self.people[0].organization_id,
+            }, content_type="application/json")
+        self.assertEqual(result.status_code, 409)
+        self.assertEqual(result.json()["error"]["code"], "integrity_conflict")
+        self.assertNotIn("synthetic", result.content.decode())
+
+    def test_ui_boundary_queries_and_organization_guards(self):
+        organization = self.people[0].organization
+        request = services.create_request(organization_id=organization.pk, actor=self.actor)
+        foreign = services.create_request(
+            organization_id=make_organization("Чужая организация").pk, actor=self.actor,
+        )
+        self.assertEqual(self.client.get("/workwear/api/requests/").status_code, 200)
+        self.assertEqual(self.client.get("/workwear/api/requests/", {
+            "organization_id": str(organization.pk),
+        }).status_code, 200)
+        self.assertEqual(self.client.get("/workwear/api/ui/requests/", {
+            "q": "9223372036854775808",
+        }).status_code, 200)
+        self.assertEqual(self.client.get("/workwear/api/ui/employees/", {
+            "organization_id": str(organization.pk), "limit": "0",
+        }).status_code, 400)
+        self.assertEqual(self.client.get(
+            f"/workwear/api/ui/requests/{request.pk}/events/", {"limit": "0"},
+        ).status_code, 400)
+        result = self.client.post("/workwear/api/ui/resolve/", {
+            "organization_id": organization.pk, "request_id": foreign.pk,
+            "lines": ["TEST-00000"],
+        }, content_type="application/json")
+        self.assertEqual(result.status_code, 400)
+        for ids in ([], [True], "not-a-list"):
+            with self.subTest(ids=ids):
+                result = self.client.post(
+                    f"/workwear/api/ui/requests/{request.pk}/bulk-add/",
+                    {"employee_ids": ids, "expected_version": request.version},
+                    content_type="application/json",
+                )
+                self.assertEqual(result.status_code, 400)
 
     def test_logout_requires_post(self):
         self.assertEqual(self.client.get("/logout/").status_code, 405)
