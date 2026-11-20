@@ -1,5 +1,6 @@
 """Проверяем формат справочников и атомарность импорта."""
 import csv
+from dataclasses import replace
 import json
 from io import StringIO
 from datetime import timedelta
@@ -9,7 +10,7 @@ import tempfile
 from unittest.mock import patch
 from uuid import uuid4
 from django.core.exceptions import ValidationError
-from django.db import connection
+from django.db import connection, IntegrityError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
@@ -335,6 +336,78 @@ class ImportTests(TestCase):
         with self.assertRaises(ImportRejected):
             parse(self.path)
         source.write_text(original, encoding="utf-8")
+    def test_accept_rejects_malformed_batch_and_stale_approval(self):
+        batch = parse(self.path)
+        for malformed in (
+            replace(batch, people=()),
+            replace(batch, people=batch.people * 2),
+            replace(batch, people=(replace(batch.people[0],
+                    organization_external_id="unknown"),)),
+        ):
+            with self.subTest(malformed=malformed.people), self.assertRaises(ValidationError):
+                self.publish(malformed)
+        with self.assertRaises(ValidationError):
+            self.publish(batch, source_export_date=timezone.localdate() + timedelta(days=1))
+        with self.assertRaises(ValidationError):
+            self.publish(batch, previous=777777)
+        self.assertEqual(EmployeeImport.objects.count(), 0)
+
+        first = self.publish(batch)
+        make_sources(self.path, people=[(
+            self.people[0][0], "TEST-UPDATED", self.people[0][2])])
+        latest = self.publish(previous=first.import_id)
+        with self.assertRaisesRegex(ValidationError, "Старая выгрузка"):
+            self.publish(batch, previous=latest.import_id)
+        self.assertEqual(EmployeeImport.objects.count(), 2)
+
+    def test_import_cli_converts_validation_and_integrity_errors(self):
+        archive = self.path / "source.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            for name in ("Employees.csv", "Positions.csv", "Units.csv"):
+                tar.add(self.path / name, arcname=name)
+        batch = parse(self.path)
+        arguments = {
+            "environment": "dev", "database_name": "veqta_dev",
+            "source_export_date": self.date.isoformat(), "apply": True,
+            "expected_employee_count": 1, "expected_previous_import_id": 0,
+        }
+        with patch("workwear.management.commands.workwear_import_1c.require_target"), \
+             patch("workwear.management.commands.workwear_import_1c.parse", return_value=batch), \
+             patch("workwear.management.commands.workwear_import_1c.accept") as publish:
+            publish.side_effect = ValidationError("Проверка пакета")
+            with self.assertRaisesRegex(CommandError, "Проверка пакета"):
+                call_command("workwear_import_1c", str(archive), **arguments)
+            publish.side_effect = IntegrityError("Ошибка ограничения")
+            with self.assertRaisesRegex(CommandError, "Публикация полностью отменена"):
+                call_command("workwear_import_1c", str(archive), **arguments)
+        self.assertEqual(EmployeeImport.objects.count(), 0)
+
+    def test_parser_rejects_oversized_organization_name_and_missing_position(self):
+        source = self.path / "Units.csv"
+        original = source.read_text(encoding="utf-8")
+        source.write_text(original.replace("Тестовая организация источника",
+                                           "Я" * 256), encoding="utf-8")
+        with self.assertRaises(ImportRejected):
+            parse(self.path)
+        source.write_text(original, encoding="utf-8")
+        employee_source = self.path / "Employees.csv"
+        rows = list(csv.reader(employee_source.open(encoding="utf-8"), delimiter=";"))
+        rows[1][rows[0].index("positionExtId")] = ""
+        with employee_source.open("w", encoding="utf-8", newline="") as stream:
+            csv.writer(stream, delimiter=";").writerows(rows)
+        batch = parse(self.path)
+        self.assertEqual(batch.people[0].position_name, "")
+        self.assertEqual(batch.anomalies["employees_without_position"], 1)
+
+    def test_tar_member_length_is_checked_before_reading(self):
+        archive = self.path / "source.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            for name in ("Employees.csv", "Positions.csv", "Units.csv"):
+                tar.add(self.path / name, arcname=name)
+        with patch("workwear.importers.directories_1c.MAX_FILE_BYTES", 4):
+            with self.assertRaises(ImportRejected):
+                parse(archive)
+
     def test_commands_refuse_wrong_environment_before_parsing_sources(self):
         for command in ("veqta_initialize", "workwear_import_1c", "workwear_load_catalog"):
             with self.subTest(command=command), self.assertRaises(CommandError):
