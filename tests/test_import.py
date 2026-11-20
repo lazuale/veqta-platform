@@ -235,6 +235,106 @@ class ImportTests(TestCase):
         with self.assertRaisesRegex(ImportRejected, "разные названия должности"):
             parse(self.path)
 
+    def test_parser_rejects_invalid_employee_attributes_and_links(self):
+        source = self.path / "Employees.csv"
+        with source.open(encoding="utf-8", newline="") as stream:
+            original = list(csv.reader(stream, delimiter=";"))
+        for field, value in (
+            ("name", ""), ("tabNumber", ""),
+            ("orgExtId", ""), ("orgName", ""),
+            ("positionExtId", str(uuid4())), ("unitExtId", str(uuid4())),
+            ("orgExtId", str(uuid4())), ("tabNumber", "N" * 65),
+        ):
+            with self.subTest(field=field, value=value[:20]):
+                rows = [row.copy() for row in original]
+                rows[1][rows[0].index(field)] = value
+                with source.open("w", encoding="utf-8", newline="") as stream:
+                    csv.writer(stream, delimiter=";").writerows(rows)
+                with self.assertRaises(ImportRejected):
+                    parse(self.path)
+        with source.open("w", encoding="utf-8", newline="") as stream:
+            csv.writer(stream, delimiter=";").writerows(original)
+        self.assertEqual(len(parse(self.path).people), 1)
+
+    def test_duplicate_rows_and_complementary_employee_records(self):
+        for name in ("Positions.csv", "Units.csv"):
+            path = self.path / name
+            rows = list(csv.reader(path.open(encoding="utf-8"), delimiter=";"))
+            with path.open("a", encoding="utf-8", newline="") as stream:
+                csv.writer(stream, delimiter=";").writerow(rows[1])
+        employees = self.path / "Employees.csv"
+        rows = list(csv.reader(employees.open(encoding="utf-8"), delimiter=";"))
+        first, second = rows[1].copy(), rows[1].copy()
+        first[rows[0].index("unitExtId")] = ""
+        second[rows[0].index("positionExtId")] = ""
+        with employees.open("w", encoding="utf-8", newline="") as stream:
+            csv.writer(stream, delimiter=";").writerows([rows[0], first, second])
+        batch = parse(self.path)
+        self.assertEqual(len(batch.people), 1)
+        for key in ("duplicate_position_rows", "duplicate_unit_rows",
+                    "duplicate_employee_rows", "partial_employee_merges"):
+            self.assertEqual(batch.anomalies[key], 1)
+
+    def test_conflicting_organization_and_unit_name_rejected(self):
+        source = self.path / "Units.csv"
+        original = source.read_text(encoding="utf-8")
+        with self.subTest("организация"):
+            source.write_text(original.replace("Тестовая организация источника",
+                                               "Несовпадающая организация"), encoding="utf-8")
+            with self.assertRaises(ImportRejected):
+                parse(self.path)
+        source.write_text(original, encoding="utf-8")
+        rows = list(csv.reader(source.open(encoding="utf-8"), delimiter=";"))
+        conflict = rows[1].copy()
+        conflict[rows[0].index("name")] = "Другой участок"
+        with source.open("a", encoding="utf-8", newline="") as stream:
+            csv.writer(stream, delimiter=";").writerow(conflict)
+        with self.assertRaises(ImportRejected):
+            parse(self.path)
+
+    def test_missing_unit_organization_is_observed_without_guessing(self):
+        source = self.path / "Units.csv"
+        rows = list(csv.reader(source.open(encoding="utf-8"), delimiter=";"))
+        rows[1][rows[0].index("orgExtId")] = ""
+        with source.open("w", encoding="utf-8", newline="") as stream:
+            csv.writer(stream, delimiter=";").writerows(rows)
+        batch = parse(self.path)
+        self.assertEqual(batch.people[0].department_name, "")
+        self.assertEqual(batch.anomalies["unit_without_organization"], 1)
+
+    def test_missing_files_size_and_archive_whitelist(self):
+        source = self.path / "Positions.csv"
+        original = source.read_bytes()
+        source.unlink()
+        with self.assertRaises(ImportRejected):
+            parse(self.path)
+        source.write_bytes(original)
+        with patch("workwear.importers.directories_1c.MAX_FILE_BYTES", 4):
+            with self.assertRaises(ImportRejected):
+                parse(self.path)
+        target = self.path / "incomplete.tar.gz"
+        with tarfile.open(target, "w:gz") as archive:
+            archive.add(self.path / "Positions.csv", arcname="Positions.csv")
+            archive.add(self.path / "Units.csv", arcname="Units.csv")
+            archive.add(self.path / "Employees.csv", arcname="unexpected.csv")
+        with self.assertRaises(ImportRejected):
+            parse(target)
+
+    def test_empty_csv_and_bad_quoting(self):
+        for name in ("Units.csv", "Employees.csv"):
+            source = self.path / name
+            original = source.read_text(encoding="utf-8")
+            header = original.splitlines()[0]
+            source.write_text(header + "\n", encoding="utf-8")
+            with self.assertRaises(ImportRejected):
+                parse(self.path)
+            source.write_text(original, encoding="utf-8")
+        source = self.path / "Positions.csv"
+        original = source.read_text(encoding="utf-8")
+        source.write_text('extId;name\n"unclosed;field\n', encoding="utf-8")
+        with self.assertRaises(ImportRejected):
+            parse(self.path)
+        source.write_text(original, encoding="utf-8")
     def test_commands_refuse_wrong_environment_before_parsing_sources(self):
         for command in ("veqta_initialize", "workwear_import_1c", "workwear_load_catalog"):
             with self.subTest(command=command), self.assertRaises(CommandError):
