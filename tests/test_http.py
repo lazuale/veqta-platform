@@ -7,6 +7,7 @@ from django.test import Client, TestCase, override_settings
 from workwear import services
 from workwear.limits import MAX_JSON_BYTES, MAX_SYNC_JSON_BYTES
 from workwear.models import EmployeeImport, Request
+from workwear.sync import save_draft
 
 from .factories import make_user, make_import, make_employees, make_items, make_organization
 
@@ -99,6 +100,124 @@ class HttpTests(TestCase):
         self.assertNotIn("source_exported_at", data["import"])
         self.assertEqual(data["limits"]["request_members"], 1000)
         self.assertEqual(data["limits"]["items_per_member"], 30)
+
+    def test_individual_api_lifecycle_and_preserved_events(self):
+        organization = self.people[0].organization
+        base = "/workwear/api/requests/"
+        created = self.client.post(base, {"organization_id": organization.pk}, content_type="application/json")
+        self.assertEqual(created.status_code, 201)
+        request_id = created.json()["request"]["id"]
+        url = f"{base}{request_id}/"
+        self.assertEqual(self.client.get(url).json()["request"]["members"], [])
+
+        added = self.client.post(url + "members/", {
+            "employee_id": self.people[0].pk, "expected_version": 1,
+        }, content_type="application/json")
+        self.assertEqual(added.status_code, 201)
+        member_id, version = added.json()["member_id"], added.json()["version"]
+        assignment = self.client.post(url + "assignments/", {
+            "member_id": member_id, "item_id": self.items[0].pk, "expected_version": version,
+        }, content_type="application/json")
+        self.assertEqual(assignment.status_code, 201)
+        assignment_id, version = assignment.json()["assignment_id"], assignment.json()["version"]
+        removed = self.client.delete(url + f"assignments/{assignment_id}/", {
+            "expected_version": version,
+        }, content_type="application/json")
+        self.assertEqual(removed.status_code, 200)
+        version = removed.json()["version"]
+        assignment = self.client.post(url + "assignments/", {
+            "member_id": member_id, "item_id": self.items[0].pk, "expected_version": version,
+        }, content_type="application/json")
+        self.assertEqual(assignment.status_code, 201)
+        version = assignment.json()["version"]
+        self.assertEqual(len(self.client.get(url).json()["request"]["members"][0]["assignments"]), 1)
+
+        completed = self.client.post(url + "complete/", {"expected_version": version},
+                                     content_type="application/json")
+        self.assertEqual(completed.status_code, 200)
+        version = completed.json()["completion"]["version"]
+        reopened = self.client.post(url + "reopen/", {"expected_version": version},
+                                    content_type="application/json")
+        self.assertEqual(reopened.status_code, 200)
+        version = reopened.json()["request"]["version"]
+        removed = self.client.delete(url + f"members/{member_id}/", {
+            "expected_version": version,
+        }, content_type="application/json")
+        self.assertEqual(removed.status_code, 200)
+        deleted = self.client.delete(url, {"expected_version": removed.json()["version"]},
+                                     content_type="application/json")
+        self.assertEqual(deleted.status_code, 200)
+        self.assertFalse(Request.objects.filter(pk=request_id).exists())
+        events = self.client.get(f"/workwear/api/ui/requests/{request_id}/events/")
+        self.assertEqual(events.status_code, 200)
+        self.assertGreaterEqual(events.json()["count"], 6)
+
+    def test_resolve_bulk_add_and_search_states(self):
+        organization = self.people[0].organization
+        foreign_org = make_organization("Другая тестовая организация")
+        foreign = make_employees(self.people[0].last_seen_import, count=1, organization=foreign_org)[0]
+        foreign.full_name = "Чужой сотрудник"
+        foreign.save(update_fields=["full_name"])
+        request = services.create_request(organization_id=organization.pk, actor=self.actor)
+        result = self.client.post("/workwear/api/ui/resolve/", {
+            "organization_id": organization.pk,
+            "lines": ["TEST-00000", "TEST-00000", "Тестовый сотрудник 00001",
+                      "Чужой сотрудник", "Нет такого сотрудника"],
+            "present_employee_ids": [self.people[1].pk],
+        }, content_type="application/json")
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual([entry["status"] for entry in result.json()["results"]],
+                         ["matched", "duplicate", "included", "other_organization", "not_found"])
+
+        bulk = self.client.post(f"/workwear/api/ui/requests/{request.pk}/bulk-add/", {
+            "employee_ids": [self.people[0].pk, self.people[1].pk],
+            "expected_version": request.version,
+        }, content_type="application/json")
+        self.assertEqual(bulk.status_code, 201)
+        self.assertEqual(len(bulk.json()["added"]), 2)
+        self.assertEqual(len(self.client.get(f"/workwear/api/requests/{request.pk}/").json()
+                             ["request"]["members"]), 2)
+        duplicate = self.client.post(f"/workwear/api/ui/requests/{request.pk}/bulk-add/", {
+            "employee_ids": [self.people[0].pk, self.people[0].pk],
+            "expected_version": bulk.json()["version"],
+        }, content_type="application/json")
+        self.assertEqual(duplicate.status_code, 400)
+
+    def test_registry_history_repeat_scan_and_reopen_reason(self):
+        organization = self.people[0].organization
+        prior = services.create_request(organization_id=organization.pk, actor=self.actor)
+        completed = save_draft(request_id=prior.pk, actor=self.actor, expected_version=prior.version,
+                               members=[{"employee_id": self.people[0].pk,
+                                         "item_ids": [self.items[0].pk]}], finish=True)
+        draft = services.create_request(organization_id=organization.pk, actor=self.actor)
+        base = f"/workwear/api/ui/requests/{draft.pk}/"
+        history = self.client.get(base + f"employees/{self.people[0].pk}/history/")
+        self.assertEqual(history.status_code, 200)
+        self.assertEqual(history.json()["results"][0]["request_id"], prior.pk)
+        scan = self.client.post(base + "repeat-scan/", {
+            "pairs": [{"employee_id": self.people[0].pk, "item_id": self.items[0].pk}],
+        }, content_type="application/json")
+        self.assertEqual(scan.status_code, 200)
+        self.assertEqual(scan.json()["warnings"][0]["previous_request_id"], prior.pk)
+        self.assertEqual(self.client.post(base + "repeat-scan/", {
+            "pairs": [{"employee_id": self.people[0].pk, "item_id": self.items[0].pk}] * 2,
+        }, content_type="application/json").status_code, 400)
+        registry = self.client.get("/workwear/api/ui/requests/", {
+            "status": "closed", "q": "TEST-00000", "date_basis": "completed", "sort": "oldest",
+        })
+        self.assertEqual(registry.status_code, 200)
+        self.assertEqual(registry.json()["count"], 1)
+        self.assertEqual(registry.json()["results"][0]["id"], prior.pk)
+        for parameters in ({"date_from": "wrong"}, {"sort": "sideways"},
+                           {"limit": "0"}, {"date_basis": "invalid"}):
+            with self.subTest(parameters=parameters):
+                self.assertEqual(self.client.get("/workwear/api/ui/requests/",
+                                                 parameters).status_code, 400)
+        reopened = self.client.post(f"/workwear/api/ui/requests/{prior.pk}/reopen/", {
+            "expected_version": completed.version, "reason": "Исправление тестовой заявки",
+        }, content_type="application/json")
+        self.assertEqual(reopened.status_code, 200)
+        self.assertEqual(reopened.json()["request"]["status"], "draft")
 
     def test_logout_requires_post(self):
         self.assertEqual(self.client.get("/logout/").status_code, 405)
