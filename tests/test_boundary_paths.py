@@ -1,6 +1,7 @@
 """Проверяем реальные граничные случаи поиска, повторов и изменения заявок."""
 from datetime import date
 from uuid import uuid4
+from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
 from django.test import TestCase
@@ -176,6 +177,30 @@ class BoundaryPathsTests(TestCase):
                 item_id=extra_items[-1].pk, actor=self.actor, expected_version=result.version,
             )
         self.assertEqual(self.request.members.get().assignments.count(), 30)
+
+    def test_short_personnel_number_is_not_indexed_by_suffix(self):
+        person = self.people[0]
+        Employee.objects.filter(pk=person.pk).update(personnel_number="A")
+        matched = resolve_many(
+            lines=["A"], organization_id=self.organization.pk,
+            latest=self.import_record, already=set(),
+        )
+        self.assertEqual(matched[0]["status"], "matched")
+
+    def test_member_count_limit_applies_to_existing_members(self):
+        with patch("workwear.services.MAX_REQUEST_MEMBERS", 2):
+            first = services.add_employees(
+                request_id=self.request.pk,
+                employee_ids=[person.pk for person in self.people],
+                actor=self.actor, expected_version=1,
+            )
+            self.assertEqual(len(first[0]), 2)
+            additional = make_employees(self.import_record, count=1, organization=self.organization)[0]
+            with self.assertRaisesRegex(ValidationError, "до 1000 сотрудников"):
+                services.add_employees(
+                    request_id=self.request.pk, employee_ids=[additional.pk],
+                    actor=self.actor, expected_version=first[1],
+                )
 
     def test_employee_str_includes_personnel_number(self):
         self.assertIn(self.people[0].personnel_number, str(self.people[0]))

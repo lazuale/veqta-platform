@@ -408,6 +408,15 @@ class ImportTests(TestCase):
             with self.assertRaises(ImportRejected):
                 parse(archive)
 
+    def test_count_discrepancy_aborts_the_entire_import(self):
+        batch = parse(self.path)
+        with patch("workwear.importers.acceptance.Employee.objects.filter") as filtered:
+            filtered.return_value.count.return_value = 0
+            with self.assertRaisesRegex(ValidationError, "Количество сотрудников"):
+                self.publish(batch)
+        self.assertEqual(EmployeeImport.objects.count(), 0)
+        self.assertEqual(Employee.objects.count(), 0)
+
     def test_commands_refuse_wrong_environment_before_parsing_sources(self):
         for command in ("veqta_initialize", "workwear_import_1c", "workwear_load_catalog"):
             with self.subTest(command=command), self.assertRaises(CommandError):
