@@ -1,5 +1,7 @@
 """Проверяем формат справочников и атомарность импорта."""
 import csv
+import json
+from io import StringIO
 from datetime import timedelta
 from pathlib import Path
 import tarfile
@@ -80,10 +82,11 @@ class ImportTests(TestCase):
             self.publish(source_export_date=self.date+timedelta(days=1))
 
     def test_cli_requires_strict_calendar_day(self):
-        for value in ("2026-11-18T00:00:00+03:00", "18.11.2026", "20261118", "2026-02-30"):
-            with self.subTest(value=value), self.assertRaises(CommandError):
-                call_command("workwear_import_1c", str(self.path),
-                    environment="dev", database_name="veqta_dev", source_export_date=value)
+        with patch("workwear.management.commands.workwear_import_1c.require_target"):
+            for value in ("2026-11-18T00:00:00+03:00", "18.11.2026", "20261118", "2026-02-30"):
+                with self.subTest(value=value), self.assertRaisesRegex(CommandError, r"Дата выгрузки|Некорректная дата"):
+                    call_command("workwear_import_1c", str(self.path),
+                        environment="dev", database_name="veqta_dev", source_export_date=value)
         self.assertEqual(EmployeeImport.objects.count(), 0)
 
     def test_service_rejects_timestamp_instead_of_date(self):
@@ -176,6 +179,61 @@ class ImportTests(TestCase):
     def test_parser_rejects_arguments_outside_its_contract(self):
         with self.assertRaises(TypeError):
             parse(self.path, timesheets="unsupported")
+
+    def test_command_dry_run_apply_and_input_guards(self):
+        options = dict(environment="dev", database_name="veqta_dev",
+                       source_export_date=self.date.isoformat())
+        archive = self.path / "sources.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            for name in ("Employees.csv", "Positions.csv", "Units.csv"):
+                tar.add(self.path / name, arcname=name)
+        with patch("workwear.management.commands.workwear_import_1c.require_target"):
+            output = StringIO()
+            call_command("workwear_import_1c", str(self.path), stdout=output, **options)
+            result = json.loads(output.getvalue())
+            self.assertEqual(result["mode"], "DRY_RUN")
+            self.assertEqual(result["unique_current_employees"], 1)
+            self.assertEqual(EmployeeImport.objects.count(), 0)
+
+            with self.assertRaisesRegex(CommandError, "APPLY requires"):
+                call_command("workwear_import_1c", str(self.path), apply=True, **options)
+            with self.assertRaises(CommandError):
+                call_command("workwear_import_1c", str(self.path / "missing-source"), **options)
+            output = StringIO()
+            call_command("workwear_import_1c", str(archive), apply=True,
+                         expected_employee_count=1, expected_previous_import_id=0,
+                         stdout=output, **options)
+            applied = json.loads(output.getvalue())
+            self.assertEqual(applied["mode"], "APPLY")
+            self.assertEqual(applied["acceptance"]["created"], 1)
+            self.assertEqual(EmployeeImport.objects.count(), 1)
+
+    def test_parser_rejects_invalid_csv_headers_and_encoding(self):
+        file = self.path / "Positions.csv"
+        original = file.read_bytes()
+        for replacement in (b"\xff\xfe", b"extId;wrong\n", b"", b"extId;name\n"):
+            with self.subTest(data=replacement):
+                file.write_bytes(replacement)
+                with self.assertRaises(ImportRejected):
+                    parse(self.path)
+        file.write_bytes(original)
+        self.assertEqual(len(parse(self.path).people), 1)
+
+    def test_parser_rejects_bad_organization_and_duplicate_position(self):
+        source = self.path / "Units.csv"
+        original = source.read_text()
+        for changed in (original.replace("Тестовое подразделение", ""),
+                        original.replace("00000000-0000-0000-0000-000000000123", "bad id")):
+            with self.subTest(changed=changed[:20]):
+                source.write_text(changed)
+                with self.assertRaises(ImportRejected):
+                    parse(self.path)
+        source.write_text(original)
+        positions = self.path / "Positions.csv"
+        with positions.open("a", encoding="utf-8") as target:
+            target.write(positions.read_text().splitlines()[1].replace("Тестовая должность", "Другая должность") + "\n")
+        with self.assertRaisesRegex(ImportRejected, "разные названия должности"):
+            parse(self.path)
 
     def test_commands_refuse_wrong_environment_before_parsing_sources(self):
         for command in ("veqta_initialize", "workwear_import_1c", "workwear_load_catalog"):
