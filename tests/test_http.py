@@ -219,6 +219,119 @@ class HttpTests(TestCase):
         self.assertEqual(reopened.status_code, 200)
         self.assertEqual(reopened.json()["request"]["status"], "draft")
 
+    def test_request_list_filters_and_missing_request(self):
+        organization = self.people[0].organization
+        requested = services.create_request(organization_id=organization.pk, actor=self.actor)
+        services.create_request(organization_id=make_organization("Другой объект").pk, actor=self.actor)
+        result = self.client.get("/workwear/api/requests/", {
+            "status": "draft", "organization_id": str(organization.pk),
+        })
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual([row["id"] for row in result.json()["results"]], [requested.pk])
+        for query in ({"status": "invalid"}, {"organization_id": "abc"},
+                      {"organization_id": "0"}, {"organization_id": "9999999999"}):
+            with self.subTest(query=query):
+                self.assertEqual(self.client.get("/workwear/api/requests/", query).status_code, 400)
+        self.assertEqual(self.client.get("/workwear/api/requests/999999999/").status_code, 404)
+
+    def test_http_validation_and_accessible_errors(self):
+        org = self.people[0].organization
+        path = "/workwear/api/requests/"
+        self.assertEqual(self.client.get("/workwear/api/session/").status_code, 200)
+        self.assertEqual(self.client.post(path, {"organization_id": org.pk}, content_type="text/plain").status_code, 400)
+        self.assertEqual(self.client.post(path, "invalid-json", content_type="application/json").status_code, 400)
+        req = services.create_request(organization_id=org.pk, actor=self.actor)
+        self.assertEqual(self.client.post(f"{path}{req.pk}/members/", {
+            "employee_id": self.people[0].pk, "expected_version": -1,
+        }, content_type="application/json").status_code, 400)
+        self.assertEqual(self.client.post(f"{path}{req.pk}/members/", {
+            "employee_id": self.people[0].pk, "expected_version": 1,
+        }, content_type="application/json").status_code, 201)
+        req.refresh_from_db()
+        self.assertEqual(self.client.post(f"{path}{req.pk}/members/", {
+            "employee_id": self.people[0].pk, "expected_version": req.version,
+        }, content_type="application/json").status_code, 400)
+        first_member = req.members.first()
+        self.items[0].is_active = False
+        self.items[0].save(update_fields=["is_active"])
+        self.assertEqual(self.client.post(f"{path}{req.pk}/assignments/", {
+            "member_id": first_member.pk, "item_id": self.items[0].pk, "expected_version": req.version,
+        }, content_type="application/json").status_code, 400)
+
+    def test_registry_date_number_and_permission_guards(self):
+        org = self.people[0].organization
+        req = services.create_request(organization_id=org.pk, actor=self.actor)
+        base = "/workwear/api/ui/requests/"
+        today = req.created_at.date().isoformat()
+        filtered = self.client.get(base, {
+            "date_from": today, "date_to": today, "organization_id": str(org.pk),
+            "q": str(req.pk), "sort": "oldest",
+        })
+        self.assertEqual(filtered.status_code, 200)
+        self.assertEqual(filtered.json()["count"], 1)
+        for query in (
+            {"q": "x" * 121}, {"status": "invalid"}, {"offset": "-1"},
+            {"offset": "1000001"}, {"offset": "99999999999999"},
+            {"date_from": "2026-02-30"}, {"date_from": "2026-10-02", "date_to": "2026-10-01"},
+            {"organization_id": "nope"}, {"date_basis": "nope"},
+        ):
+            with self.subTest(query=query):
+                self.assertEqual(self.client.get(base, query).status_code, 400)
+        self.assertEqual(self.client.get("/workwear/api/ui/employees/", {
+            "q": "a", "organization_id": str(org.pk),
+        }).json()["results"], [])
+        self.assertEqual(self.client.get("/workwear/api/ui/requests/999999999/events/").status_code, 404)
+        reader = make_user(administrator=False)
+        reader.user_permissions.add(Permission.objects.get(
+            content_type__app_label="workwear", codename="view_request"))
+        self.client.force_login(reader)
+        metadata = self.client.get("/workwear/api/ui/metadata/")
+        self.assertEqual(metadata.status_code, 200)
+        self.assertEqual(metadata.json()["items"], [])
+        self.assertEqual(self.client.get("/workwear/api/ui/employees/", {
+            "q": "TEST", "organization_id": str(org.pk),
+        }).status_code, 403)
+
+    def test_resolve_context_and_bad_inputs(self):
+        org = self.people[0].organization
+        req = services.create_request(organization_id=org.pk, actor=self.actor)
+        url = "/workwear/api/ui/resolve/"
+        payload = {"organization_id": org.pk, "lines": ["TEST-00000"], "request_id": req.pk}
+        valid = self.client.post(url, payload, content_type="application/json")
+        self.assertEqual(valid.status_code, 200)
+        self.assertEqual(valid.json()["results"][0]["status"], "matched")
+        invalid_cases = (
+            {"organization_id": 999999, "lines": ["TEST-00000"]},
+            {"organization_id": org.pk, "lines": []},
+            {"organization_id": org.pk, "lines": [123]},
+            {"organization_id": org.pk, "lines": ["TEST-00000"], "present_employee_ids": [False]},
+            {"organization_id": org.pk, "lines": ["TEST-00000"], "request_id": 999999999},
+        )
+        for invalid in invalid_cases:
+            with self.subTest(invalid=invalid):
+                response = self.client.post(url, invalid, content_type="application/json")
+                self.assertIn(response.status_code, {400, 404})
+
+    def test_repeat_scan_rejects_foreign_employee_and_malformed_pairs(self):
+        org = self.people[0].organization
+        req = services.create_request(organization_id=org.pk, actor=self.actor)
+        path = f"/workwear/api/ui/requests/{req.pk}/repeat-scan/"
+        other = make_employees(self.people[0].last_seen_import, count=1,
+                               organization=make_organization("Чужая организация"))[0]
+        for pairs in (
+            [{"employee_id": other.pk, "item_id": self.items[0].pk}],
+            [{"employee_id": self.people[0].pk}],
+            "invalid",
+            [{"employee_id": -1, "item_id": self.items[0].pk}],
+            [{"employee_id": 99999999, "item_id": self.items[0].pk}],
+        ):
+            with self.subTest(pairs=pairs):
+                self.assertEqual(self.client.post(path, {"pairs": pairs},
+                                                  content_type="application/json").status_code, 400)
+        empty = self.client.post(path, {"pairs": []}, content_type="application/json")
+        self.assertEqual(empty.status_code, 200)
+        self.assertEqual(empty.json()["warnings"], [])
+
     def test_logout_requires_post(self):
         self.assertEqual(self.client.get("/logout/").status_code, 405)
         self.assertEqual(self.client.post("/logout/").status_code, 302)
