@@ -3,7 +3,12 @@ import os
 import secrets
 import subprocess
 import sys
+from importlib import import_module
+from unittest.mock import patch
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase
+from config.database import require_target
+from workwear.ingest_lock import lock_for_acceptance, lock_for_membership
 
 
 class ConfigurationTests(SimpleTestCase):
@@ -72,3 +77,52 @@ class ConfigurationTests(SimpleTestCase):
         self.assertNotEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="1",
             VEQTA_ENV="prod", DB_NAME="veqta_prod", DB_USER="veqta_prod",
             DJANGO_DEBUG="0", DJANGO_TRUST_PROXY="1"), 0)
+
+
+class RuntimeGuardTests(SimpleTestCase):
+    """Моделируем отказы до обращения к настоящей базе."""
+
+    def test_database_target_checks_vendor_role_and_actual_connection(self):
+        with patch("config.database.settings") as settings, patch("config.database.connection") as db:
+            settings.VEQTA_ENV = "dev"
+            db.vendor = "postgresql"
+            db.settings_dict = {"NAME": "veqta_dev", "USER": "veqta_dev"}
+            db.cursor.return_value.__enter__.return_value.fetchone.return_value = ("veqta_dev", "veqta_dev")
+            require_target("dev", "veqta_dev")
+            with self.assertRaises(CommandError):
+                require_target("dev", "veqta_prod")
+            db.vendor = "sqlite"
+            with self.assertRaisesRegex(CommandError, "Неверная целевая база"):
+                require_target("dev", "veqta_dev")
+            db.vendor = "postgresql"
+            db.settings_dict["USER"] = "postgres"
+            with self.assertRaisesRegex(CommandError, "Имя базы или роль"):
+                require_target("dev", "veqta_dev")
+            db.settings_dict["USER"] = "veqta_dev"
+            db.cursor.return_value.__enter__.return_value.fetchone.return_value = ("veqta_prod", "veqta_dev")
+            with self.assertRaisesRegex(CommandError, "PostgreSQL подключила команду"):
+                require_target("dev", "veqta_dev")
+
+    def test_ingest_lock_requires_transaction_and_postgresql(self):
+        with patch("workwear.ingest_lock.transaction.get_connection") as transaction_connection, \
+             patch("workwear.ingest_lock.connection") as database:
+            transaction_connection.return_value.in_atomic_block = False
+            with self.assertRaisesRegex(RuntimeError, "transaction.atomic"):
+                lock_for_membership()
+            transaction_connection.return_value.in_atomic_block = True
+            database.vendor = "sqlite"
+            with self.assertRaisesRegex(RuntimeError, "PostgreSQL"):
+                lock_for_acceptance()
+
+    def test_initialize_rejects_existing_schema(self):
+        from workwear.management.commands.veqta_initialize import Command
+
+        with patch("workwear.management.commands.veqta_initialize.require_target"), \
+             patch("workwear.management.commands.veqta_initialize.connection") as database:
+            database.introspection.table_names.return_value = ["django_migrations"]
+            with self.assertRaisesRegex(CommandError, "База уже содержит таблицы"):
+                Command().handle(environment="dev", database_name="veqta_dev")
+
+    def test_asgi_and_wsgi_entrypoints_exist(self):
+        self.assertIsNotNone(import_module("config.asgi").application)
+        self.assertIsNotNone(import_module("config.wsgi").application)
