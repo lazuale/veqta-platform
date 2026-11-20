@@ -36,6 +36,7 @@ jobs:
       DJANGO_DEBUG: '1'
       DJANGO_TRUST_PROXY: '0'
       DJANGO_SECURE_COOKIES: '0'
+      COVERAGE_FILE: test-results/coverage/.coverage
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -45,6 +46,7 @@ jobs:
         run: |
           python -m pip install --require-hashes -r requirements-browser.lock
           python -m pip check
+          mkdir -p test-results/coverage
       - name: Create isolated roles and database
         run: |
           python - <<'PY'
@@ -59,7 +61,9 @@ jobs:
       - name: Bootstrap and Cold Start with runtime permissions
         run: |
           psql -X -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres -f deploy/postgresql/dev.sql
-          DB_RUNTIME_PASSWORD="$DB_PASSWORD" DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" python -m tests.coldstart
+          DB_RUNTIME_PASSWORD="$DB_PASSWORD" DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
+            python -m coverage run --append --branch --source=config,portal,workwear \
+              --omit='*/migrations/*' -m tests.coldstart
       - name: Independent PROD Cold Start and cross-contour isolation
         run: |
           DB_PASSWORD="$DB_PROD_PASSWORD" DB_OWNER_PASSWORD="$DB_PROD_OWNER_PASSWORD" \
@@ -68,7 +72,8 @@ jobs:
             DJANGO_SECRET_KEY="$DJANGO_PROD_SECRET_KEY" DJANGO_DEBUG=0 DJANGO_TRUST_PROXY=1 \
             DJANGO_SECURE_COOKIES=1 DJANGO_ALLOWED_HOSTS=localhost \
             DJANGO_CSRF_TRUSTED_ORIGINS=https://localhost \
-            python manage.py veqta_initialize --environment prod --database-name veqta_prod
+            python -m coverage run --append --branch --source=config,portal,workwear \
+              --omit='*/migrations/*' manage.py veqta_initialize --environment prod --database-name veqta_prod
           VEQTA_ENV=prod DB_NAME=veqta_prod DB_USER=veqta_prod DB_PASSWORD="$DB_PROD_PASSWORD" \
             DJANGO_SECRET_KEY="$DJANGO_PROD_SECRET_KEY" DJANGO_DEBUG=0 DJANGO_TRUST_PROXY=1 \
             DJANGO_SECURE_COOKIES=1 DJANGO_ALLOWED_HOSTS=localhost \
@@ -119,15 +124,12 @@ jobs:
           print("Independent DEV/PROD: migrations, runtime access, SQLSTATE 42501 on SET ROLE and rejected cross-CONNECT: PASS")
           PY
       - name: Django and PostgreSQL regression
-        env:
-          COVERAGE_FILE: test-results/coverage/.coverage
         run: |
-          mkdir -p test-results/coverage
           python manage.py check
           python manage.py makemigrations --check --dry-run
           python manage.py migrate --check
           DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
-            python -m coverage run --branch --source=config,portal,workwear \
+            python -m coverage run --append --branch --source=config,portal,workwear \
               --omit='*/migrations/*' manage.py test tests --noinput --verbosity 2
           DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
             python -m coverage run --append --branch --source=config,portal,workwear \

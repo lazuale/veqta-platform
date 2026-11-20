@@ -32,7 +32,7 @@ def _query_num(request, key, *, default, maximum):
     if len(digits) > len(str(maximum)):
         raise ValidationError(f"Параметр {key} вне допустимого диапазона")
     number = int(digits)
-    if number < 0 or number > maximum:
+    if number > maximum:
         raise ValidationError(f"Параметр {key} вне допустимого диапазона")
     return number
 
