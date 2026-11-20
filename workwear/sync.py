@@ -58,14 +58,10 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
     existing = list(RequestEmployee.objects.filter(request_id=req.pk).prefetch_related("assignments"))
     existing_by_employee = {m.employee_id: m for m in existing}
     latest = latest_import()
-    for employee_id in desired:
-        employee = employees[employee_id]
-        # Нового участника проверяем по последней выгрузке, даже если он есть в истории.
-        if employee_id not in existing_by_employee:
-            require_current(employee, organization_id=req.organization_id, latest=latest)
-        elif employee.organization_id != req.organization_id:
-            # Смену организации существующего GUID запрещают составные внешние ключи.
-            raise ValidationError("Организация сотрудника не совпадает с заявкой")
+    # Составные FK PostgreSQL гарантируют организацию ранее включённых сотрудников.
+    # По последней выгрузке проверяем только новых участников.
+    for employee_id in desired.keys() - existing_by_employee.keys():
+        require_current(employees[employee_id], organization_id=req.organization_id, latest=latest)
     # До записи рассчитываем изменения и сохраняем данные исключаемых участников для истории.
     old_items = {m.employee_id: {a.item_id for a in m.assignments.all()} for m in existing}
     added_item_ids = {
