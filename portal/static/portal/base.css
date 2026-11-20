@@ -12,12 +12,8 @@ body.veq-platform {margin:0;min-height:100vh;color:var(--vq-text);background:var
 :where(.veq-platform) :is(button,input,select,textarea):disabled {cursor:not-allowed;opacity:.48}
 :where(.veq-platform) [hidden] {display:none}
 :where(.veq-platform) :is(input[type=checkbox],input[type=radio]) {width:16px;height:16px;margin:0;accent-color:var(--vq-accent);flex:none;cursor:pointer}
-:where(.veq-platform) .vq-link {color:var(--vq-accent);text-decoration:underline;text-underline-offset:3px}
-:where(.veq-platform) .vq-muted,:where(.veq-platform) .secondary,:where(.veq-platform) .quiet {color:var(--vq-text-muted)}
-:where(.veq-platform) .vq-mono {font-family:var(--vq-font-mono);font-size:.94em;overflow-wrap:anywhere}
-:where(.veq-platform) .vq-number {font-variant-numeric:tabular-nums}
-:where(.veq-platform) .vq-right {text-align:right;font-variant-numeric:tabular-nums}
+:where(.veq-platform) .secondary,:where(.veq-platform) .quiet {color:var(--vq-text-muted)}
 :where(.veq-platform) .vq-sr-only {position:absolute;width:1px;height:1px;padding:0;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 .vq-skip {position:fixed;left:16px;top:12px;padding:10px 16px;background:var(--vq-primary);color:var(--vq-surface);z-index:1000;transform:translateY(-160%);border-radius:var(--vq-radius-control)}
 .vq-skip:focus {transform:translateY(0)}
-@media(pointer:coarse) {:where(.veq-platform) :is(.vq-btn,.vq-select,.vq-input,.vq-field,.vq-menu-trigger) {min-height:44px}:where(.veq-platform) :is(input,select,textarea) {font-size:16px}}
+@media(pointer:coarse) {:where(.veq-platform) :is(.vq-btn,.vq-select,.vq-field,.vq-menu-trigger) {min-height:44px}:where(.veq-platform) :is(input,select,textarea) {font-size:16px}}
