@@ -417,6 +417,25 @@ class ImportTests(TestCase):
         self.assertEqual(EmployeeImport.objects.count(), 0)
         self.assertEqual(Employee.objects.count(), 0)
 
+    def test_empty_position_name_is_rejected(self):
+        source = self.path / "Positions.csv"
+        rows = list(csv.reader(source.open(encoding="utf-8"), delimiter=";"))
+        rows[1][rows[0].index("name")] = ""
+        with source.open("w", encoding="utf-8", newline="") as stream:
+            csv.writer(stream, delimiter=";").writerows(rows)
+        with self.assertRaisesRegex(ImportRejected, "не указана должность"):
+            parse(self.path)
+
+    def test_identical_employee_rows_are_not_partial_merges(self):
+        source = self.path / "Employees.csv"
+        rows = list(csv.reader(source.open(encoding="utf-8"), delimiter=";"))
+        with source.open("a", encoding="utf-8", newline="") as stream:
+            csv.writer(stream, delimiter=";").writerow(rows[1])
+        result = parse(self.path)
+        self.assertEqual(len(result.people), 1)
+        self.assertEqual(result.anomalies["duplicate_employee_rows"], 1)
+        self.assertEqual(result.anomalies["partial_employee_merges"], 0)
+
     def test_commands_refuse_wrong_environment_before_parsing_sources(self):
         for command in ("veqta_initialize", "workwear_import_1c", "workwear_load_catalog"):
             with self.subTest(command=command), self.assertRaises(CommandError):
