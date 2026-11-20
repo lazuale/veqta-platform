@@ -448,3 +448,38 @@ class CatalogCommandTests(TestCase):
                 with self.assertRaises(CommandError):
                     call_command("workwear_load_catalog", str(source), apply=True, **options)
                 self.assertEqual(WorkwearItem.objects.get(code="CLI-0").name, "Произвольная позиция 0")
+
+    def test_catalog_command_rejects_invalid_source_records(self):
+        header = ["code", "name", "category", "validity_days", "sort_order", "is_active"]
+        valid = ["CAT-1", "Тестовая позиция", "Категория", "90", "1", "1"]
+        cases = (
+            (header[:-1], [valid[:-1]], 1, "столбцы"),
+            (header, [valid], 2, "Число позиций"),
+            (header, [valid + ["extra"]], 1, "Некорректная строка"),
+            (header, [valid[:-1] + ["yes"]], 1, "is_active"),
+            (header, [valid[:3] + ["0"] + valid[4:]], 1, "Каталог, строка"),
+            (header, [valid, valid], 2, "Повтор кода"),
+        )
+        with TemporaryDirectory() as directory, patch(
+            "workwear.management.commands.workwear_load_catalog.require_target",
+        ):
+            source = Path(directory) / "catalog.csv"
+            for columns, rows, expected_count, message in cases:
+                with self.subTest(message=message):
+                    with source.open("w", encoding="utf-8", newline="") as stream:
+                        writer = csv.writer(stream, delimiter=";")
+                        writer.writerow(columns)
+                        writer.writerows(rows)
+                    with self.assertRaisesRegex(CommandError, message):
+                        call_command(
+                            "workwear_load_catalog", str(source),
+                            environment="dev", database_name="veqta_dev",
+                            expected_count=expected_count, stdout=StringIO(),
+                        )
+            source.unlink()
+            with self.assertRaises(CommandError):
+                call_command(
+                    "workwear_load_catalog", str(source),
+                    environment="dev", database_name="veqta_dev",
+                    expected_count=1, stdout=StringIO(),
+                )
