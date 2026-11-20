@@ -123,8 +123,23 @@ jobs:
           python manage.py check
           python manage.py makemigrations --check --dry-run
           python manage.py migrate --check
-          DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" python manage.py test tests --noinput --verbosity 2
-          DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" python -m tests.acceptance
+          DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
+            python -m coverage run --branch --source=config,portal,workwear \
+              --omit='*/migrations/*' manage.py test tests --noinput --verbosity 2
+          DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
+            python -m coverage run --append --branch --source=config,portal,workwear \
+              --omit='*/migrations/*' -m tests.acceptance
+          mkdir -p test-results/coverage
+          python -m coverage report -m
+          python -m coverage json -o test-results/coverage/coverage.json
+          python -m coverage html -d test-results/coverage/html
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: python-branch-coverage
+          path: test-results/coverage/
+          retention-days: 7
+          if-no-files-found: ignore
       - name: Source and syntax
         run: |
           python scripts/check_source.py

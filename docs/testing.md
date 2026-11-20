@@ -17,6 +17,25 @@ DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
 
 Django создаёт и удаляет одноразовую БД. Тесты покрывают Admin, импорт, права, снимки, транзакции и ограничения PostgreSQL. Сценарий масштаба сохраняет и завершает заявку на 1000 сотрудников × 30 позиций. Тесты серверных скриптов можно запустить отдельно командой `python -m unittest tests.test_deployment -v`. Они проверяют подготовку и работу при отказах в синтетическом окружении.
 
+## Покрытие Python и ветвлений
+
+CI измеряет покрытие Python-кода через `coverage.py` 7.16.2, установленный по фиксированному SHA-256 вместе с тестовыми зависимостями. На тех же тестах Django и сервисной приёмке собирается общее покрытие операторов и ветвлений для `config/`, `portal/` и `workwear/`, за исключением схемы миграции. Отчёт показывает неисполненные строки и переходы по каждому файлу, а не только итоговый процент.
+
+Для локального воспроизведения после установки `requirements-browser.lock` и настройки одноразовой БД выполните:
+
+```bash
+DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
+  python -m coverage run --branch --source=config,portal,workwear \
+  --omit='*/migrations/*' manage.py test tests --noinput --verbosity 2
+DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
+  python -m coverage run --append --branch --source=config,portal,workwear \
+  --omit='*/migrations/*' -m tests.acceptance
+python -m coverage report -m
+python -m coverage html -d test-results/coverage/html
+```
+
+GitHub Actions сохраняет подробный JSON и HTML в артефакте `python-branch-coverage`. Этот показатель отражает только исполнение кода внутри процессов измерения. Отдельные процессы Cold Start, Gunicorn, браузеров и серверных утилит в него не входят; триггеры PostgreSQL также не измеряются `coverage.py`. Непокрытая строка или ветвление сами по себе не означают, что код недостижим, и не являются основанием для удаления.
+
 ## Cold Start
 
 В новом тестовом кластере выполните только [создание локальной базы и ролей](getting-started.md#создайте-локальную-базу), до `veqta_initialize`. Запустите:
