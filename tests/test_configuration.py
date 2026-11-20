@@ -57,6 +57,15 @@ class ConfigurationTests(SimpleTestCase):
     def test_boolean_typo_rejected(self):
         self.assertNotEqual(self.settings_process(DJANGO_DEBUG="yes"), 0)
 
+    def test_secure_cookies_reject_missing_https_proxy_and_insecure_prod(self):
+        prod = {"VEQTA_ENV": "prod", "DB_NAME": "veqta_prod",
+                "DB_USER": "veqta_prod", "DJANGO_DEBUG": "0",
+                "DJANGO_TRUST_PROXY": "1", "DJANGO_SECURE_COOKIES": "0"}
+        self.assertNotEqual(self.settings_process(**prod), 0)
+        self.assertNotEqual(self.settings_process(
+            DJANGO_SECURE_COOKIES="1", DJANGO_TRUST_PROXY="0",
+        ), 0)
+
     def test_default_browser_server_uses_isolated_http_settings(self):
         self.assertEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="0",
             assertions="assert settings.DEBUG; assert not settings.SESSION_COOKIE_SECURE; "
