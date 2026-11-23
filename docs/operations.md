@@ -1,6 +1,6 @@
 # Эксплуатация и восстановление
 
-Обслуживайте по одному контуру. Пути, базы и роли указаны в [инструкции по установке](deployment.md#1-контуры-и-предпосылки). Перед обновлением запишите SHA и проверьте резервную копию. При восстановлении версия кода должна соответствовать схеме БД.
+Обслуживайте контуры по одному. Пути, базы и роли указаны в [серверной установке](deployment.md#1-контуры-и-предпосылки). Сопоставляйте записанный SHA с состоянием схемы и содержимым копии.
 
 ## Состояние и диагностика
 
@@ -9,128 +9,82 @@ sudo bash /opt/veqta-dev/scripts/server_verify.sh dev
 sudo bash /opt/veqta-prod/scripts/server_verify.sh prod
 sudo journalctl -u veqta-dev.service -n 80 --no-pager
 sudo journalctl -u veqta-prod.service -n 80 --no-pager
-sudo nginx -t
 ```
 
-Проверка сверяет базу и роль от имени приложения, затем Gunicorn, HTTPS и статику с правильным SNI. Ожидаются HTTP 200 и CSRF-cookie с атрибутом `Secure`. Если применение заблокировано другой операцией, дождитесь её завершения. Внешний DNS и права пользователя проверяйте отдельно.
+Verify показывает SHA checkout, проверяет подключение Runtime и состояние миграций под Migrator. Для Gunicorn, HTTPS и статики ожидается HTTP 200, а для страницы входа нужен CSRF-cookie с атрибутом `Secure`.
 
-## Отказ посередине установки
+## Применение выпуска
 
-| Место отказа | Состояние и безопасное продолжение |
-|---|---|
-| Clone или права checkout | Каталог может быть неполным. Проверьте владельца, `git status` и полный SHA. Если `.git` неисправен, сохраните каталог для анализа и выполните перенос в новый каталог; не продолжайте apply вслепую. |
-| Пользователь/роль/БД уже существует | Cold start намеренно останавливается. Установите, какой этап завершён; не удаляйте роль, базу или env ради повторного запуска. |
-| Env создан, роли ещё не созданы | Сохраните оба env и пароли; продолжите SQL только после проверки отсутствия соответствующих роли и БД. |
-| Одна или обе роли созданы, CREATE DATABASE не прошёл | Не повторяйте CREATE ROLE и не генерируйте новые пароли. Владельцем новой базы должен быть veqta_ENV_owner. После проверки владельца/свойств роли создайте только отсутствующую БД и выполните REVOKE/GRANT из соответствующего SQL. |
-| БД есть, initialize прервался | Посмотрите таблицы и `django_migrations`. При таблицах initialize повторно не запускается; после проверки контура используйте штатный `migrate --plan`, затем `migrate --noinput`. Не используйте `--fake`. |
-| pip/collectstatic | Операции идут на месте; venv/статика могут быть частично изменены. Верните согласованный SHA и повторите apply после устранения причины. При несовместимых зависимостях сначала остановите только службу выбранного приложения в согласованное окно. |
-| Ошибка nginx -t или конфликт целевого hostname | До reload живой Nginx не менялся; EXIT trap возвращает только файл/ссылку сайта. Найдите прежний hostname во всей конфигурации, включая conf.d; не отключайте соседние сайты автоматически. |
-| Ошибка restart, HTTP или БД после restart | Новый unit/venv/статика могли остаться. Trap восстанавливает сайт, а после отправленного reload пытается reload старой конфигурации. Ошибка этого reload сообщается явно. Проверьте состояние сервиса и полную конфигурацию прежде следующего apply. |
-| Certbot не получил сертификат | Временный HTTP-сайт остаётся для challenge и возвращает 503 на обычные URL. Проверьте DNS, A/AAAA, порт 80 и повторите только выпуск сертификата. |
+1. Для обоих checkout запишите `git rev-parse HEAD`, `git status --short` и активный unit. Если есть локальные изменения, сохраните отдельно индекс (`git diff --cached --binary`), рабочее дерево (`git diff --binary`) и незарегистрированные файлы. Храните их в закрытом каталоге. Сверьте серверные изменения `config/settings.py` и `workwear/migrations/0001_initial.py` до переключения SHA.
+2. Убедитесь, что действующие env используют канонические роли, адрес и порт совпадают для Runtime и Migrator, а `*-migrate.env` имеет права `root:root 0600`. Запишите PostgreSQL 19, владельцев и состояние миграций. Проверьте `0001_initial` и права журнала событий до применения. Используйте `veqta_root_django config.migration migrate --plan` из доверенного checkout выпуска.
+3. Снимите резервную копию DEV и проверьте её восстановление. Примените [проверенный SHA](deployment.md#7-обновление-существующего-контура-и-откат) в согласованное окно. Проверьте статус службы, вход, Admin, сохранение и завершение тестовой заявки, историю, ACL и счётчики рабочих данных.
+4. Для PROD согласуйте окно и разрешение на изменение схемы и перезапуск. Приостановите запись в выбранный контур на время подготовки точки возврата. Запишите SHA, сделайте свежую копию и проверьте её полным восстановлением. Остановите только выбранную службу на время переключения checkout и конфигурации. Убедитесь, что другие приложения продолжают обслуживаться.
+5. Выполните `server_apply.sh prod --migrate` и `server_verify.sh prod`. Сверьте `0002_database_acl`, права на объекты и отсутствие неприменённых миграций. Проверьте вход по HTTPS, Admin, реестр Workwear и историю существующей заявки. Сопоставьте счётчики с зафиксированной точкой до обновления и сохраните результаты с SHA каждого контура.
 
-Проверка административного состояния локального PostgreSQL не меняет данные:
+Чтобы получить план для выбранной базы без записи в неё, используйте служебную команду из доверенного checkout выпуска. Пример для PROD.
 
 ```bash
-sudo -u postgres psql -X -h /var/run/postgresql -p 5432 -U postgres -d postgres -c "SELECT rolname, rolsuper, rolcreatedb, rolcreaterole FROM pg_roles WHERE rolname IN ('veqta_dev','veqta_dev_owner','veqta_prod','veqta_prod_owner');"
-sudo -u postgres psql -X -h /var/run/postgresql -p 5432 -U postgres -d postgres -c "SELECT datname, pg_get_userbyid(datdba) AS owner FROM pg_database WHERE datname IN ('veqta_dev','veqta_prod');"
-```
-
-Если проверка прав кода не прошла, восстановите доверенный каталог root и виртуальное окружение. После прерванной чистой установки выполните только недостающие команды из `deploy/postgresql/<контур>.sql`, проверив фактическое состояние. План миграций доступен прикладной роли. Миграции запускает владелец через [server_apply.sh --migrate](deployment.md#7-обновление-существующего-контура-и-откат).
-
-```bash
-sudo -u veqta-prod bash -c '
+sudo bash -c '
     set -Eeuo pipefail
-    set -a; source /etc/veqta/prod.env; set +a
-    cd /opt/veqta-prod
-    .venv/bin/python manage.py migrate --plan
+    source /opt/veqta-prod/scripts/server_checks.sh
+    veqta_target prod
+    veqta_load_config
+    veqta_root_django config.migration migrate --plan
 '
 ```
 
-В примере выбран PROD. Для DEV возьмите его пользователя, путь и env.
+## Отказ посередине установки
+
+| Место отказа | Действие |
+|---|---|
+| Clone или права checkout | Проверьте владельца, статус Git и SHA. Сохраните неполный каталог для проверки, если потребуется новый checkout. |
+| Пользователь, роль или БД уже есть | Определите последний выполненный шаг. Сохраните действующие базы и закрытые настройки. |
+| Роли созданы, создание БД прервалось | Проверьте обе роли и свободное имя базы. Используйте имеющиеся пароли. Создайте отсутствующую базу с владельцем Migrator и примените `deploy/postgresql/access.sql` с параметрами её контура. |
+| База есть, миграция прервалась | Проверьте `django_migrations`, блокировки и применённую схему под Migrator. `0002_database_acl` выполняется транзакционно. После устранения причины проверьте план и повторите `migrate --noinput`, затем `migrate --check`. |
+| pip, статика или unit | Проверьте частично изменённые файлы, зависимости и состояние systemd. Выберите совместимый SHA до повторного запуска. |
+| Nginx, Gunicorn или HTTPS | Apply возвращает прежние файлы сайта при отказе. Если уже запрашивался reload, проверяет прежнюю конфигурацию и запрашивает его повторно. Проверьте журнал службы, соседние сайты и активную конфигурацию. |
+| Certbot | Проверьте DNS, A/AAAA и порт 80. Временный сайт обслуживает ACME и возвращает 503 для приложения до применения HTTPS. |
 
 ## Резервная копия и пробное восстановление
 
-Перед миграциями PROD проверьте точку восстановления. Резервные копии и env храните вне Git с ограниченным доступом. Следующий сеанс root обслуживает **один контур**; не меняйте `VEQTA_TARGET` во время работы:
+Скрипт снимает согласованный снимок базы под Migrator. Используйте выпускную версию скрипта из доверенного root-owned checkout. Запишите фактический SHA работающего приложения и схему на момент копирования. Храните оба env отдельно, с исходными ограничениями доступа.
 
 ```bash
-sudo -i
-set -Eeuo pipefail
-umask 077
-VEQTA_TARGET=prod
-# Для DEV до загрузки конфигурации выберите dev.
-[[ "$VEQTA_TARGET" == dev || "$VEQTA_TARGET" == prod ]]
-source "/opt/veqta-$VEQTA_TARGET/scripts/server_checks.sh"
-veqta_target "$VEQTA_TARGET"
-veqta_load_config
-veqta_clean_checkout
-veqta_check_database
-stamp=$(date -u +%Y%m%dT%H%M%SZ)
-backup_dir="/var/backups/veqta/$VEQTA_TARGET"
-install -d -o root -g root -m 0700 "$backup_dir"
-backup="$backup_dir/${DB_NAME}_$stamp.dump"
-[[ ! -e "$backup" ]]
-PGPASSWORD="$DB_PASSWORD" /usr/lib/postgresql/18/bin/pg_dump --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$DB_NAME" --format=custom --file="$backup"
-git -c safe.directory="$APP" -C "$APP" rev-parse HEAD > "$backup.sha"
-/usr/lib/postgresql/18/bin/pg_restore --list "$backup" >/dev/null
+target=prod
+sudo install -d -o root -g root -m 0700 "/var/backups/veqta/$target"
+sudo bash "/opt/veqta-$target/scripts/server_backup.sh" "$target" "/var/backups/veqta/$target"
 ```
 
-Не включайте shell xtrace: пароль передаётся в окружении процесса, а не в argv или SQL-текст. `pg_dump` получает согласованный снимок БД, но для точки возврата релиза согласуйте окно и зафиксируйте также неизменность кода/env. Оба env с ключом Django и разными паролями ролей сохраните отдельно от публичного кода с теми же ограничениями доступа.
+Проверка `pg_restore --list` подтверждает, что оглавление читается. Для точки возврата нужен полный прогон в отдельном PostgreSQL 19 с пустым целевым контуром. Проверьте SHA-256 файла, версии `psql` и `pg_restore`, адрес проверочного кластера и отсутствие в нём базы и ролей выбранного контура.
 
-Продолжите **в том же root-сеансе**. Пробное восстановление создаёт новую БД, рабочая БД не меняется:
+На проверочном кластере из корня проекта администратор PostgreSQL задаёт параметры подключения через окружение libpq или закрытый `PGPASSFILE`. Параметры `DB_PASSWORD` и `DB_MIGRATION_PASSWORD` передают новые разные пароли для проверочной копии в окружении дочернего процесса. Пример для PROD.
 
 ```bash
-restore_db="veqta_${VEQTA_TARGET}_restore_check_$stamp"
-runuser -u postgres -- /usr/lib/postgresql/18/bin/createdb -h /var/run/postgresql -p 5432 -U postgres --owner="${DB_NAME}_owner" --template=template0 "$restore_db"
-runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres -v restore_db="$restore_db" -v app_role="$DB_USER" <<'VEQTA_REVOKE'
-REVOKE ALL ON DATABASE :"restore_db" FROM PUBLIC;
-GRANT CONNECT ON DATABASE :"restore_db" TO :"app_role";
-VEQTA_REVOKE
-(
-    set -a; source "$MIGRATION_CONFIG"; set +a
-    [[ "$DB_USER" == "veqta_${VEQTA_TARGET}_owner" ]]
-    PGPASSWORD="$DB_PASSWORD" /usr/lib/postgresql/18/bin/pg_restore --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$restore_db" --no-owner --exit-on-error "$backup"
-)
-PGPASSWORD="$DB_PASSWORD" psql -X -v ON_ERROR_STOP=1 --host="$DB_HOST" --port="$DB_PORT" --username="$DB_USER" --dbname="$restore_db" <<'VEQTA_RESTORE_CHECK'
-SELECT count(*) AS migrations FROM django_migrations;
-SELECT count(*) AS employees FROM workwear_employee;
-SELECT count(*) AS requests FROM workwear_request;
-SELECT count(*) AS events FROM workwear_workwearevent;
-SELECT count(*) AS workwear_triggers FROM pg_trigger WHERE tgname LIKE 'ww_%';
-VEQTA_RESTORE_CHECK
+psql -Xw -d postgres -v roles_only=1 -f deploy/postgresql/prod.sql
+pg_restore --no-password --create --exit-on-error --dbname=postgres "$VEQTA_RESTORE_ARCHIVE"
 ```
 
-Восстановление выполняет владелец, а проверочные SELECT выполняет прикладная роль. `--no-owner` назначает объекты подключённому владельцу; ACL и default privileges сохраняются. Не используйте `--no-privileges`: приложение потеряет свои grants. Роли должны существовать под теми же каноническими именами; пароль владельца не передаётся работающей службе. Не используйте `--disable-triggers`.
+В режиме `roles_only` bootstrap создаёт две канонические роли. `pg_restore --create` восстанавливает каноническую базу, её владельца, ACL и настройки. Архив прикладной базы не содержит глобальных ролей кластера. Сохраняйте владельцев и ACL при восстановлении. Защитные триггеры остаются включёнными.
 
-Сверьте счётчики с ожидаемым снимком; один существующий `.dump` недостаточен. Схема Cold Start содержит 13 `ww_`-триггеров; при изменении схемы сравнивайте с соответствующим коммитом, а не фиксированной цифрой. Guard приложения не разрешает запускать обычный VEQTA на произвольно названной БД: для полной прикладной проверки восстановите копию в отдельный изолированный кластер с каноническим именем базы. Не ослабляйте `require_target` ради проверки.
+Сверьте исходную точку и копию по списку миграций, владельцам, таблицам, последовательностям, функциям, ACL, правам по умолчанию и счётчикам данных. Пример инвентаризации выбранной базы из административного подключения.
 
-Если проверка неуспешна, сохраните исходную копию/журнал и устраните причину; не переключайте рабочее приложение на непроверенное восстановление. Удаление тестовой копии — только после проверки её точного имени, никогда рабочей БД.
+```sql
+SELECT datname, datdba::regrole, datacl FROM pg_database WHERE datname = current_database();
+SELECT app, name FROM django_migrations ORDER BY app, name;
+SELECT tgname, tgenabled FROM pg_trigger WHERE NOT tgisinternal AND tgname LIKE 'ww_%' ORDER BY tgname;
+SELECT count(*) FROM workwear_request;
+SELECT count(*) FROM workwear_workwearevent;
+\dn+ public
+\dp public.*
+\ddp
+```
+
+Проверьте вход и реестр Workwear через Runtime на изолированном экземпляре с записанным SHA. Проверьте отказ доступа Runtime к `django_migrations` и запрет изменения или удаления истории. Для автоматического прогона с синтетическими данными используйте [проверку выпуска](testing.md).
 
 ## Возврат рабочей БД из проверенной копии
 
-Это ручное восстановление в согласованное окно после успешной проверки выше, а не часть обычного apply. Остановится только выбранная служба VEQTA. PostgreSQL и Nginx продолжают работать. Предыдущая рабочая база **сохраняется** под другим именем, не удаляется.
-
-В том же root-сеансе проверьте `VEQTA_TARGET`, `DB_NAME`, `DB_USER`, `restore_db`, путь `backup` и SHA из `backup.sha`. Для более ранней копии сначала восстановите её в новую проверочную БД по предыдущему разделу и задайте соответствующие переменные. Не используйте пример как автоматический откат произвольной БД.
-
-```bash
-[[ "$DB_NAME" == "veqta_$VEQTA_TARGET" && "$DB_USER" == "$DB_NAME" ]]
-[[ "$restore_db" == "veqta_${VEQTA_TARGET}_restore_check_"* ]]
-restore_revision=$(cat "$backup.sha")
-[[ "$restore_revision" =~ ^[0-9a-f]{40}$ ]]
-git -c safe.directory="$APP" -C "$APP" cat-file -e "${restore_revision}^{commit}"
-veqta_clean_checkout
-retained_db="veqta_${VEQTA_TARGET}_before_restore_$(date -u +%Y%m%dT%H%M%SZ)"
-systemctl stop "$SERVICE"
-runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres -v working="$DB_NAME" -v restored="$restore_db" -v retained="$retained_db" <<'VEQTA_SWITCH'
-SELECT pg_terminate_backend(pid) FROM pg_stat_activity
-WHERE datname IN (:'working', :'restored') AND pid <> pg_backend_pid();
-ALTER DATABASE :"working" RENAME TO :"retained";
-ALTER DATABASE :"restored" RENAME TO :"working";
-VEQTA_SWITCH
-git -c safe.directory="$APP" -C "$APP" checkout --detach "$restore_revision"
-veqta_check_trusted_code
-bash "$APP/scripts/server_apply.sh" "$VEQTA_TARGET"
-bash "$APP/scripts/server_verify.sh" "$VEQTA_TARGET"
-exit
-```
-
-Во время переключения другие операторы не должны менять выбранные БД или запускать службу. Если второе переименование не прошло, оставьте службу остановленной, проверьте имена в `pg_database` и верните сохранённой базе каноническое имя; не удаляйте ни одну из копий. Если оба переименования прошли, а старый код не стартует, данные всё ещё сохранены в обеих базах: проверьте совместимость SHA/схемы и используйте тот же ручной порядок для возврата. Не применяйте новые миграции автоматически к восстановленной базе.
+1. Согласуйте остановку выбранной службы и точку восстановления. Сохраните состояние отказавшего контура и записи после выбранной точки копирования для последующей сверки.
+2. Подготовьте отдельный кластер PostgreSQL 19 по процедуре выше. Остановите только выбранную службу VEQTA. Сохраните старый checkout, env и рабочую БД.
+3. Верните SHA из записи о копии. В обоих env выбранного контура укажите адрес, порт и TLS нового кластера. Укажите пароль Runtime в env службы и пароль Migrator в защищённом файле миграций.
+4. Сверьте план миграций, владельцев, ACL и счётчики с проверенной копией. Обычный apply запускайте только при совместимых версии кода и состоянии схемы. Предыдущая версия server apply может требовать доступ Runtime к журналу миграций. Для такой версии используйте проверенный запуск соответствующего unit после сборки статики и проверки зависимостей без изменения ACL.
+5. Поднимите службу и проверьте HTTPS, вход, Admin и Workwear. При сбое оставьте запись остановленной. Сверьте SHA, оба env и состояние сохранённых баз перед повторным переключением.

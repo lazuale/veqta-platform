@@ -13,7 +13,8 @@ VEQTA — проект Django с отдельной базой PostgreSQL для
 | `workwear/api.py`, `workwear/ui_api.py` | HTTP-контракт, сериализация, параметры и ошибки |
 | `workwear/importers/directories_1c.py`, `workwear/importers/acceptance.py` | Разбор CSV и транзакционная публикация справочника |
 | `workwear/management/commands/` | Инициализация пустой схемы и загрузка данных |
-| `workwear/migrations/0001_initial.py` | Окончательная схема, составные FK и триггеры |
+| `workwear/migrations/0001_initial.py` | Схема, составные FK и триггеры |
+| `workwear/migrations/0002_database_acl.py` | Права прикладной роли на служебные и защищённые объекты |
 
 ## Модели и снимки
 
@@ -52,7 +53,9 @@ PostgreSQL заполняет `snapshot_*` при вставке, включая
 
 Начальная миграция Workwear создаёт 10 функций с `SECURITY INVOKER`, 13 триггеров и два составных FK. SQL-контроль целостности действует на любые записи. Права конкретного пользователя проверяет сервис Django.
 
-В каждом контуре `veqta_ENV_owner` владеет схемой и применяет миграции. Прикладная роль `veqta_ENV` получает права на соединение, схему, данные, последовательности и функции. Права по умолчанию задаются до миграций. Для владельца глобально отозван `EXECUTE` у `PUBLIC`; владельцу DEV разрешён `CREATEDB` для тестов. [Развёртывание и права ролей](deployment.md).
+В каждом контуре `svc_platform_<контур>_migrator` владеет базой и объектами схемы. `config.migration` проверяет базу, роль входа и действующую роль PostgreSQL до работы со схемой. Gunicorn использует `config.settings` и роль `svc_platform_<контур>`.
+
+По умолчанию Runtime получает `SELECT, INSERT, UPDATE, DELETE` обычных таблиц, `USAGE` последовательностей и `USAGE` схемы. `django_migrations` доступна Migrator. Для `workwear_workwearevent` у Runtime есть `SELECT` и `INSERT`. Изменение и удаление событий запрещены также триггерами, включая `TRUNCATE`. Функции-триггеры выполняются при записи. Права на прямой вызов новых функций выдаются явно по необходимости. [Развёртывание и права ролей](deployment.md).
 
 ## HTTP API
 

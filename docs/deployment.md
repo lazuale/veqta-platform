@@ -1,15 +1,15 @@
 # Серверное развёртывание VEQTA
 
-Чистая установка создаёт новую базу PostgreSQL; её имя и роли должны быть свободны. Workwear устанавливается одной начальной миграцией. Инструкция подходит для новых контуров и их последующих обновлений. Старую схему нужно переносить отдельно с проверкой данных.
+Чистая установка создаёт базу PostgreSQL, схему Workwear и права ролей. Для действующего контура с применённой `0001_initial` переходите к [обновлению](#7-обновление-существующего-контура-и-откат).
 
 ## Подготовка сервера
 
-Базовый стек проекта — Ubuntu 26.04.1, Python 3.14 с venv, PostgreSQL 18, Gunicorn, Nginx и systemd. Версии зависимостей приложения закреплены в `requirements.lock`. На чистой Ubuntu установите необходимые пакеты:
+Базовый стек проекта — Ubuntu 26.04.1, Python 3.14 с venv, PostgreSQL 19, Gunicorn, Nginx и systemd. Версии зависимостей приложения закреплены в `requirements.lock`. Подключите [репозиторий пакетов PostgreSQL для Ubuntu](https://www.postgresql.org/download/linux/ubuntu/) и установите необходимые пакеты.
 
 ```bash
 sudo apt-get update
 sudo apt-get install --no-install-recommends ca-certificates git curl openssl nginx \
-  python3.14 python3.14-venv postgresql-18 postgresql-client-18 util-linux coreutils mawk certbot
+  python3.14 python3.14-venv postgresql-19 postgresql-client-19 util-linux coreutils mawk certbot
 sudo systemctl enable --now postgresql nginx certbot.timer
 ```
 
@@ -24,7 +24,7 @@ sudo nginx -t
 sudo systemctl is-active postgresql nginx
 ```
 
-Для нестандартного `pg_hba.conf` разрешите прикладным ролям и владельцам доступ к их базам с loopback. Владельцу DEV нужны подключения к служебной `postgres` и одноразовой `test_veqta_dev` для тестов. Правила доступа других систем сохраняйте. [Пакеты PostgreSQL для Ubuntu](https://www.postgresql.org/download/linux/ubuntu/).
+В `pg_hba.conf` разрешите вход каждой роли в её базу с loopback по SCRAM. Учитывайте порядок правил и сохраняйте настройки других приложений PostgreSQL. Интеграционный прогон использует отдельный кластер.
 
 ## 1. Контуры и предпосылки
 
@@ -34,14 +34,15 @@ sudo systemctl is-active postgresql nginx
 | Checkout, Git и venv: root:root | `/opt/veqta-dev` | `/opt/veqta-prod` |
 | Linux-пользователь / группа | `veqta-dev` | `veqta-prod` |
 | Env, root:группа 0640 | `/etc/veqta/dev.env` | `/etc/veqta/prod.env` |
-| База / прикладная роль PostgreSQL | `veqta_dev` | `veqta_prod` |
-| Владелец схемы / миграции | `veqta_dev_owner` | `veqta_prod_owner` |
+| База PostgreSQL | `veqta_dev` | `veqta_prod` |
+| Runtime | `svc_platform_dev` | `svc_platform_prod` |
+| Migrator, владелец БД и схемы | `svc_platform_dev_migrator` | `svc_platform_prod_migrator` |
 | Env миграций, root:root 0600 | `/etc/veqta/dev-migrate.env` | `/etc/veqta/prod-migrate.env` |
 | Gunicorn | `127.0.0.1:8767` | `127.0.0.1:8765` |
 | Статика: root:www-data, чтение Nginx | `/var/www/veqta/dev-static` | `/var/www/veqta/prod-static` |
 | Systemd | `veqta-dev.service` | `veqta-prod.service` |
 
-Для серверов со стандартизированными именами ролей `DB_USER` в файле приложения может быть `svc_platform_dev` или `svc_platform_prod` по контуру. Для миграций используйте соответственно `svc_platform_dev_migrator` и `svc_platform_prod_migrator`. Владелец базы, владелец схемы и выданные им права должны соответствовать выбранным ролям. Базы по-прежнему называются `veqta_dev` и `veqta_prod`.
+Bootstrap отзывает доступ `PUBLIC` к базам и схеме `public` каждого контура. Runtime получает только прикладные права. Для служебных команд используется отдельный файл окружения Migrator.
 
 Перед Cold Start проверьте, что каталоги, роли, базы и домены свободны. Для работающего контура используйте [обновление](#7-обновление-существующего-контура-и-откат).
 
@@ -91,9 +92,9 @@ if id "$actor" >/dev/null 2>&1; then
     echo 'STOP: пользователь уже существует; проверьте частичную установку по operations.md' >&2
     exit 1
 fi
-existing=$(runuser -u postgres -- psql -X -At -h /var/run/postgresql -p 5432 -U postgres -d postgres -v target="$database" <<'VEQTA_SQL'
+existing=$(runuser -u postgres -- psql -X -At -h /var/run/postgresql -p 5432 -U postgres -d postgres -v target="$database" -v runtime_role="svc_platform_$target" <<'VEQTA_SQL'
 SELECT EXISTS(SELECT FROM pg_database WHERE datname = :'target')
-    OR EXISTS(SELECT FROM pg_roles WHERE rolname IN (:'target', :'target' || '_owner'));
+    OR EXISTS(SELECT FROM pg_roles WHERE rolname IN (:'runtime_role', :'runtime_role' || '_migrator'));
 VEQTA_SQL
 )
 [[ "$existing" == f ]] || { echo 'STOP: роль или база уже существует'; exit 1; }
@@ -116,10 +117,10 @@ install -o root -g root -m 0600 "$app/.env.$target-migrate" "$migration_config"
 rm -- "$app/.env.$target" "$app/.env.$target-migrate"
 (
     set -a; source "$migration_config"; set +a
-    export DB_OWNER_PASSWORD=$DB_PASSWORD
+    export DB_MIGRATION_PASSWORD=$DB_PASSWORD
     set -a; source "$config"; set +a
     # Оба пароля передаются psql только в окружении этого дочернего процесса.
-    runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres < "$app/deploy/postgresql/$target.sql"
+    runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres -f "$app/deploy/postgresql/$target.sql"
 )
 python3.14 -m venv "$app/.venv"
 "$app/.venv/bin/python" -m pip install --no-cache-dir --require-hashes -r "$app/requirements.lock"
@@ -129,7 +130,7 @@ runuser -u "$actor" -- test -x "$app/.venv/bin/python"
 veqta_target "$target"
 veqta_check_trusted_code
 veqta_load_config
-veqta_owner_django veqta_initialize --environment "$target" --database-name "$database"
+veqta_root_django config.migration veqta_initialize --environment "$target" --database-name "$database"
 VEQTA_BOOTSTRAP
 ```
 
@@ -197,14 +198,15 @@ VEQTA_RENEW
 
 ## 6. Администратор, данные и приёмка
 
-Для выбранного контура создайте администратора штатной интерактивной командой; пароль не передаётся в командной строке:
+Создайте первого администратора штатной командой. `createsuperuser` проверяет историю миграций и работает с настройками Migrator.
 
 ```bash
-sudo -u "veqta-$VEQTA_TARGET" bash -c '
+sudo bash -c '
     set -Eeuo pipefail
-    set -a; source "/etc/veqta/$1.env"; set +a
-    cd "/opt/veqta-$1"
-    exec .venv/bin/python manage.py createsuperuser
+    source "/opt/veqta-$1/scripts/server_checks.sh"
+    veqta_target "$1"
+    veqta_load_config
+    veqta_root_django config.migration createsuperuser
 ' bash "$VEQTA_TARGET"
 ```
 
@@ -212,7 +214,9 @@ sudo -u "veqta-$VEQTA_TARGET" bash -c '
 
 ## 7. Обновление существующего контура и откат
 
-Получите проверенный SHA в каталог оператора, как в разделе 2. Для каждого контура проверьте чистоту Git и перенесите коммит. Служебному пользователю GitHub-токен не нужен:
+До смены checkout зафиксируйте SHA, сохраните локальные правки и подготовьте проверенную копию БД по [порядку применения выпуска](operations.md#применение-выпуска). Особое внимание уделите `config/settings.py` и `workwear/migrations/0001_initial.py`. Сравните изменения с выпуском до переноса коммита.
+
+Получите проверенный SHA в каталог оператора, как в разделе 2. Служебному пользователю GitHub-токен не нужен.
 
 ```bash
 sudo bash -s -- "$VEQTA_SOURCE" "$VEQTA_REVISION" "$VEQTA_TARGET" <<'VEQTA_UPDATE'
@@ -251,18 +255,18 @@ VEQTA_UPDATE
 
 Перед apply проверьте выбранный SHA и успешное завершение блока. При сбое сохраните checkout и выясните причину по [руководству эксплуатации](operations.md).
 
-До изменения схемы создайте [копию и проверьте восстановление](operations.md#резервная-копия-и-пробное-восстановление). Затем примените выбранный SHA:
+После проверки копии и согласования окна примените выбранный SHA.
 
 ```bash
 sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_apply.sh" "$VEQTA_TARGET" --migrate
 sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_verify.sh" "$VEQTA_TARGET"
 ```
 
-Добавляйте `--migrate`, когда в проверенном плане есть миграции. При обновлении согласуйте окно перезапуска. Возврат к предыдущему SHA с обычным apply возможен при совместимой схеме. Для полного отката используйте [восстановление проверенной копии](operations.md#возврат-рабочей-бд-из-проверенной-копии).
+Apply выполняет `makemigrations --check --dry-run`, `migrate --plan` и `migrate --check` под Migrator. Флаг `--migrate` разрешает применить найденные миграции. При наличии `0001_initial` обновление применяет `0002_database_acl` без переноса данных. Возврат к предыдущему SHA допустим после проверки его совместимости со схемой. [Порядок восстановления](operations.md#возврат-рабочей-бд-из-проверенной-копии).
 
 ## Настройки и права процессов
 
-`scripts/create_config.py --environment dev|prod --hostname DNS` создаёт два файла с отдельными паролями. Шаблоны приложения находятся в `deploy/dev.env.example` и `deploy/prod.env.example`. Runtime получает только файл приложения. Владелец БД используется для явной операции миграции из доверенного root-owned кода и очищенного окружения.
+`scripts/create_config.py --environment dev|prod --hostname DNS` создаёт два файла с отдельными паролями. Шаблоны приложения находятся в `deploy/dev.env.example` и `deploy/prod.env.example`. Runtime получает только файл приложения. Служебный запуск `veqta_root_django config.migration` читает защищённый env от root и проверяет фактический сеанс PostgreSQL. `veqta_initialize` предназначена для новой пустой базы. В рабочем контуре применяйте `migrate`.
 
 | Переменная | Назначение |
 |---|---|

@@ -4,10 +4,10 @@
 
 ## Создайте локальную базу
 
-В Ubuntu пакеты `postgresql-18` и `postgresql-client-18` устанавливают утилиты в `/usr/lib/postgresql/18/bin`. Для установки с другим путём задайте `VEQTA_PG_BIN` с каталогом исполняемых файлов. Все три команды должны показать PostgreSQL 18.
+В Ubuntu пакеты `postgresql-19` и `postgresql-client-19` устанавливают утилиты в `/usr/lib/postgresql/19/bin`. Для установки с другим путём задайте `VEQTA_PG_BIN` с каталогом исполняемых файлов. Все три команды должны показать PostgreSQL 19.
 
 ```bash
-export PATH="${VEQTA_PG_BIN:-/usr/lib/postgresql/18/bin}:$PATH"
+export PATH="${VEQTA_PG_BIN:-/usr/lib/postgresql/19/bin}:$PATH"
 initdb --version
 pg_ctl --version
 psql --version
@@ -28,13 +28,13 @@ pg_ctl -D "$VEQTA_PG/data" -l "$VEQTA_PG/postgres.log" \
 ```
 
 ```bash
-export VEQTA_ENV=dev DB_NAME=veqta_dev DB_USER=veqta_dev
+export VEQTA_ENV=dev DB_NAME=veqta_dev DB_USER=svc_platform_dev
 export DJANGO_DEBUG=1 DJANGO_TRUST_PROXY=0 DJANGO_SECURE_COOKIES=0
 export DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,testserver
 export DJANGO_SECRET_KEY="$(python -c 'from secrets import token_urlsafe; print(token_urlsafe(64))')"
 export DB_PASSWORD="$(python -c 'from secrets import token_urlsafe; print(token_urlsafe(32))')"
-export DB_OWNER_PASSWORD="$(python -c 'from secrets import token_urlsafe; print(token_urlsafe(32))')"
-PGPASSWORD="$VEQTA_PG_PASSWORD" psql -X -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres \
+VEQTA_MIGRATOR_PASSWORD="$(python -c 'from secrets import token_urlsafe; print(token_urlsafe(32))')"
+PGPASSWORD="$VEQTA_PG_PASSWORD" DB_MIGRATION_PASSWORD="$VEQTA_MIGRATOR_PASSWORD" psql -X -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres \
   -f deploy/postgresql/dev.sql && unset VEQTA_PG_PASSWORD
 ```
 
@@ -43,11 +43,14 @@ SQL создаёт `veqta_dev` и две роли. Схему создаёт в�
 ## Создайте схему и администратора
 
 ```bash
-DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
+(
+  export DB_USER=svc_platform_dev_migrator DB_PASSWORD="$VEQTA_MIGRATOR_PASSWORD"
+  export DJANGO_SETTINGS_MODULE=config.migration
   python manage.py veqta_initialize --environment dev --database-name veqta_dev
+  python manage.py migrate --check
+  python manage.py createsuperuser
+)
 python manage.py check
-python manage.py migrate --check
-python manage.py createsuperuser
 ```
 
 ## Примите учебный справочник
@@ -84,8 +87,18 @@ python manage.py workwear_import_1c "$VEQTA_DEMO/source.tar.gz" --environment de
 
 ## Запустите приложение
 
+Локальный WSGI-сервер использует Runtime и раздаёт статику через Django. Для сетевого запуска используйте [Gunicorn и Nginx](deployment.md).
+
 ```bash
-python manage.py runserver 127.0.0.1:8000
+python - <<'PY'
+from wsgiref.simple_server import make_server
+
+from config.wsgi import application
+from django.contrib.staticfiles.handlers import StaticFilesHandler
+
+with make_server("127.0.0.1", 8000, StaticFilesHandler(application)) as server:
+    server.serve_forever()
+PY
 ```
 
 Войдите созданной учётной записью, затем откройте Django Admin и Workwear. [Вход](http://127.0.0.1:8000/login/) · [Django Admin](http://127.0.0.1:8000/admin/) · [Workwear](http://127.0.0.1:8000/workwear/).
@@ -98,11 +111,10 @@ python manage.py runserver 127.0.0.1:8000
 
 ## Запустите тесты
 
-Остановите Django сочетанием Ctrl+C. В той же оболочке выполните:
+Остановите локальный сервер сочетанием Ctrl+C. Полный прогон создаёт собственные одноразовые кластеры и проверяет обе роли.
 
 ```bash
-DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
-  python manage.py test tests --noinput
+bash tests/postgresql_release.sh
 ```
 
-Django создаст и удалит отдельную `test_veqta_dev`. [Полный прогон, нагрузка и браузеры](testing.md). Когда кластер больше не нужен, остановите его командой `pg_ctl -D "$VEQTA_PG/data" -m fast -w stop`. Файлы кластера остаются по пути `$VEQTA_PG`.
+Когда учебный кластер больше не нужен, остановите его командой `pg_ctl -D "$VEQTA_PG/data" -m fast -w stop`. Его файлы останутся по пути `$VEQTA_PG`. [Полный прогон, нагрузка и браузеры](testing.md).
