@@ -216,17 +216,19 @@ def resolve(request):
     if "request_id" in obj:
         require_permission(request, "view_request")
     latest = latest_import()
-    already = set()
+    present = obj.get("present_employee_ids", [])
+    if not isinstance(present, list) or len(present) > MAX_REQUEST_MEMBERS or any(
+        type(employee_id) is not int or employee_id <= 0 for employee_id in present
+    ):
+        raise ValidationError("Недопустимый список сотрудников черновика")
+    already = set(present)
     if "request_id" in obj:
         request_id = positive_int(obj["request_id"], "request_id")
         parent = Request.objects.get(pk=request_id)
         if parent.organization_id != org:
             raise ValidationError("Организация заявки не совпадает с запросом")
-        already.update(RequestEmployee.objects.filter(request_id=request_id).values_list("employee_id", flat=True))
-    staged = obj.get("present_employee_ids", [])
-    if not isinstance(staged, list) or len(staged) > 1000 or any(type(x) is not int or x <= 0 for x in staged):
-        raise ValidationError("Недопустимый список сотрудников черновика")
-    already.update(staged)
+        if "present_employee_ids" not in obj:
+            already.update(RequestEmployee.objects.filter(request_id=request_id).values_list("employee_id", flat=True))
     return respond({"import_id": latest.pk if latest else None, "results": resolve_many(
         lines=lines,
         organization_id=org,

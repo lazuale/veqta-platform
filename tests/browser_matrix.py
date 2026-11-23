@@ -447,7 +447,24 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             expect(page.locator('.vq-modal')).to_have_count(0)
             expect(page.locator('tr[data-row]')).to_have_count(4)
             assert database_call(lambda: persisted(request_id)) == saved
-            return {'statuses':statuses,'ambiguous_chosen_by_id':True,'partial_search':True,'tab_selection_preserved':True,'cancelled_read_unchanged':True}
+            # Массовый подбор учитывает удаление из локального черновика.
+            person = data['people'][0]
+            page.locator(f'[data-check="{person}"]').check()
+            page.locator('[data-action="remove-selected"]').click()
+            page.locator('[data-action="apply-remove"]').click()
+            expect(page.locator('tr[data-row]')).to_have_count(3)
+            page.locator('[data-action="add"]').first.click()
+            page.locator('#bulkText').fill('RC-0000')
+            page.locator('[data-action="check-bulk"]').click()
+            expect(page.locator('[data-action="apply-bulk"]')).to_be_enabled()
+            page.locator('[data-action="apply-bulk"]').click()
+            expect(page.locator('tr[data-row]')).to_have_count(4)
+            warning.click()
+            expect(warning).to_have_attribute('aria-pressed', 'true')
+            expect(page.locator('[data-action="save"]')).to_be_disabled()
+            assert database_call(lambda: persisted(request_id)) == saved
+            return {'statuses':statuses,'ambiguous_chosen_by_id':True,'partial_search':True,
+                    'tab_selection_preserved':True,'cancelled_read_unchanged':True,'local_removal_resolved':True}
 
         def unsaved_navigation():
             request_id=data['extra']['lookup']

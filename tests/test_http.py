@@ -317,6 +317,25 @@ class HttpTests(TestCase):
                 response = self.client.post(url, invalid, content_type="application/json")
                 self.assertIn(response.status_code, {400, 404})
 
+    def test_bulk_search_respects_local_removal_before_save(self):
+        employee = self.people[0]
+        draft = services.create_request(organization_id=employee.organization_id, actor=self.actor)
+        services.add_employee(request_id=draft.pk, employee_id=employee.pk,
+                              actor=self.actor, expected_version=draft.version)
+        data = {"request_id": draft.pk, "organization_id": employee.organization_id,
+                "lines": [employee.personnel_number, employee.personnel_number]}
+        url = "/workwear/api/ui/resolve/"
+        for present, expected in (
+            ({}, ["included", "included"]),
+            ({"present_employee_ids": []}, ["matched", "duplicate"]),
+            ({"present_employee_ids": [employee.pk]}, ["included", "included"]),
+        ):
+            with self.subTest(present=present):
+                response = self.client.post(url, data | present, content_type="application/json")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual([row["status"] for row in response.json()["results"]], expected)
+        self.assertEqual(draft.members.count(), 1)
+
     def test_repeat_scan_rejects_foreign_employee_and_malformed_pairs(self):
         org = self.people[0].organization
         req = services.create_request(organization_id=org.pk, actor=self.actor)
