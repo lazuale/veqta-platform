@@ -347,6 +347,28 @@ class InstallationConfigurationTests(unittest.TestCase):
     def test_service_configuration_rejects_owner_role(self):
         self.assertNotEqual(self.load({"DB_USER": "veqta_prod_owner"}).returncode, 0)
 
+    def test_service_configuration_accepts_server_role(self):
+        result = self.load({"DB_USER": "svc_platform_prod"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_service_configuration_rejects_server_migrator(self):
+        self.assertNotEqual(self.load({"DB_USER": "svc_platform_prod_migrator"}).returncode, 0)
+
+    def test_migration_configuration_accepts_only_target_migrator(self):
+        self.assertEqual(self.generate().returncode, 0)
+        config = self.project / ".env.prod-migrate"
+        original = config.read_text()
+        self.script("stat", "#!/bin/sh\necho root:root:600\n")
+        command = ('veqta_target prod; DB_HOST=127.0.0.1; DB_PORT=5432; DB_SSLMODE=prefer; '
+                   'MIGRATION_CONFIG="$VEQTA_TEST_DIR/project/.env.prod-migrate"; veqta_load_migration_config')
+        for role, accepted in (("svc_platform_prod_migrator", True),
+                               ("svc_platform_prod", False),
+                               ("svc_platform_dev_migrator", False)):
+            with self.subTest(role=role):
+                config.write_text(original.replace("DB_USER=veqta_prod_owner\n", f"DB_USER={role}\n"))
+                result = self.shell(command)
+                self.assertEqual(result.returncode == 0, accepted, result.stderr)
+
     def test_migration_configuration_rejects_other_postgresql_address(self):
         self.assertEqual(self.generate().returncode, 0)
         config = self.project / ".env.prod-migrate"

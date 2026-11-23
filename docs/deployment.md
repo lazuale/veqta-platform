@@ -41,6 +41,8 @@ sudo systemctl is-active postgresql nginx
 | Статика: root:www-data, чтение Nginx | `/var/www/veqta/dev-static` | `/var/www/veqta/prod-static` |
 | Systemd | `veqta-dev.service` | `veqta-prod.service` |
 
+Для серверов со стандартизированными именами ролей `DB_USER` в файле приложения может быть `svc_platform_dev` или `svc_platform_prod` по контуру. Для миграций используйте соответственно `svc_platform_dev_migrator` и `svc_platform_prod_migrator`. Владелец базы, владелец схемы и выданные им права должны соответствовать выбранным ролям. Базы по-прежнему называются `veqta_dev` и `veqta_prod`.
+
 Перед Cold Start проверьте, что каталоги, роли, базы и домены свободны. Для работающего контура используйте [обновление](#7-обновление-существующего-контура-и-откат).
 
 ## 2. Получение и фиксация исходников — оператор без sudo

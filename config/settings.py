@@ -3,6 +3,8 @@ import os
 from pathlib import Path
 from django.core.exceptions import ImproperlyConfigured
 
+from .database import database_role_names
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -27,9 +29,10 @@ if VEQTA_ENV not in {'dev', 'prod'}:
     raise ImproperlyConfigured('VEQTA_ENV должна быть dev или prod')
 IS_PRODUCTION = VEQTA_ENV == 'prod'
 EXPECTED_DATABASE = f'veqta_{VEQTA_ENV}'
-if required('DB_NAME') != EXPECTED_DATABASE or required('DB_USER') not in {
-    EXPECTED_DATABASE, f'{EXPECTED_DATABASE}_owner',
-}:
+_database_user = required('DB_USER')
+if required('DB_NAME') != EXPECTED_DATABASE or _database_user not in (
+    *database_role_names(VEQTA_ENV), *database_role_names(VEQTA_ENV, owner=True),
+):
     raise ImproperlyConfigured('Контур, имя БД и роль подключения не совпадают')
 SECRET_KEY = required('DJANGO_SECRET_KEY')
 if len(SECRET_KEY) < 50 or SECRET_KEY.startswith('django-insecure-'):
@@ -70,7 +73,7 @@ WSGI_APPLICATION = 'config.wsgi.application'
 ASGI_APPLICATION = 'config.asgi.application'
 DATABASES = {'default': {
     'ENGINE': 'django.db.backends.postgresql', 'NAME': EXPECTED_DATABASE,
-    'USER': required('DB_USER'), 'PASSWORD': required('DB_PASSWORD'),
+    'USER': _database_user, 'PASSWORD': required('DB_PASSWORD'),
     'HOST': required('DB_HOST'), 'PORT': required('DB_PORT'),
     'CONN_MAX_AGE': 60 if IS_PRODUCTION else 0, 'CONN_HEALTH_CHECKS': True,
     'OPTIONS': {'sslmode': os.environ.get('DB_SSLMODE', 'prefer')},

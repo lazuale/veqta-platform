@@ -34,6 +34,15 @@ class ConfigurationTests(SimpleTestCase):
         self.assertNotEqual(self.settings_process(DB_USER="veqta_prod_owner"), 0)
         self.assertNotEqual(self.settings_process(DB_USER="postgres"), 0)
 
+    def test_server_roles_are_bound_to_their_environment(self):
+        for contour, other in (("dev", "prod"), ("prod", "dev")):
+            changes = {"VEQTA_ENV": contour, "DB_NAME": f"veqta_{contour}",
+                       "DJANGO_DEBUG": "0", "DJANGO_TRUST_PROXY": "1"}
+            for suffix in ("", "_migrator"):
+                with self.subTest(contour=contour, suffix=suffix):
+                    self.assertEqual(self.settings_process(DB_USER=f"svc_platform_{contour}{suffix}", **changes), 0)
+                    self.assertNotEqual(self.settings_process(DB_USER=f"svc_platform_{other}{suffix}", **changes), 0)
+
     def test_database_and_role_must_match_environment(self):
         for changes in ({"DB_NAME": "veqta_prod"}, {"DB_USER": "veqta_prod"}, {"VEQTA_ENV": "unknown"}):
             with self.subTest(changes=changes):
@@ -111,6 +120,22 @@ class RuntimeGuardTests(SimpleTestCase):
             db.cursor.return_value.__enter__.return_value.fetchone.return_value = ("veqta_prod", "veqta_dev")
             with self.assertRaisesRegex(CommandError, "PostgreSQL подключила команду"):
                 require_target("dev", "veqta_dev")
+
+    def test_database_target_checks_configured_server_role_and_operation(self):
+        with patch("config.database.settings") as settings, patch("config.database.connection") as db:
+            settings.VEQTA_ENV = "dev"
+            db.vendor = "postgresql"
+            cursor = db.cursor.return_value.__enter__.return_value
+            for role, owner in (("svc_platform_dev", False), ("svc_platform_dev_migrator", True)):
+                with self.subTest(role=role):
+                    db.settings_dict = {"NAME": "veqta_dev", "USER": role}
+                    cursor.fetchone.return_value = ("veqta_dev", role)
+                    require_target("dev", "veqta_dev", owner=owner)
+                    with self.assertRaisesRegex(CommandError, "Имя базы или роль"):
+                        require_target("dev", "veqta_dev", owner=not owner)
+                    cursor.fetchone.return_value = ("veqta_dev", "veqta_dev_owner" if owner else "veqta_dev")
+                    with self.assertRaisesRegex(CommandError, "PostgreSQL подключила команду"):
+                        require_target("dev", "veqta_dev", owner=owner)
 
     def test_ingest_lock_requires_transaction_and_postgresql(self):
         with patch("workwear.ingest_lock.transaction.get_connection") as transaction_connection, \

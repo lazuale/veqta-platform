@@ -31,7 +31,8 @@ veqta_load_config() {
   set +a
   DOMAIN=${VEQTA_HOSTNAME:-}
   veqta_check_hostname || return 1
-  [[ "${VEQTA_ENV:-}" == "$ENV_NAME" && "${DB_NAME:-}" == "veqta_${ENV_NAME}" && "${DB_USER:-}" == "veqta_${ENV_NAME}" ]] || {
+  [[ "${VEQTA_ENV:-}" == "$ENV_NAME" && "${DB_NAME:-}" == "veqta_${ENV_NAME}" &&
+      ( "${DB_USER:-}" == "veqta_${ENV_NAME}" || "${DB_USER:-}" == "svc_platform_${ENV_NAME}" ) ]] || {
     echo 'STOP: неверная база/роль/окружение' >&2; return 1;
   }
   [[ -n "${DB_HOST:-}" && -n "${DB_PORT:-}" && -n "${DB_PASSWORD:-}" ]] || {
@@ -147,7 +148,8 @@ veqta_load_migration_config() {
   source "$MIGRATION_CONFIG"
   set +a
   [[ "${VEQTA_ENV:-}" == "$ENV_NAME" && "${DB_NAME:-}" == "veqta_${ENV_NAME}" &&
-      "${DB_USER:-}" == "veqta_${ENV_NAME}_owner" && "${DB_HOST:-}" == "$app_host" &&
+      ( "${DB_USER:-}" == "veqta_${ENV_NAME}_owner" || "${DB_USER:-}" == "svc_platform_${ENV_NAME}_migrator" ) &&
+      "${DB_HOST:-}" == "$app_host" &&
       "${DB_PORT:-}" == "$app_port" && "${DB_SSLMODE:-prefer}" == "$app_ssl" &&
       -n "${DB_PASSWORD:-}" ]] || {
     echo 'STOP: настройки миграций не совпадают с целевой PostgreSQL' >&2; return 1;
