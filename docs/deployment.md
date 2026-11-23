@@ -42,7 +42,7 @@ sudo systemctl is-active postgresql nginx
 | Статика: root:www-data, чтение Nginx | `/var/www/veqta/dev-static` | `/var/www/veqta/prod-static` |
 | Systemd | `veqta-dev.service` | `veqta-prod.service` |
 
-Bootstrap отзывает доступ `PUBLIC` к базам и схеме `public` каждого контура. Runtime получает только прикладные права. Для служебных команд используется отдельный файл окружения Migrator.
+Bootstrap использует libpq для подготовки SCRAM-верификаторов до отправки SQL. Он отзывает доступ `PUBLIC` к базам и схеме `public` каждого контура. Runtime получает только прикладные права. Для служебных команд используется отдельный файл окружения Migrator.
 
 Перед Cold Start проверьте, что каталоги, роли, базы и домены свободны. Для работающего контура используйте [обновление](#7-обновление-существующего-контура-и-откат).
 
@@ -115,16 +115,16 @@ install -d -o root -g root -m 0755 /etc/veqta
 install -o root -g "$actor" -m 0640 "$app/.env.$target" "$config"
 install -o root -g root -m 0600 "$app/.env.$target-migrate" "$migration_config"
 rm -- "$app/.env.$target" "$app/.env.$target-migrate"
+python3.14 -m venv "$app/.venv"
+"$app/.venv/bin/python" -m pip install --no-cache-dir --require-hashes -r "$app/requirements.lock"
+"$app/.venv/bin/python" -m pip check
 (
     set -a; source "$migration_config"; set +a
     export DB_MIGRATION_PASSWORD=$DB_PASSWORD
     set -a; source "$config"; set +a
-    # Оба пароля передаются psql только в окружении этого дочернего процесса.
-    runuser -u postgres -- psql -X -v ON_ERROR_STOP=1 -h /var/run/postgresql -p 5432 -U postgres -d postgres -f "$app/deploy/postgresql/$target.sql"
+    PGHOST=/var/run/postgresql PGPORT=5432 PGUSER=postgres \
+      runuser -u postgres -- "$app/.venv/bin/python" "$app/scripts/bootstrap_database.py" "$target"
 )
-python3.14 -m venv "$app/.venv"
-"$app/.venv/bin/python" -m pip install --no-cache-dir --require-hashes -r "$app/requirements.lock"
-"$app/.venv/bin/python" -m pip check
 runuser -u "$actor" -- test -r "$app/manage.py"
 runuser -u "$actor" -- test -x "$app/.venv/bin/python"
 veqta_target "$target"

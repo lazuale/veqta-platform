@@ -34,8 +34,9 @@ export DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,testserver
 export DJANGO_SECRET_KEY="$(python -c 'from secrets import token_urlsafe; print(token_urlsafe(64))')"
 export DB_PASSWORD="$(python -c 'from secrets import token_urlsafe; print(token_urlsafe(32))')"
 VEQTA_MIGRATOR_PASSWORD="$(python -c 'from secrets import token_urlsafe; print(token_urlsafe(32))')"
-PGPASSWORD="$VEQTA_PG_PASSWORD" DB_MIGRATION_PASSWORD="$VEQTA_MIGRATOR_PASSWORD" psql -X -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres \
-  -f deploy/postgresql/dev.sql && unset VEQTA_PG_PASSWORD
+PGHOST="$DB_HOST" PGPORT="$DB_PORT" PGUSER=postgres PGPASSWORD="$VEQTA_PG_PASSWORD" \
+  DB_MIGRATION_PASSWORD="$VEQTA_MIGRATOR_PASSWORD" python scripts/bootstrap_database.py dev
+unset VEQTA_PG_PASSWORD
 ```
 
 SQL создаёт `veqta_dev` и две роли. Схему создаёт владелец, а обычные команды приложения используют отдельную роль с доступом к данным.

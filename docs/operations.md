@@ -33,6 +33,26 @@ sudo bash -c '
 '
 ```
 
+
+Проверьте владельцев и права через административное подключение к выбранной базе. Пример для PROD.
+
+```sql
+SELECT current_database(), current_setting('server_version');
+SELECT datdba::regrole, datacl FROM pg_database WHERE datname = current_database();
+SELECT app, name, applied FROM django_migrations WHERE app = 'workwear' ORDER BY name;
+SELECT c.relname, c.relowner::regrole,
+       has_table_privilege('svc_platform_prod', c.oid, 'SELECT') AS can_select,
+       has_table_privilege('svc_platform_prod', c.oid, 'INSERT') AS can_insert,
+       has_table_privilege('svc_platform_prod', c.oid, 'UPDATE,DELETE,TRUNCATE') AS can_change_history
+FROM pg_class AS c
+WHERE c.oid IN ('public.django_migrations'::regclass, 'public.workwear_workwearevent'::regclass)
+ORDER BY c.relname;
+SELECT tgname, tgenabled FROM pg_trigger WHERE tgname IN
+    ('ww_event_no_update_delete', 'ww_event_no_truncate') ORDER BY tgname;
+```
+
+Ожидаемый владелец обеих таблиц — `svc_platform_prod_migrator`. У Runtime все три флага `django_migrations` равны `false`. Для журнала событий ожидается `true, true, false`. Оба триггера имеют состояние `O`.
+
 ## Отказ посередине установки
 
 | Место отказа | Действие |
@@ -60,11 +80,11 @@ sudo bash "/opt/veqta-$target/scripts/server_backup.sh" "$target" "/var/backups/
 На проверочном кластере из корня проекта администратор PostgreSQL задаёт параметры подключения через окружение libpq или закрытый `PGPASSFILE`. Параметры `DB_PASSWORD` и `DB_MIGRATION_PASSWORD` передают новые разные пароли для проверочной копии в окружении дочернего процесса. Пример для PROD.
 
 ```bash
-psql -Xw -d postgres -v roles_only=1 -f deploy/postgresql/prod.sql
+python scripts/bootstrap_database.py prod --roles-only
 pg_restore --no-password --create --exit-on-error --dbname=postgres "$VEQTA_RESTORE_ARCHIVE"
 ```
 
-В режиме `roles_only` bootstrap создаёт две канонические роли. `pg_restore --create` восстанавливает каноническую базу, её владельца, ACL и настройки. Архив прикладной базы не содержит глобальных ролей кластера. Сохраняйте владельцев и ACL при восстановлении. Защитные триггеры остаются включёнными.
+В режиме `--roles-only` bootstrap создаёт две канонические роли. `pg_restore --create` восстанавливает каноническую базу, её владельца, ACL и настройки. Архив прикладной базы не содержит глобальных ролей кластера. Сохраняйте владельцев и ACL при восстановлении. Защитные триггеры остаются включёнными.
 
 Сверьте исходную точку и копию по списку миграций, владельцам, таблицам, последовательностям, функциям, ACL, правам по умолчанию и счётчикам данных. Пример инвентаризации выбранной базы из административного подключения.
 

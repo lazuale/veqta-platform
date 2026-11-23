@@ -168,6 +168,34 @@ def check_recovery(restore_port):
         assert all(after_retry[label] == data for label, data in source_state.items() if label not in ignored)
     print("Обновление с 0001: прерванная миграция откатила ACL, повтор завершился с сохранением данных")
 
+    smoke = """
+from django.contrib.auth import get_user_model
+from django.test import Client
+from workwear.models import Request, WorkwearEvent
+
+client = Client(HTTP_HOST="localhost", HTTP_X_FORWARDED_PROTO="https")
+client.force_login(get_user_model().objects.get(username="coldstart_admin"))
+assert client.get("/admin/").status_code == 200
+assert client.get("/workwear/").status_code == 200
+assert Request.objects.filter(status="closed").exists()
+assert WorkwearEvent.objects.exists()
+"""
+    names = (
+        "PATH", "HOME", "LANG", "LD_LIBRARY_PATH", "PYTHONPATH",
+        "VEQTA_ENV", "DB_NAME", "DB_HOST", "DB_SSLMODE", "DJANGO_SECRET_KEY",
+        "DJANGO_ALLOWED_HOSTS", "DJANGO_DEBUG", "DJANGO_TRUST_PROXY", "DJANGO_SECURE_COOKIES",
+        "DJANGO_CSRF_TRUSTED_ORIGINS",
+    )
+    environment = {name: os.environ[name] for name in names if name in os.environ}
+    environment.update(
+        DB_PORT=restore_port, DB_USER="svc_platform_prod",
+        DB_PASSWORD=os.environ["VEQTA_TEST_RESTORED_RUNTIME"], DJANGO_SETTINGS_MODULE="config.settings",
+    )
+    subprocess.run(
+        [sys.executable, "manage.py", "shell", "-c", smoke], env=environment, check=True, timeout=30,
+    )
+    print("Восстановленная PROD: Admin, Workwear и история доступны под Runtime")
+
 
 if __name__ == "__main__":
     if len(sys.argv) == 2:

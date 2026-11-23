@@ -61,8 +61,8 @@ expected_failure() {
 }
 
 bootstrap() {
-  DB_PASSWORD="$runtime_password" DB_MIGRATION_PASSWORD="$migrator_password" \
-    psql -Xw "$@" -f "deploy/postgresql/$VEQTA_ENV.sql"
+  PGOPTIONS="-c log_statement=all" DB_PASSWORD="$runtime_password" DB_MIGRATION_PASSWORD="$migrator_password" \
+    python scripts/bootstrap_database.py "$VEQTA_ENV" "$@"
 }
 
 migrator() (
@@ -111,19 +111,38 @@ for contour in dev prod; do
   migrator migrate --noinput
   migrator migrate --check
 done
+python - "$lab/primary.log" <<'PYTHON'
+import os
+import sys
+from pathlib import Path
+
+log = Path(sys.argv[1]).read_text()
+for contour in ("DEV", "PROD"):
+    for role in ("RUNTIME", "MIGRATOR"):
+        assert os.environ[f"VEQTA_TEST_{contour}_{role}"] not in log
+print("Bootstrap: открытые пароли ролей отсутствуют при log_statement=all")
+PYTHON
 python -m tests.release_database
 
-# Архив снимаем под Migrator, роли создаём с новыми паролями на отдельном сервере.
-PGUSER=svc_platform_prod_migrator PGPASSWORD="$migrator_password" PGDATABASE=veqta_prod \
-  pg_dump --no-password --format=custom --file="$lab/veqta_prod.dump"
-pg_restore --list "$lab/veqta_prod.dump" >/dev/null
+# Используем тот же архиватор, что и при серверном резервном копировании.
+source scripts/server_backup.sh
+(
+  cd "$lab"
+  DB_USER=svc_platform_prod_migrator DB_PASSWORD="$migrator_password" \
+    veqta_archive_database "$lab" > backup.sha256
+  sha256sum --check --strict backup.sha256
+)
+archives=("$lab"/veqta_prod_*.dump)
+[[ ${#archives[@]} == 1 && -s "${archives[0]}" ]]
+DB_USER=svc_platform_prod DB_PASSWORD="$runtime_password" \
+  expected_failure 'копию создаёт Migrator' veqta_archive_database "$lab"
 (
   start_cluster restore
   restore_port=$PGPORT
   runtime_password=$(new_password)
   migrator_password=$(new_password)
-  bootstrap -v roles_only=1
-  pg_restore --no-password --create --exit-on-error --dbname=postgres "$lab/veqta_prod.dump"
+  bootstrap --roles-only
+  pg_restore --no-password --create --exit-on-error --dbname=postgres "${archives[0]}"
   # Оригинал и копия используют разные реквизиты при одинаковых именах ролей.
   VEQTA_TEST_RESTORED_MIGRATOR="$migrator_password" \
     VEQTA_TEST_RESTORED_RUNTIME="$runtime_password" DB_USER=svc_platform_prod_migrator \

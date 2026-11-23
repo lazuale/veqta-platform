@@ -76,6 +76,8 @@ def live_server(*, nginx_executable=None, artifacts=None):
     )
     environment = {name: os.environ[name] for name in names if name in os.environ}
     environment.update(DB_USER="svc_platform_dev", DB_PASSWORD=os.environ["DB_RUNTIME_PASSWORD"])
+    migration_password = os.environ["DB_PASSWORD"]
+    assert migration_password and all(migration_password not in value for value in environment.values())
     with https_server(environment, nginx_executable, artifacts) as server:
         yield server
 
