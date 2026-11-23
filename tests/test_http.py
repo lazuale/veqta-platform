@@ -336,6 +336,40 @@ class HttpTests(TestCase):
                 self.assertEqual([row["status"] for row in response.json()["results"]], expected)
         self.assertEqual(draft.members.count(), 1)
 
+    def test_search_rejects_text_that_cannot_be_used_in_postgresql(self):
+        for path, extra in (
+            ("ui/requests/", {}),
+            ("ui/employees/", {"organization_id": self.people[0].organization_id}),
+        ):
+            with self.subTest(path=path):
+                response = self.client.get("/workwear/api/" + path, {"q": "Тест\x00", **extra})
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["error"]["code"], "validation_error")
+
+    def test_reopen_rejects_unstorable_reason_without_changing_state(self):
+        draft = services.create_request(organization_id=self.people[0].organization_id, actor=self.actor)
+        result = save_draft(request_id=draft.pk, actor=self.actor, expected_version=draft.version,
+                            members=[{"employee_id": self.people[0].pk, "item_ids": [self.items[0].pk]}],
+                            finish=True)
+        url = f"/workwear/api/ui/requests/{draft.pk}/reopen/"
+        for reason in ("Причина\x00", "Причина\ud800"):
+            with self.subTest(reason=reason):
+                data = json.dumps({"expected_version": result.version, "reason": reason})
+                response = self.client.post(url, data, content_type="application/json")
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.json()["error"]["code"], "validation_error")
+                draft.refresh_from_db()
+                self.assertEqual((draft.status, draft.version), ("closed", result.version))
+
+    def test_bulk_search_rejects_malformed_unicode(self):
+        data = json.dumps({
+            "organization_id": self.people[0].organization_id,
+            "lines": ["Имя\ud800"],
+        })
+        response = self.client.post("/workwear/api/ui/resolve/", data, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.json()["error"]["code"], "validation_error")
+
     def test_repeat_scan_rejects_foreign_employee_and_malformed_pairs(self):
         org = self.people[0].organization
         req = services.create_request(organization_id=org.pk, actor=self.actor)

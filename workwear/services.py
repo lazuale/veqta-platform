@@ -20,6 +20,7 @@ from .models import (
     WorkwearEvent,
     WorkwearItem,
 )
+from .validators import validate_text
 
 
 class WorkwearConflict(Exception):
@@ -242,6 +243,7 @@ def reopen_request(*, request_id, actor, expected_version, reason=""):
     _authorize(actor, "reopen_request")
     if not isinstance(reason, str) or len(reason) > 500:
         raise ValidationError("Причина возврата должна содержать не более 500 символов")
+    validate_text(reason)
     req = _lock_request(request_id, expected_version, status=RequestStatus.CLOSED)
     old_completed_at = req.completed_at.isoformat()
     old_completed_by_id = req.completed_by_id

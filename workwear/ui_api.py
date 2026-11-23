@@ -15,12 +15,14 @@ from .models import (
     Employee, Organization, Request, RequestEmployee,
     RequestStatus, WorkwearEvent, WorkwearItem,
 )
+from .validators import validate_text
 
 
 def _query_text(request, key, *, limit=120):
     value = request.GET.get(key, "").strip()
     if len(value) > limit:
         raise ValidationError(f"Слишком длинный параметр {key}")
+    validate_text(value)
     return value
 
 
@@ -213,6 +215,8 @@ def resolve(request):
         raise ValidationError("Список должен содержать от 1 до 100 строк")
     if any(not isinstance(line, str) or len(line) > 255 or not line.strip() for line in lines):
         raise ValidationError("Каждая строка должна содержать ФИО или табельный номер")
+    for line in lines:
+        validate_text(line)
     if "request_id" in obj:
         require_permission(request, "view_request")
     latest = latest_import()
