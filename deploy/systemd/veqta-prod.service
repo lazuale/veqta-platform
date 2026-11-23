@@ -10,6 +10,7 @@ Group=veqta-prod
 WorkingDirectory=/opt/veqta-prod
 EnvironmentFile=/etc/veqta/prod.env
 Environment=PYTHONDONTWRITEBYTECODE=1
+UnsetEnvironment=DJANGO_SETTINGS_MODULE PYTHONPATH PYTHONHOME DB_MIGRATION_PASSWORD
 ExecStart=/opt/veqta-prod/.venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:8765 --workers 2 --timeout 120 --error-logfile - --no-control-socket
 Restart=on-failure
 RestartSec=5

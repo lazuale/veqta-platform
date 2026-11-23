@@ -55,20 +55,20 @@ veqta_clean_checkout
 }
 veqta_check_database
 veqta_django check
-veqta_django makemigrations --check --dry-run
-veqta_django migrate --plan
+veqta_root_django config.migration makemigrations --check --dry-run
+veqta_root_django config.migration migrate --plan
 if [[ "${2:-}" == --migrate ]]; then
   echo 'Применяем миграции целевого контура (флаг --migrate задан явно)'
-  veqta_migrate
+  veqta_root_django config.migration migrate --noinput
 fi
-veqta_django migrate --check
+veqta_root_django config.migration migrate --check
 
 install -d -o root -g root -m 0755 /var/www/veqta
 install -d -o root -g www-data -m 2750 "$STATIC_ROOT"
 [[ -z "$(find "$STATIC_ROOT" -type l -print -quit)" ]] || {
   echo 'STOP: симлинк в каталоге статики' >&2; exit 2;
 }
-veqta_admin_django collectstatic --noinput
+veqta_root_django config.settings collectstatic --noinput
 chown -R root:www-data "$STATIC_ROOT"
 chmod -R go-w "$STATIC_ROOT"
 chmod -R g+rX "$STATIC_ROOT"

@@ -31,8 +31,9 @@ def main():
         parser.error("Файл настройки уже существует; перезапись запрещена")
     created = []
     try:
-        for path, role in zip(paths, (f"veqta_{args.environment}", f"veqta_{args.environment}_owner")):
-            content = template.replace(f"DB_USER=veqta_{args.environment}\n", f"DB_USER={role}\n")
+        runtime_role = f"svc_platform_{args.environment}"
+        for path, role in zip(paths, (runtime_role, f"{runtime_role}_migrator"), strict=True):
+            content = template.replace(f"DB_USER={runtime_role}\n", f"DB_USER={role}\n")
             content = content.replace("DB_PASSWORD=\n", f"DB_PASSWORD={secrets.token_urlsafe(32)}\n")
             descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
             created.append(path)

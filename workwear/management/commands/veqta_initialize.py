@@ -13,7 +13,7 @@ class Command(BaseCommand):
         parser.add_argument("--database-name", required=True)
 
     def handle(self, *args, **options):
-        require_target(options["environment"], options["database_name"], owner=True)
+        require_target(options["environment"], options["database_name"], migration=True)
         if connection.introspection.table_names():
             raise CommandError("База уже содержит таблицы. Для дальнейших миграций используйте migrate после проверки контура")
         call_command("migrate", interactive=False, stdout=self.stdout)

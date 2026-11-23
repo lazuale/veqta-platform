@@ -32,7 +32,7 @@ veqta_load_config() {
   DOMAIN=${VEQTA_HOSTNAME:-}
   veqta_check_hostname || return 1
   [[ "${VEQTA_ENV:-}" == "$ENV_NAME" && "${DB_NAME:-}" == "veqta_${ENV_NAME}" &&
-      ( "${DB_USER:-}" == "veqta_${ENV_NAME}" || "${DB_USER:-}" == "svc_platform_${ENV_NAME}" ) ]] || {
+      "${DB_USER:-}" == "svc_platform_${ENV_NAME}" ]] || {
     echo 'STOP: неверная база/роль/окружение' >&2; return 1;
   }
   [[ -n "${DB_HOST:-}" && -n "${DB_PORT:-}" && -n "${DB_PASSWORD:-}" ]] || {
@@ -121,22 +121,6 @@ veqta_check_trusted_code() {
   done < <(find "$APP" -type l -print0)
 }
 
-# Административную команду запускаем из доверенного кода без переменных, меняющих загрузку Python.
-veqta_admin_django() (
-  [[ $EUID -eq 0 ]] || { echo 'STOP: административная команда требует root' >&2; exit 1; }
-  cd "$APP"
-  exec /usr/bin/env -i PATH=/usr/bin:/bin HOME=/root USER=root LOGNAME=root \
-    PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 \
-    VEQTA_ENV="$VEQTA_ENV" VEQTA_HOSTNAME="${VEQTA_HOSTNAME:-}" \
-    DJANGO_SECRET_KEY="$DJANGO_SECRET_KEY" DJANGO_DEBUG="$DJANGO_DEBUG" \
-    DJANGO_ALLOWED_HOSTS="$DJANGO_ALLOWED_HOSTS" DJANGO_TRUST_PROXY="$DJANGO_TRUST_PROXY" \
-    DJANGO_CSRF_TRUSTED_ORIGINS="${DJANGO_CSRF_TRUSTED_ORIGINS:-}" \
-    DJANGO_SECURE_COOKIES="$DJANGO_SECURE_COOKIES" DJANGO_STATIC_ROOT="$DJANGO_STATIC_ROOT" \
-    DB_NAME="$DB_NAME" DB_USER="$DB_USER" DB_PASSWORD="$DB_PASSWORD" \
-    DB_HOST="$DB_HOST" DB_PORT="$DB_PORT" DB_SSLMODE="${DB_SSLMODE:-prefer}" \
-    "$APP/.venv/bin/python" -B manage.py "$@"
-)
-
 veqta_load_migration_config() {
   [[ "$(stat -c %U:%G:%a "$MIGRATION_CONFIG")" == root:root:600 ]] || {
     echo 'STOP: настройки миграций должны иметь права root:root 0600' >&2; return 1;
@@ -148,7 +132,7 @@ veqta_load_migration_config() {
   source "$MIGRATION_CONFIG"
   set +a
   [[ "${VEQTA_ENV:-}" == "$ENV_NAME" && "${DB_NAME:-}" == "veqta_${ENV_NAME}" &&
-      ( "${DB_USER:-}" == "veqta_${ENV_NAME}_owner" || "${DB_USER:-}" == "svc_platform_${ENV_NAME}_migrator" ) &&
+      "${DB_USER:-}" == "svc_platform_${ENV_NAME}_migrator" &&
       "${DB_HOST:-}" == "$app_host" &&
       "${DB_PORT:-}" == "$app_port" && "${DB_SSLMODE:-prefer}" == "$app_ssl" &&
       -n "${DB_PASSWORD:-}" ]] || {
@@ -156,18 +140,34 @@ veqta_load_migration_config() {
   }
 }
 
-veqta_owner_django() (
-  [[ $EUID -eq 0 ]] || { echo 'STOP: миграции требуют root' >&2; exit 1; }
-  umask 077
+# Секреты передаём в окружении самого Python, без промежуточных аргументов env.
+veqta_root_django() (
+  local module=$1 name
+  shift
+  [[ $EUID -eq 0 ]] || { echo 'STOP: требуется root' >&2; exit 1; }
   veqta_check_trusted_code || exit 1
-  veqta_load_migration_config || exit 1
-  veqta_admin_django shell -c 'from django.conf import settings; from config.database import require_target; require_target(settings.VEQTA_ENV, settings.EXPECTED_DATABASE, owner=True)' || exit 1
-  veqta_admin_django "$@"
-)
+  case "$module" in
+    config.settings) ;;
+    config.migration)
+      umask 077
+      veqta_load_migration_config || exit 1
+      ;;
+    *) exit 2 ;;
+  esac
 
-veqta_migrate() {
-  veqta_owner_django migrate --noinput
-}
+  # Миграции и сборка статики не наследуют параметры загрузки Python и libpq.
+  while IFS= read -r name; do
+    export -n "$name"
+  done < <(compgen -e)
+  export PATH=/usr/bin:/bin HOME=/root USER=root LOGNAME=root
+  export PYTHONDONTWRITEBYTECODE=1 PYTHONNOUSERSITE=1 PGCONNECT_TIMEOUT=5
+  export DJANGO_SETTINGS_MODULE="$module"
+  export VEQTA_ENV VEQTA_HOSTNAME DJANGO_SECRET_KEY DJANGO_DEBUG DJANGO_ALLOWED_HOSTS
+  export DJANGO_TRUST_PROXY DJANGO_CSRF_TRUSTED_ORIGINS DJANGO_SECURE_COOKIES DJANGO_STATIC_ROOT
+  export DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT DB_SSLMODE
+  cd "$APP" || exit 1
+  exec "$APP/.venv/bin/python" -B manage.py "$@"
+)
 
 veqta_clean_checkout() {
   local status
@@ -187,9 +187,11 @@ veqta_django() {
     shift
   fi
   # Передаём аргументы без повторного разбора оболочкой.
-  "${deadline[@]}" runuser -u "$ACTOR" -- bash -c '
+  "${deadline[@]}" runuser -u "$ACTOR" -- /usr/bin/env -i PATH=/usr/bin:/bin \
+    /bin/bash --noprofile --norc -c '
     set -Eeuo pipefail
     set -a; source "$1"; set +a
+    export DJANGO_SETTINGS_MODULE=config.settings
     cd "$2"
     if [[ -n "$3" ]]; then export PGCONNECT_TIMEOUT="$3"; fi
     shift 3
