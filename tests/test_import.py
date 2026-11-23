@@ -181,6 +181,23 @@ class ImportTests(TestCase):
         with self.assertRaises(TypeError):
             parse(self.path, timesheets="unsupported")
 
+    def test_parser_rejects_null_byte_before_preview(self):
+        path = self.path / "Employees.csv"
+        path.write_bytes(path.read_bytes().replace(b"TEST-00001", b"TEST-\x0000001"))
+        with self.assertRaisesRegex(ImportRejected, "Employees.csv.*нулевой"):
+            parse(self.path)
+        self.assertFalse(EmployeeImport.objects.exists())
+
+    def test_truncated_archive_returns_command_error_without_publication(self):
+        path = self.path / "sources.tar.gz"
+        with tarfile.open(path, "w:gz") as archive:
+            archive.add(self.path / "Employees.csv", arcname="Employees.csv")
+        path.write_bytes(path.read_bytes()[:30])
+        with patch("workwear.management.commands.workwear_import_1c.require_target"):
+            with self.assertRaisesRegex(CommandError, "Архив оборван"):
+                call_command("workwear_import_1c", str(path), environment="dev", database_name="veqta_dev")
+        self.assertFalse(EmployeeImport.objects.exists())
+
     def test_command_dry_run_apply_and_input_guards(self):
         options = dict(environment="dev", database_name="veqta_dev",
                        source_export_date=self.date.isoformat())
@@ -196,7 +213,7 @@ class ImportTests(TestCase):
             self.assertEqual(result["unique_current_employees"], 1)
             self.assertEqual(EmployeeImport.objects.count(), 0)
 
-            with self.assertRaisesRegex(CommandError, "APPLY requires"):
+            with self.assertRaisesRegex(CommandError, "Для публикации нужен архив"):
                 call_command("workwear_import_1c", str(self.path), apply=True, **options)
             with self.assertRaises(CommandError):
                 call_command("workwear_import_1c", str(self.path / "missing-source"), **options)
@@ -212,7 +229,7 @@ class ImportTests(TestCase):
     def test_parser_rejects_invalid_csv_headers_and_encoding(self):
         file = self.path / "Positions.csv"
         original = file.read_bytes()
-        for replacement in (b"\xff\xfe", b"extId;wrong\n", b"", b"extId;name\n"):
+        for replacement in (b"\xff\xfe", b"extId;wrong\n", b"", b"extId;name\n", b'"extId;name\n'):
             with self.subTest(data=replacement):
                 file.write_bytes(replacement)
                 with self.assertRaises(ImportRejected):

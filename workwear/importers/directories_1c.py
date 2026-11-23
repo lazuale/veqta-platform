@@ -82,13 +82,16 @@ def _rows(data, name, required):
         decoded = data.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise ImportRejected(f"{name}: требуется кодировка UTF-8 (BOM допускается)") from exc
+    if "\x00" in decoded:
+        raise ImportRejected(f"{name}: файл содержит нулевой символ")
     reader = csv.DictReader(io.StringIO(decoded, newline=""), delimiter=";", strict=True)
-    if reader.fieldnames is None or len(reader.fieldnames) != len(set(reader.fieldnames)):
-        raise ImportRejected(f"{name}: отсутствуют заголовки CSV или есть повторяющиеся столбцы")
-    missing = set(required) - set(reader.fieldnames)
-    if missing:
-        raise ImportRejected(f"{name}: отсутствуют обязательные столбцы: {sorted(missing)}")
     try:
+        fieldnames = reader.fieldnames
+        if fieldnames is None or len(fieldnames) != len(set(fieldnames)):
+            raise ImportRejected(f"{name}: отсутствуют заголовки CSV или есть повторяющиеся столбцы")
+        missing = set(required) - set(fieldnames)
+        if missing:
+            raise ImportRejected(f"{name}: отсутствуют обязательные столбцы: {sorted(missing)}")
         for n, row in enumerate(reader, start=2):
             if n - 1 > MAX_ROWS or None in row or any(v is None for v in row.values()):
                 raise ImportRejected(f"{name}:{n}: некорректная строка CSV")

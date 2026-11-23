@@ -9,7 +9,7 @@ from django.core.management.base import BaseCommand, CommandError
 from config.database import require_target
 from django.core.exceptions import ValidationError
 from django.db import connection, IntegrityError
-from workwear.importers.directories_1c import parse, ImportRejected
+from workwear.importers.directories_1c import parse
 from workwear.importers.acceptance import accept, review
 
 
@@ -41,10 +41,12 @@ class Command(BaseCommand):
             except ValueError as exc:
                 raise CommandError("Некорректная дата выгрузки YYYY-MM-DD") from exc
         if options['apply'] and Path(options['source']).is_dir():
-            raise CommandError('APPLY requires a .tar.gz snapshot of the three CSV')
+            raise CommandError('Для публикации нужен архив .tar.gz с тремя CSV')
         try:
             batch = parse(options['source'])
-        except (ImportRejected, OSError, ValueError, tarfile.TarError) as exc:
+        except EOFError as exc:
+            raise CommandError('Архив оборван или повреждён') from exc
+        except (OSError, ValueError, tarfile.TarError) as exc:
             raise CommandError(str(exc)) from exc
         result = {
             'mode': 'APPLY' if options['apply'] else 'DRY_RUN',
