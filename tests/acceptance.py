@@ -313,6 +313,11 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
         page.on("pageerror", lambda error: errors.append(str(error)))
         page.on("response", lambda response: failures.append((response.status, response.url)) if response.status >= 400 else None)
         sign_in(page, base, actor.username, password)
+        if server.ca_file:
+            session_cookie = next(cookie for cookie in page.context.cookies(base)
+                                  if cookie["name"] == "veqta_dev_session")
+            assert session_cookie["secure"] and session_cookie["httpOnly"] and session_cookie["sameSite"] == "Lax"
+            print("Сессионная cookie через HTTPS: Secure, HttpOnly, SameSite=Lax — успешно")
         page.goto(base + "/profile/")
         expect(page.locator('h1')).to_have_text("Профиль")
         expect(page.locator('dl')).to_contain_text(actor.username)

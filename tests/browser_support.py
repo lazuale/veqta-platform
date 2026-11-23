@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass
+from http.cookies import SimpleCookie
 from pathlib import Path
 import json
 import os
@@ -180,8 +181,11 @@ def https_server(environment, nginx_executable, artifacts):
                     try:
                         with opener.open(base + "/login/", timeout=1) as response:
                             assert response.status == 200
-                            assert "Secure" in response.headers.get("Set-Cookie", "")
+                            csrf_cookie = SimpleCookie(response.headers["Set-Cookie"])["veqta_dev_csrf"]
+                            assert csrf_cookie["secure"] and csrf_cookie["samesite"] == "Lax"
                             assert response.headers["X-Frame-Options"] == "DENY"
+                            assert response.headers["X-Content-Type-Options"] == "nosniff"
+                            assert response.headers["Strict-Transport-Security"].startswith("max-age=3600")
                         break
                     except OSError:
                         time.sleep(0.1)
@@ -219,6 +223,7 @@ def https_server(environment, nginx_executable, artifacts):
                         "debug": False, "https_verified_with_fixture_ca": True,
                         "untrusted_certificate_rejected": True, "wrong_hostname_rejected": True,
                         "secure_csrf_cookie": True, "http_redirect": 301, "static": 200,
+                        "csrf_samesite": "Lax", "strict_transport_security": True,
                         "database_role": runtime["DB_USER"], "migration_secret_in_server": any(name in runtime for name in
                             ("DB_OWNER_PASSWORD", "DB_MIGRATION_PASSWORD", "DB_RUNTIME_PASSWORD")),
                         "browser_ignore_https_errors": True,
