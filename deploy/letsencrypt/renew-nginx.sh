@@ -1,5 +1,5 @@
 #!/bin/sh
-# Deploy hook Certbot: имена выбранных контуров берутся из их настроек.
+# После продления сертификата Certbot берёт имена контуров из их настроек.
 set -eu
 for config in /etc/veqta/dev.env /etc/veqta/prod.env; do
     [ -r "$config" ] || continue

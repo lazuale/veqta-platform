@@ -13,7 +13,7 @@ from workwear.models import Employee, WorkwearItem
 from workwear.repeats import scan_repeats
 from workwear.sync import save_draft
 
-from .factories import make_employees, make_import, make_items, make_organization, make_user
+from .factories import make_employees, make_import, make_items, make_user
 
 
 class BoundaryPathsTests(TestCase):
