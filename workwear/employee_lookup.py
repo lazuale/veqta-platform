@@ -1,5 +1,4 @@
 """Поиск по ФИО и номеру 1С не меняет данные. Ключ сотрудника — GUID, а не совпадение имени."""
-from collections import defaultdict
 import re
 
 from .eligibility import is_current
@@ -38,32 +37,36 @@ def resolve_many(*, lines, organization_id, latest, already):
             for line in lines
         ]
 
-    name_map = defaultdict(list)
-    number_map = defaultdict(list)
-    suffix_map = defaultdict(list)
+    lookups = [(text, normalize_name(text), normalize_number(text)) for text in map(str.strip, lines)]
+    name_map = {name: [] for _, name, _ in lookups}
+    number_map = {number: [] for _, _, number in lookups}
+    suffix_map = {number: [] for number in number_map
+                  if len(number) == 4 and number.isascii() and number.isdecimal()}
     queryset = Employee.objects.select_related("organization").only(
         "id", "full_name", "personnel_number", "organization__name", "organization_id",
         "last_seen_import_id", "position_name", "department_name",
     )
+    # Сохраняем только совпадения со строками запроса. Для статуса «Другая организация»
+    # проверяем весь справочник, включая сотрудников предыдущих выгрузок.
     for employee in queryset.iterator(chunk_size=2000):
-        name_map[normalize_name(employee.full_name)].append(employee)
+        name = normalize_name(employee.full_name)
+        if name in name_map:
+            name_map[name].append(employee)
         number = normalize_number(employee.personnel_number)
-        number_map[number].append(employee)
-        if len(number) >= 4:
-            suffix_map[number[-4:]].append(employee)
+        if number in number_map:
+            number_map[number].append(employee)
+        suffix = number[-4:]
+        if suffix in suffix_map:
+            suffix_map[suffix].append(employee)
 
     used_ids = set()
     results = []
-    for line in lines:
-        text = line.strip()
-        number = normalize_number(text)
-        candidates = name_map.get(normalize_name(text), []) or number_map.get(number, [])
-        if not candidates and number.isascii() and number.isdecimal() and len(number) == 4:
-            candidates = suffix_map.get(number, [])
+    for text, name, number in lookups:
+        candidates = name_map[name] or number_map[number] or suffix_map.get(number, [])
         relevant = [x for x in candidates if x.organization_id == organization_id]
-        current = list({x.pk: x for x in relevant if is_current(
+        current = [x for x in relevant if is_current(
             x, organization_id=organization_id, latest=latest
-        )}.values())
+        )]
         if len(current) > 1:
             state = "ambiguous"
         elif len(current) == 1:
