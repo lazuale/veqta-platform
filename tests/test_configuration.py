@@ -3,7 +3,6 @@ import os
 import secrets
 import subprocess
 import sys
-from importlib import import_module
 from unittest.mock import patch
 from django.core.management.base import CommandError
 from django.test import SimpleTestCase
@@ -17,7 +16,7 @@ class ConfigurationTests(SimpleTestCase):
         env = os.environ.copy()
         # Не наследуем настройки HTTPS при проверке значений по умолчанию.
         env.pop("DJANGO_SECURE_COOKIES", None)
-        env.update(VEQTA_ENV="dev", DB_NAME="veqta_dev", DB_USER="veqta_dev",
+        env.update(DJANGO_SETTINGS_MODULE=module, VEQTA_ENV="dev", DB_NAME="veqta_dev", DB_USER="svc_platform_dev",
                    DB_PASSWORD=secrets.token_urlsafe(32), DB_HOST="127.0.0.1", DB_PORT="5432",
                    DJANGO_SECRET_KEY=secrets.token_urlsafe(64), DJANGO_ALLOWED_HOSTS="localhost",
                    DJANGO_DEBUG="1", DJANGO_TRUST_PROXY="0", DJANGO_CSRF_TRUSTED_ORIGINS="")
@@ -29,22 +28,29 @@ class ConfigurationTests(SimpleTestCase):
     def test_valid_dev_configuration(self):
         self.assertEqual(self.settings_process(), 0)
 
-    def test_schema_owner_is_bound_to_its_environment(self):
-        self.assertEqual(self.settings_process(DB_USER="veqta_dev_owner"), 0)
-        self.assertNotEqual(self.settings_process(DB_USER="veqta_prod_owner"), 0)
-        self.assertNotEqual(self.settings_process(DB_USER="postgres"), 0)
-
-    def test_server_roles_are_bound_to_their_environment(self):
+    def test_settings_accept_only_their_contour_and_role(self):
         for contour, other in (("dev", "prod"), ("prod", "dev")):
             changes = {"VEQTA_ENV": contour, "DB_NAME": f"veqta_{contour}",
                        "DJANGO_DEBUG": "0", "DJANGO_TRUST_PROXY": "1"}
-            for suffix in ("", "_migrator"):
-                with self.subTest(contour=contour, suffix=suffix):
-                    self.assertEqual(self.settings_process(DB_USER=f"svc_platform_{contour}{suffix}", **changes), 0)
-                    self.assertNotEqual(self.settings_process(DB_USER=f"svc_platform_{other}{suffix}", **changes), 0)
+            for module, suffix in (("config.settings", ""), ("config.migration", "_migrator")):
+                other_suffix = "" if suffix else "_migrator"
+                with self.subTest(contour=contour, module=module):
+                    self.assertEqual(self.settings_process(module=module, DB_USER=f"svc_platform_{contour}{suffix}", **changes), 0)
+                    for user in (f"svc_platform_{other}{suffix}", f"svc_platform_{contour}{other_suffix}", "postgres"):
+                        self.assertNotEqual(self.settings_process(module=module, DB_USER=user, **changes), 0)
+
+    def test_http_entrypoints_use_runtime_settings(self):
+        self.assertEqual(self.settings_process(assertions=
+            "assert import_module('config.asgi').application; assert import_module('config.wsgi').application"), 0)
+
+    def test_http_entrypoints_reject_migration_settings(self):
+        for interface in ("wsgi", "asgi"):
+            with self.subTest(interface=interface):
+                self.assertNotEqual(self.settings_process(module="config.migration", DB_USER="svc_platform_dev_migrator",
+                    assertions=f"import_module('config.{interface}')"), 0)
 
     def test_database_and_role_must_match_environment(self):
-        for changes in ({"DB_NAME": "veqta_prod"}, {"DB_USER": "veqta_prod"}, {"VEQTA_ENV": "unknown"}):
+        for changes in ({"DB_NAME": "veqta_prod"}, {"DB_USER": "svc_platform_prod"}, {"VEQTA_ENV": "unknown"}):
             with self.subTest(changes=changes):
                 self.assertNotEqual(self.settings_process(**changes), 0)
 
@@ -55,7 +61,7 @@ class ConfigurationTests(SimpleTestCase):
                 self.assertNotEqual(self.settings_process(**changes), 0)
 
     def test_prod_forbids_debug_and_requires_trusted_proxy(self):
-        prod = {"VEQTA_ENV": "prod", "DB_NAME": "veqta_prod", "DB_USER": "veqta_prod",
+        prod = {"VEQTA_ENV": "prod", "DB_NAME": "veqta_prod", "DB_USER": "svc_platform_prod",
                 "DJANGO_DEBUG": "0", "DJANGO_TRUST_PROXY": "1"}
         self.assertEqual(self.settings_process(**prod), 0)
         for changes in ({"DJANGO_DEBUG": "1"}, {"DJANGO_TRUST_PROXY": "0"},
@@ -68,32 +74,23 @@ class ConfigurationTests(SimpleTestCase):
 
     def test_secure_cookies_reject_missing_https_proxy_and_insecure_prod(self):
         prod = {"VEQTA_ENV": "prod", "DB_NAME": "veqta_prod",
-                "DB_USER": "veqta_prod", "DJANGO_DEBUG": "0",
+                "DB_USER": "svc_platform_prod", "DJANGO_DEBUG": "0",
                 "DJANGO_TRUST_PROXY": "1", "DJANGO_SECURE_COOKIES": "0"}
         self.assertNotEqual(self.settings_process(**prod), 0)
         self.assertNotEqual(self.settings_process(
             DJANGO_SECURE_COOKIES="1", DJANGO_TRUST_PROXY="0",
         ), 0)
 
-    def test_default_browser_server_uses_isolated_http_settings(self):
-        self.assertEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="0",
-            assertions="assert settings.DEBUG; assert not settings.SESSION_COOKIE_SECURE; "
-                       "assert settings.SECURE_PROXY_SSL_HEADER is None; "
-                       "assert settings.DATABASES['default']['NAME'] == 'test_veqta_dev'"), 0)
-
     def test_https_browser_server_disables_debug_and_requires_secure_cookies(self):
-        self.assertEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="1",
+        self.assertEqual(self.settings_process(module="config.testing",
             assertions="assert not settings.DEBUG; assert settings.SESSION_COOKIE_SECURE; "
                        "assert settings.CSRF_COOKIE_SECURE; assert settings.SECURE_SSL_REDIRECT; "
                        "assert settings.SECURE_PROXY_SSL_HEADER == ('HTTP_X_FORWARDED_PROTO', 'https'); "
                        "assert settings.DATABASES['default']['NAME'] == 'test_veqta_dev'"), 0)
 
-    def test_invalid_https_test_flag_is_rejected(self):
-        self.assertNotEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="yes"), 0)
-
     def test_browser_server_cannot_use_production_environment(self):
-        self.assertNotEqual(self.settings_process(module="config.testing", VEQTA_TEST_HTTPS="1",
-            VEQTA_ENV="prod", DB_NAME="veqta_prod", DB_USER="veqta_prod",
+        self.assertNotEqual(self.settings_process(module="config.testing",
+            VEQTA_ENV="prod", DB_NAME="veqta_prod", DB_USER="svc_platform_prod",
             DJANGO_DEBUG="0", DJANGO_TRUST_PROXY="1"), 0)
 
 
@@ -104,8 +101,8 @@ class RuntimeGuardTests(SimpleTestCase):
         with patch("config.database.settings") as settings, patch("config.database.connection") as db:
             settings.VEQTA_ENV = "dev"
             db.vendor = "postgresql"
-            db.settings_dict = {"NAME": "veqta_dev", "USER": "veqta_dev"}
-            db.cursor.return_value.__enter__.return_value.fetchone.return_value = ("veqta_dev", "veqta_dev")
+            db.settings_dict = {"NAME": "veqta_dev", "USER": "svc_platform_dev"}
+            db.cursor.return_value.__enter__.return_value.fetchone.return_value = ("veqta_dev", "svc_platform_dev", "svc_platform_dev", True)
             require_target("dev", "veqta_dev")
             with self.assertRaises(CommandError):
                 require_target("dev", "veqta_prod")
@@ -116,9 +113,9 @@ class RuntimeGuardTests(SimpleTestCase):
             db.settings_dict["USER"] = "postgres"
             with self.assertRaisesRegex(CommandError, "Имя базы или роль"):
                 require_target("dev", "veqta_dev")
-            db.settings_dict["USER"] = "veqta_dev"
-            db.cursor.return_value.__enter__.return_value.fetchone.return_value = ("veqta_prod", "veqta_dev")
-            with self.assertRaisesRegex(CommandError, "PostgreSQL подключила команду"):
+            db.settings_dict["USER"] = "svc_platform_dev"
+            db.cursor.return_value.__enter__.return_value.fetchone.return_value = ("veqta_prod", "svc_platform_dev", "svc_platform_dev", True)
+            with self.assertRaisesRegex(CommandError, "Подключение PostgreSQL"):
                 require_target("dev", "veqta_dev")
 
     def test_database_target_checks_configured_server_role_and_operation(self):
@@ -126,16 +123,16 @@ class RuntimeGuardTests(SimpleTestCase):
             settings.VEQTA_ENV = "dev"
             db.vendor = "postgresql"
             cursor = db.cursor.return_value.__enter__.return_value
-            for role, owner in (("svc_platform_dev", False), ("svc_platform_dev_migrator", True)):
+            for role, migration in (("svc_platform_dev", False), ("svc_platform_dev_migrator", True)):
                 with self.subTest(role=role):
                     db.settings_dict = {"NAME": "veqta_dev", "USER": role}
-                    cursor.fetchone.return_value = ("veqta_dev", role)
-                    require_target("dev", "veqta_dev", owner=owner)
+                    cursor.fetchone.return_value = ("veqta_dev", role, role, True)
+                    require_target("dev", "veqta_dev", migration=migration)
                     with self.assertRaisesRegex(CommandError, "Имя базы или роль"):
-                        require_target("dev", "veqta_dev", owner=not owner)
-                    cursor.fetchone.return_value = ("veqta_dev", "veqta_dev_owner" if owner else "veqta_dev")
-                    with self.assertRaisesRegex(CommandError, "PostgreSQL подключила команду"):
-                        require_target("dev", "veqta_dev", owner=owner)
+                        require_target("dev", "veqta_dev", migration=not migration)
+                    cursor.fetchone.return_value = ("veqta_dev", role, "postgres", False)
+                    with self.assertRaisesRegex(CommandError, "Подключение PostgreSQL"):
+                        require_target("dev", "veqta_dev", migration=migration)
 
     def test_ingest_lock_requires_transaction_and_postgresql(self):
         with patch("workwear.ingest_lock.transaction.get_connection") as transaction_connection, \
@@ -156,7 +153,3 @@ class RuntimeGuardTests(SimpleTestCase):
             database.introspection.table_names.return_value = ["django_migrations"]
             with self.assertRaisesRegex(CommandError, "База уже содержит таблицы"):
                 Command().handle(environment="dev", database_name="veqta_dev")
-
-    def test_asgi_and_wsgi_entrypoints_exist(self):
-        self.assertIsNotNone(import_module("config.asgi").application)
-        self.assertIsNotNone(import_module("config.wsgi").application)

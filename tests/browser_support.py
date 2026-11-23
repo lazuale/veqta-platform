@@ -67,40 +67,17 @@ def sign_in(page, base, username, password):
 
 
 @contextmanager
-def live_server(*, stack="runserver", nginx_executable=None, artifacts=None):
-    environment = os.environ.copy()
-    environment.update(DB_USER="veqta_dev", DB_PASSWORD=environment.pop("DB_RUNTIME_PASSWORD"))
-    environment.pop("DB_OWNER_PASSWORD", None)
-    environment.pop("DB_MIGRATION_PASSWORD", None)
-    if stack == "nginx":
-        with https_server(environment, nginx_executable, artifacts) as server:
-            yield server
-        return
-    if stack != "runserver":
-        raise ValueError("Неизвестный сервер приёмки")
-    environment["VEQTA_TEST_HTTPS"] = "0"
-    port = free_port()
-    base = f"http://127.0.0.1:{port}"
-    with tempfile.TemporaryFile() as log:
-        server = subprocess.Popen([
-            sys.executable, "manage.py", "runserver", f"127.0.0.1:{port}",
-            "--noreload", "--settings=config.testing",
-        ], cwd=Path(__file__).resolve().parent.parent, stdout=log, stderr=log, env=environment)
-        try:
-            for _ in range(100):
-                try:
-                    urllib.request.urlopen(base + "/login/", timeout=1).close()
-                    break
-                except OSError:
-                    if server.poll() is not None:
-                        raise RuntimeError("Тестовый сервер завершился до запуска")
-                    time.sleep(0.1)
-            else:
-                raise RuntimeError("Тестовый сервер не ответил")
-            yield BrowserServer(base)
-        finally:
-            stop_process(server)
-
+def live_server(*, nginx_executable=None, artifacts=None):
+    names = (
+        "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "LD_LIBRARY_PATH", "PYTHONPATH",
+        "VEQTA_ENV", "DB_NAME", "DB_HOST", "DB_PORT", "DB_SSLMODE",
+        "DJANGO_SECRET_KEY", "DJANGO_ALLOWED_HOSTS", "DJANGO_DEBUG", "DJANGO_TRUST_PROXY",
+        "DJANGO_SECURE_COOKIES", "DJANGO_CSRF_TRUSTED_ORIGINS",
+    )
+    environment = {name: os.environ[name] for name in names if name in os.environ}
+    environment.update(DB_USER="svc_platform_dev", DB_PASSWORD=os.environ["DB_RUNTIME_PASSWORD"])
+    with https_server(environment, nginx_executable, artifacts) as server:
+        yield server
 
 
 def expose_fixture_static(folder):
@@ -139,7 +116,7 @@ def https_server(environment, nginx_executable, artifacts):
             "-keyout", str(key), "-out", str(certificate), "-days", "1", "-subj", "/CN=localhost",
             "-addext", "subjectAltName=DNS:localhost,IP:127.0.0.1"],
             check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        runtime = environment | {"DJANGO_SETTINGS_MODULE": "config.testing", "VEQTA_TEST_HTTPS": "1",
+        runtime = environment | {"DJANGO_SETTINGS_MODULE": "config.testing",
             "DJANGO_DEBUG": "0", "DJANGO_TRUST_PROXY": "1", "DJANGO_SECURE_COOKIES": "1",
             "DJANGO_CSRF_TRUSTED_ORIGINS": base, "DJANGO_STATIC_ROOT": str(folder / "static")}
         with (folder / "collectstatic.log").open("wb") as log:
@@ -225,7 +202,7 @@ def https_server(environment, nginx_executable, artifacts):
                         "secure_csrf_cookie": True, "http_redirect": 301, "static": 200,
                         "csrf_samesite": "Lax", "strict_transport_security": True,
                         "database_role": runtime["DB_USER"], "migration_secret_in_server": any(name in runtime for name in
-                            ("DB_OWNER_PASSWORD", "DB_MIGRATION_PASSWORD", "DB_RUNTIME_PASSWORD")),
+                            ("DB_MIGRATION_PASSWORD", "DB_RUNTIME_PASSWORD")),
                         "browser_ignore_https_errors": True,
                         "tls_validation": "explicit fixture CA and hostname checks in the HTTP client",
                     }, ensure_ascii=False, indent=2))

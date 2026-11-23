@@ -12,30 +12,7 @@ jobs:
   verify:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
-    services:
-      postgres:
-        image: postgres:18.7
-        env:
-          # Только одноразовый контейнер CI, доступный через loopback runner.
-          POSTGRES_HOST_AUTH_METHOD: trust
-        ports:
-          - 127.0.0.1:5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
     env:
-      VEQTA_ENV: dev
-      DB_NAME: veqta_dev
-      DB_USER: veqta_dev
-      DB_HOST: 127.0.0.1
-      DB_PORT: '5432'
-      DB_SSLMODE: disable
-      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,testserver
-      DJANGO_DEBUG: '1'
-      DJANGO_TRUST_PROXY: '0'
-      DJANGO_SECURE_COOKIES: '0'
       COVERAGE_FILE: test-results/coverage/.coverage
     steps:
       - uses: actions/checkout@v6
@@ -47,96 +24,50 @@ jobs:
           python -m pip install --require-hashes -r requirements-browser.lock
           python -m pip check
           mkdir -p test-results/coverage
-      - name: Create isolated roles and database
+      - name: Install PostgreSQL 19 and HTTPS dependencies
         run: |
-          python - <<'PY'
-          import os, secrets
-          with open(os.environ['GITHUB_ENV'], 'a') as stream:
-              for name in ('DJANGO_SECRET_KEY', 'DJANGO_PROD_SECRET_KEY', 'DB_PASSWORD', 'DB_OWNER_PASSWORD',
-                           'DB_PROD_PASSWORD', 'DB_PROD_OWNER_PASSWORD'):
-                  value = secrets.token_urlsafe(64)
-                  print(f'::add-mask::{value}')
-                  stream.write(f'{name}={value}\n')
-          PY
-      - name: Bootstrap and Cold Start with runtime permissions
+          sudo install -d /usr/share/postgresql-common/pgdg
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+            | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
+          sudo tee /etc/apt/sources.list.d/veqta-pgdg.sources >/dev/null <<'APT'
+          Types: deb
+          URIs: https://apt.postgresql.org/pub/repos/apt
+          Suites: noble-pgdg
+          Components: main
+          Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          APT
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends postgresql-19 postgresql-client-19 nginx openssl
+          echo /usr/lib/postgresql/19/bin >> "$GITHUB_PATH"
+      - name: Source, syntax and protected process environment
         run: |
-          psql -X -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres -f deploy/postgresql/dev.sql
-          DB_RUNTIME_PASSWORD="$DB_PASSWORD" DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
-            python -m coverage run --append --branch --source=config,portal,workwear \
-              --omit='*/migrations/*' -m tests.coldstart
-      - name: Independent PROD Cold Start and cross-contour isolation
+          python scripts/check_source.py
+          python -m compileall -q config portal workwear tests scripts
+          for script in scripts/*.sh tests/*.sh; do
+            bash -n "$script"
+          done
+          sudo bash tests/linux_permissions.sh
+          sh -n deploy/letsencrypt/renew-nginx.sh
+          for script in portal/static/portal/*.js workwear/static/workwear/*.js workwear/static/workwear/js/*.js; do
+            node --input-type=module --check < "$script"
+          done
+          git show --check --format= HEAD
+      - name: Install browser engines
         run: |
-          DB_PASSWORD="$DB_PROD_PASSWORD" DB_OWNER_PASSWORD="$DB_PROD_OWNER_PASSWORD" \
-            psql -X -h "$DB_HOST" -p "$DB_PORT" -U postgres -d postgres -f deploy/postgresql/prod.sql
-          VEQTA_ENV=prod DB_NAME=veqta_prod DB_USER=veqta_prod_owner DB_PASSWORD="$DB_PROD_OWNER_PASSWORD" \
-            DJANGO_SECRET_KEY="$DJANGO_PROD_SECRET_KEY" DJANGO_DEBUG=0 DJANGO_TRUST_PROXY=1 \
-            DJANGO_SECURE_COOKIES=1 DJANGO_ALLOWED_HOSTS=localhost \
-            DJANGO_CSRF_TRUSTED_ORIGINS=https://localhost \
-            python -m coverage run --append --branch --source=config,portal,workwear \
-              --omit='*/migrations/*' manage.py veqta_initialize --environment prod --database-name veqta_prod
-          VEQTA_ENV=prod DB_NAME=veqta_prod DB_USER=veqta_prod DB_PASSWORD="$DB_PROD_PASSWORD" \
-            DJANGO_SECRET_KEY="$DJANGO_PROD_SECRET_KEY" DJANGO_DEBUG=0 DJANGO_TRUST_PROXY=1 \
-            DJANGO_SECURE_COOKIES=1 DJANGO_ALLOWED_HOSTS=localhost \
-            DJANGO_CSRF_TRUSTED_ORIGINS=https://localhost \
-            python manage.py migrate --check
-          python - <<'PY'
-          import os
-          import psycopg
-
-          db = dict(host=os.environ["DB_HOST"], port=os.environ["DB_PORT"],
-                    connect_timeout=5, sslmode="disable")
-          passwords = {
-              "veqta_dev": os.environ["DB_PASSWORD"],
-              "veqta_dev_owner": os.environ["DB_OWNER_PASSWORD"],
-              "veqta_prod": os.environ["DB_PROD_PASSWORD"],
-              "veqta_prod_owner": os.environ["DB_PROD_OWNER_PASSWORD"],
-          }
-          for contour in ("dev", "prod"):
-              database = f"veqta_{contour}"
-              role = database
-              with psycopg.connect(**db, dbname=database, user=role, password=passwords[role]) as conn:
-                  with conn.cursor() as cursor:
-                      cursor.execute("""
-                          SELECT current_database(), current_user,
-                              has_database_privilege(current_user,current_database(),'CREATE'),
-                              has_schema_privilege(current_user,'public','CREATE')
-                      """)
-                      assert cursor.fetchone() == (database, role, False, False)
-                      cursor.execute("SELECT count(*) FROM pg_trigger WHERE tgname LIKE 'ww_%' AND NOT tgisinternal")
-                      assert cursor.fetchone()[0] == 13
-                      try:
-                          cursor.execute(f"SET ROLE veqta_{contour}_owner")
-                      except psycopg.errors.InsufficientPrivilege as error:
-                          assert error.sqlstate == "42501"
-                      else:
-                          raise AssertionError(f"Unexpected owner privilege: {role}")
-          for role, other in (
-              ("veqta_dev", "veqta_prod"), ("veqta_dev_owner", "veqta_prod"),
-              ("veqta_prod", "veqta_dev"), ("veqta_prod_owner", "veqta_dev")
-          ):
-              try:
-                  psycopg.connect(**db, dbname=other, user=role, password=passwords[role]).close()
-              except psycopg.OperationalError as error:
-                  # При отказе на стадии startup libpq может не выдавать SQLSTATE наружу.
-                  assert "permission denied for database" in str(error), (role, other, error)
-              else:
-                  raise AssertionError(f"Cross-contour CONNECT was granted: {role} -> {other}")
-          print("Independent DEV/PROD: migrations, runtime access, SQLSTATE 42501 on SET ROLE and rejected cross-CONNECT: PASS")
-          PY
-      - name: Django and PostgreSQL regression
+          python -m playwright install --with-deps chromium firefox webkit
+          npm install --prefix "$RUNNER_TEMP/veqta-axe" --no-save --ignore-scripts --no-audit --no-fund axe-core@4.11.0
+      - name: Cold Start, role isolation, restore, Django and browser matrix
         run: |
-          python manage.py check
-          python manage.py makemigrations --check --dry-run
-          python manage.py migrate --check
-          DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
-            python -m coverage run --append --branch --source=config,portal,workwear \
-              --omit='*/migrations/*' manage.py test tests --noinput --verbosity 2
-          DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
-            python -m coverage run --append --branch --source=config,portal,workwear \
-              --omit='*/migrations/*' -m tests.acceptance
-          python -m coverage report -m
-          python -m coverage json -o test-results/coverage/coverage.json
-          python -m coverage html -d test-results/coverage/html
+          export VEQTA_TEST_AXE="$RUNNER_TEMP/veqta-axe/node_modules/axe-core/axe.min.js"
+          bash tests/postgresql_release.sh --browser
+      - name: Publish coverage reports
+        if: always()
+        run: |
+          if [[ -s "$COVERAGE_FILE" ]]; then
+            python -m coverage report -m
+            python -m coverage json -o test-results/coverage/coverage.json
+            python -m coverage html -d test-results/coverage/html
+          fi
       - uses: actions/upload-artifact@v7
         if: always()
         with:
@@ -144,41 +75,10 @@ jobs:
           path: test-results/coverage/
           retention-days: 7
           if-no-files-found: ignore
-      - name: Source and syntax
-        run: |
-          python scripts/check_source.py
-          python -m compileall -q config portal workwear tests scripts
-          bash -n scripts/server_checks.sh scripts/server_apply.sh scripts/server_verify.sh tests/linux_permissions.sh
-          sudo bash tests/linux_permissions.sh
-          sh -n deploy/letsencrypt/renew-nginx.sh
-          for script in portal/static/portal/*.js workwear/static/workwear/*.js workwear/static/workwear/js/*.js; do
-            node --input-type=module --check < "$script"
-          done
-          git show --check --format= HEAD
-      - name: Install browsers and native servers for RC acceptance
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          python -m playwright install --with-deps chromium firefox webkit
-          sudo apt-get install --yes --no-install-recommends nginx openssl
-          npm install --prefix "$RUNNER_TEMP/veqta-axe" --no-save --ignore-scripts --no-audit --no-fund axe-core@4.11.0
-      - name: RC acceptance in three engines
-        if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main')
-        run: |
-          failed=0
-          for engine in chromium firefox webkit; do
-            extra=()
-            if [[ "$engine" == chromium ]]; then extra+=(--http-load); fi
-            if ! DB_RUNTIME_PASSWORD="$DB_PASSWORD" DB_USER=veqta_dev_owner DB_PASSWORD="$DB_OWNER_PASSWORD" \
-                python -m tests.acceptance --browser --matrix --server nginx --engine "$engine" "${extra[@]}" \
-                --axe-script "$RUNNER_TEMP/veqta-axe/node_modules/axe-core/axe.min.js" \
-                --artifacts "test-results/rc/$engine"; then
-              failed=1
-            fi
-          done
-          exit "$failed"
       - uses: actions/upload-artifact@v7
-        if: always() && (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/main'))
+        if: always()
         with:
           name: rc-browser-evidence
           path: test-results/rc/
           retention-days: 7
+          if-no-files-found: ignore

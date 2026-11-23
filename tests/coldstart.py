@@ -2,7 +2,6 @@
 from io import StringIO
 import os
 from pathlib import Path
-import secrets
 import tarfile
 from tempfile import TemporaryDirectory
 from uuid import uuid4
@@ -14,7 +13,7 @@ def main():
     django.setup()
     from django.core.management import call_command
     from django.db import connection
-    from django.db.migrations.loader import MigrationLoader
+    from django.conf import settings
     from django.test import Client
     from django.utils import timezone
     from config.database import require_target
@@ -24,16 +23,8 @@ def main():
     )
     from .test_import import make_sources
 
-    require_target("dev", "veqta_dev", owner=True)
-    runtime_password = os.environ.get("DB_RUNTIME_PASSWORD")
-    if not runtime_password:
-        raise RuntimeError("Нужен DB_RUNTIME_PASSWORD отдельной прикладной роли")
-    if connection.introspection.table_names():
-        raise RuntimeError("Cold Start требует новую пустую БД. Существующая схема не изменена")
-    call_command("veqta_initialize", environment="dev", database_name="veqta_dev", stdout=StringIO())
-    loader = MigrationLoader(connection)
-    assert {key for key in loader.disk_migrations if key[0] == "workwear"} == {("workwear", "0001_initial")}
-    assert {key for key in loader.applied_migrations if key[0] == "workwear"} == {("workwear", "0001_initial")}
+    environment, database = settings.VEQTA_ENV, settings.EXPECTED_DATABASE
+    require_target(environment, database)
     for model in (Organization, EmployeeImport, Employee, Request, RequestEmployee,
                   RequestAssignment, WorkwearItem, WorkwearEvent):
         assert not model.objects.exists(), model.__name__
@@ -51,21 +42,10 @@ def main():
             assert "organization_name" not in columns
         columns = {col.name for col in connection.introspection.get_table_description(cursor, "workwear_request")}
         assert "snapshot_organization_name" in columns and "organization_name" not in columns
-    print("Cold Start: одна начальная миграция, пустые справочники, 10 функций, 13 триггеров и составные FK — успешно")
+    print(f"{environment.upper()} Cold Start: пустые справочники, 10 функций, 13 триггеров и составные FK")
 
-    # Схему создаёт владелец, а ORM и API проверяем через отдельную прикладную роль.
-    connection.close()
-    connection.settings_dict.update(USER="veqta_dev", PASSWORD=runtime_password)
-    require_target("dev", "veqta_dev")
-
-    password = secrets.token_urlsafe(32)
-    os.environ["DJANGO_SUPERUSER_PASSWORD"] = password
-    try:
-        call_command("createsuperuser", username="coldstart_admin", email="admin@example.invalid",
-                     interactive=False, stdout=StringIO())
-    finally:
-        os.environ.pop("DJANGO_SUPERUSER_PASSWORD", None)
-    client = Client(HTTP_HOST="localhost")
+    password = os.environ["DJANGO_SUPERUSER_PASSWORD"]
+    client = Client(HTTP_HOST="localhost", HTTP_X_FORWARDED_PROTO="https")
     assert client.login(username="coldstart_admin", password=password)
     metadata = client.get("/workwear/api/ui/metadata/").json()
     assert metadata["organizations"] == [] and metadata["items"] == []
@@ -88,7 +68,7 @@ def main():
         with tarfile.open(archive_path, "w:gz") as archive:
             for filename in ("Employees.csv", "Positions.csv", "Units.csv"):
                 archive.add(source / filename, arcname=filename)
-        options = dict(environment="dev", database_name="veqta_dev", stdout=StringIO())
+        options = dict(environment=environment, database_name=database, stdout=StringIO())
         call_command("workwear_import_1c", str(archive_path), **options)
         call_command("workwear_import_1c", str(archive_path), apply=True,
             source_export_date=timezone.localdate().isoformat(), expected_employee_count=1,
@@ -108,8 +88,6 @@ def main():
     assert RequestAssignment.objects.get().snapshot_validity_days == 90
     from .database_roles import check_runtime_permissions
     check_runtime_permissions()
-    call_command("migrate", check_unapplied=True, stdout=StringIO())
-    call_command("makemigrations", check_changes=True, dry_run=True, stdout=StringIO())
     print("Cold Start: createsuperuser, Admin, пустые состояния, справочники, импорт CLI и первая завершённая заявка — успешно")
 
 

@@ -59,7 +59,7 @@ def check_parallel_load(organization_id, employee_ids, item_ids, users=8):
 
     def worker(arguments):
         connection = connections["default"]
-        connection.settings_dict = {**connection.settings_dict, "USER": "veqta_dev",
+        connection.settings_dict = {**connection.settings_dict, "USER": "svc_platform_dev",
                                     "PASSWORD": os.environ["DB_RUNTIME_PASSWORD"]}
         try:
             user_id, request_id = arguments
@@ -175,7 +175,7 @@ def check_http_load(server, organization_id, employee_ids, item_ids):
                                       data={"expected_version": 1, "members": members, "finish": False})
         saving = client.measurements[-1].copy()
         assert status == 200 and body["version"] == 2 and body["changed"] is True, (status, body)
-        assert saving["database_role"] == "veqta_dev", saving
+        assert saving["database_role"] == "svc_platform_dev", saving
         status, stored = client.request("GET", f"/workwear/api/requests/{request_id}/")
         assert status == 200
         pairs = sorted((member["employee_id"], assignment["item_id"])
@@ -477,11 +477,9 @@ def check_browser(actor, people, executable, engine="chromium", server_options=N
 
 
 def main():
-    """Временную схему удаляем и после ошибки проверки."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--browser", action="store_true")
     parser.add_argument("--browser-executable")
-    parser.add_argument("--server", choices=["runserver", "nginx"], default="runserver")
     parser.add_argument("--nginx-executable", help="Путь к изолированному Nginx для HTTPS-приёмки")
     parser.add_argument("--http-load", action="store_true", help="Восемь одновременных HTTP-пользователей; требует --matrix")
     parser.add_argument("--engine", choices=["chromium", "firefox", "webkit"], default="chromium")
@@ -491,37 +489,35 @@ def main():
     args = parser.parse_args()
     if args.http_load and not args.matrix:
         parser.error("--http-load требует --matrix")
-    server_options = {"stack": args.server, "nginx_executable": args.nginx_executable}
-    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings")
+    server_options = {"nginx_executable": args.nginx_executable}
+    os.environ.setdefault("DJANGO_SETTINGS_MODULE", "tests.settings")
     import django
     django.setup()
-    from config.database import require_target
+    from django.conf import settings
+    from django.core.management import call_command
     from django.db import connection
+    from config.database import verify_connection
     from .factories import make_user, make_import, make_employees, make_items
-    require_target("dev", "veqta_dev", owner=True)
+
+    if settings.SETTINGS_MODULE != "tests.settings":
+        raise RuntimeError("Приёмка требует настройки одноразовой базы")
     if (args.browser or args.matrix) and not os.environ.get("DB_RUNTIME_PASSWORD"):
         raise RuntimeError("Браузерный сервер требует DB_RUNTIME_PASSWORD прикладной роли")
-    with connection._nodb_cursor() as cursor:
-        cursor.execute("SELECT 1 FROM pg_database WHERE datname = %s", ["test_veqta_dev"])
-        if cursor.fetchone():
-            raise RuntimeError("test_veqta_dev уже существует; проверьте её отдельно перед удалением")
-    original_name = connection.settings_dict["NAME"]
-    connection.creation.create_test_db(verbosity=0, autoclobber=False, serialize=False)
-    try:
-        from .database_roles import grant_test_runtime_access
-        grant_test_runtime_access()
-        actor, snapshot = make_user(), make_import()
-        people, items = make_employees(snapshot), make_items()
-        check_race(actor, people, items)
-        if args.browser:
-            check_browser(actor, people, args.browser_executable, args.engine,
-                server_options | {"artifacts": Path(args.artifacts) / "servers/basic"})
-        if args.matrix:
-            from .browser_matrix import check_matrix
-            check_matrix(actor, args.browser_executable, Path(args.artifacts), args.engine, args.axe_script,
-                server_options=server_options | {"artifacts": Path(args.artifacts) / "servers/matrix"}, http_load=args.http_load)
-    finally:
-        connection.creation.destroy_test_db(original_name, verbosity=0)
+    verify_connection(connection, "test_veqta_dev", "svc_platform_dev_migrator")
+    if connection.introspection.table_names():
+        raise RuntimeError("Для приёмки требуется пустая test_veqta_dev")
+
+    call_command("migrate", interactive=False, verbosity=0)
+    actor, snapshot = make_user(), make_import()
+    people, items = make_employees(snapshot), make_items()
+    check_race(actor, people, items)
+    if args.browser:
+        check_browser(actor, people, args.browser_executable, args.engine,
+            server_options | {"artifacts": Path(args.artifacts) / "servers/basic"})
+    if args.matrix:
+        from .browser_matrix import check_matrix
+        check_matrix(actor, args.browser_executable, Path(args.artifacts), args.engine, args.axe_script,
+            server_options=server_options | {"artifacts": Path(args.artifacts) / "servers/matrix"}, http_load=args.http_load)
 
 
 if __name__ == "__main__":

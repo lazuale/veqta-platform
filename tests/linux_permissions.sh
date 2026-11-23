@@ -75,9 +75,12 @@ cat > "$APP/.venv/bin/python" <<'VEQTA_FAKE_PYTHON'
 test -z "${PYTHONPATH-}" || exit 71
 test -z "${PYTHONHOME-}" || exit 72
 test -z "${LD_PRELOAD-}" || exit 73
-test "$DB_USER" = veqta_dev_owner || exit 74
+test "$DB_USER" = svc_platform_dev_migrator || exit 74
 test "$DB_PASSWORD" = synthetic-owner || exit 75
 test "$VEQTA_ENV" = dev || exit 76
+test "$DJANGO_SETTINGS_MODULE" = config.migration || exit 77
+test -z "${PGOPTIONS-}" || exit 78
+test -z "${DB_MIGRATION_PASSWORD-}" || exit 79
 VEQTA_FAKE_PYTHON
 chmod 0755 "$APP/.venv/bin/python"
 # Новый каталог venv может наследовать ACL от среды CI.
@@ -86,7 +89,7 @@ chmod -R go-w "$APP"
 cat > "$APP/owner.env" <<'VEQTA_FAKE_ENV'
 VEQTA_ENV=dev
 DB_NAME=veqta_dev
-DB_USER=veqta_dev_owner
+DB_USER=svc_platform_dev_migrator
 DB_PASSWORD=synthetic-owner
 DB_HOST=127.0.0.1
 DB_PORT=5432
@@ -97,7 +100,7 @@ ENV_NAME=dev
 MIGRATION_CONFIG="$APP/owner.env"
 VEQTA_ENV=dev
 DB_NAME=veqta_dev
-DB_USER=veqta_dev
+DB_USER=svc_platform_dev
 DB_PASSWORD=synthetic-runtime
 DB_HOST=127.0.0.1
 DB_PORT=5432
@@ -109,7 +112,8 @@ DJANGO_TRUST_PROXY=1
 DJANGO_CSRF_TRUSTED_ORIGINS=https://localhost
 DJANGO_SECURE_COOKIES=1
 DJANGO_STATIC_ROOT=/tmp/synthetic-static
-PYTHONPATH=/tmp/untrusted-python veqta_migrate
+PYTHONPATH=/tmp/untrusted-python PGOPTIONS=-c DB_MIGRATION_PASSWORD=synthetic-unused \
+  veqta_root_django config.migration migrate --noinput
 
 # Окружение процесса владельца закрыто для непривилегированного пользователя.
 (DB_PASSWORD=synthetic-owner /bin/sleep 8) &

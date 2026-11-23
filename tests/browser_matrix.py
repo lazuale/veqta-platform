@@ -900,7 +900,7 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
         summary = {
             "results": results, "completed": True,
             "passed": all(r['status']=='passed' for r in results) and not errors and sorted(failures)==sorted(expected_http),
-            "server_stack": (server_options or {}).get("stack", "runserver"), "browser_engine": engine, "browser_version": browser.version, "engines_available": engines,
+            "server_stack": "nginx", "browser_engine": engine, "browser_version": browser.version, "engines_available": engines,
             "javascript_errors": errors, "console": console,
             "expected_http_errors": [{"status":status,"path":urlsplit(url).path} for status,url in expected_http],
             "observed_http_errors": [{"status":status,"path":urlsplit(url).path} for status,url in failures],

@@ -271,18 +271,16 @@ class InstallationConfigurationTests(unittest.TestCase):
         for contour, hostname in (("dev", "dev.example.invalid"), ("prod", "release.example.invalid")):
             result = self.generate(contour, hostname)
             self.assertEqual(result.returncode, 0, result.stderr)
-            contents = []
             for suffix in ("", "-migrate"):
                 path = self.project / f".env.{contour}{suffix}"
                 self.assertEqual(path.stat().st_mode & 0o777, 0o600)
-                text = path.read_text()
-                contents.append(text)
-                self.assertIn(f"VEQTA_HOSTNAME={hostname}\n", text)
-                self.assertIn(f"DB_USER=veqta_{contour}" + ("_owner" if suffix else "") + "\n", text)
-                password = next(line.split("=", 1)[1] for line in text.splitlines() if line.startswith("DB_PASSWORD="))
-                self.assertNotIn(password, result.stdout + result.stderr)
+                values = dict(line.split("=", 1) for line in path.read_text().splitlines() if "=" in line)
+                role = f"svc_platform_{contour}" + ("_migrator" if suffix else "")
+                self.assertEqual(values["VEQTA_HOSTNAME"], hostname)
+                self.assertEqual(values["DB_USER"], role)
+                password = values["DB_PASSWORD"]
+                self.assertFalse(password in result.stdout or password in result.stderr)
                 secrets_seen.append(password)
-            self.assertNotEqual(contents[0], contents[1])
         self.assertEqual(len(set(secrets_seen)), 4)
 
     def test_generator_rejects_invalid_or_missing_hostname(self):
@@ -344,8 +342,8 @@ class InstallationConfigurationTests(unittest.TestCase):
         self.env['DB_HOST'] = '127.0.0.1'
         self.assertNotEqual(self.load({"DB_HOST": ""}).returncode, 0)
 
-    def test_service_configuration_rejects_owner_role(self):
-        self.assertNotEqual(self.load({"DB_USER": "veqta_prod_owner"}).returncode, 0)
+    def test_service_configuration_rejects_database_name_as_role(self):
+        self.assertNotEqual(self.load({"DB_USER": "veqta_prod"}).returncode, 0)
 
     def test_service_configuration_accepts_server_role(self):
         result = self.load({"DB_USER": "svc_platform_prod"})
@@ -365,7 +363,7 @@ class InstallationConfigurationTests(unittest.TestCase):
                                ("svc_platform_prod", False),
                                ("svc_platform_dev_migrator", False)):
             with self.subTest(role=role):
-                config.write_text(original.replace("DB_USER=veqta_prod_owner\n", f"DB_USER={role}\n"))
+                config.write_text(original.replace("DB_USER=svc_platform_prod_migrator\n", f"DB_USER={role}\n"))
                 result = self.shell(command)
                 self.assertEqual(result.returncode == 0, accepted, result.stderr)
 
@@ -414,7 +412,7 @@ class ServerApplyTests(unittest.TestCase):
         config = config.replace("DB_PASSWORD=\n", "DB_PASSWORD=synthetic\n")
         config = config.replace("/var/www/", str(self.path) + "/var/www/")
         (self.path / "etc/veqta/prod.env").write_text(config)
-        (self.path / "etc/veqta/prod-migrate.env").write_text(config.replace("DB_USER=veqta_prod\n", "DB_USER=veqta_prod_owner\n"))
+        (self.path / "etc/veqta/prod-migrate.env").write_text(config.replace("DB_USER=svc_platform_prod\n", "DB_USER=svc_platform_prod_migrator\n"))
         self.site = self.path / "etc/nginx/sites-available/veqta-prod"
         self.link = self.path / "etc/nginx/sites-enabled/veqta-prod"
         self.script("runuser", '#!/bin/sh\nshift 3\nexec "$@"\n')
