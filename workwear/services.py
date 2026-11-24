@@ -62,9 +62,10 @@ def _audit(request_id, actor, event_type, **details):
     return event
 
 
-def _lock_request(request_id, expected_version, *, status):
-    # Блокировку импорта берём до блокировки заявки, как при сохранении всего черновика.
-    lock_for_membership()
+def _lock_request(request_id, expected_version, *, status, membership_lock=True):
+    # При изменении состава блокируем импорт до блокировки строки заявки.
+    if membership_lock:
+        lock_for_membership()
     req = Request.objects.select_for_update().get(pk=request_id)
     if type(expected_version) is not int or expected_version < 1:
         raise ValidationError("Требуется текущая версия заявки")
@@ -157,7 +158,7 @@ def remove_employee(*, request_id, member_id, actor, expected_version):
 def add_assignment(*, request_id, member_id, item_id, actor, expected_version):
     """Предупреждение о прошлой выдаче не запрещает новое назначение."""
     _authorize(actor, "change_request")
-    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
+    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT, membership_lock=False)
     member = RequestEmployee.objects.get(pk=member_id, request_id=req.pk)
     item = WorkwearItem.objects.get(pk=item_id)
     if not item.is_active:
@@ -179,7 +180,7 @@ def add_assignment(*, request_id, member_id, item_id, actor, expected_version):
 @transaction.atomic
 def remove_assignment(*, request_id, assignment_id, actor, expected_version):
     _authorize(actor, "change_request")
-    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
+    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT, membership_lock=False)
     assignment = RequestAssignment.objects.get(
         pk=assignment_id, request_employee__request_id=req.pk,
     )
@@ -240,7 +241,7 @@ def reopen_request(*, request_id, actor, expected_version, reason=""):
     if not isinstance(reason, str) or len(reason) > 500:
         raise ValidationError("Причина возврата должна содержать не более 500 символов")
     validate_text(reason)
-    req = _lock_request(request_id, expected_version, status=RequestStatus.CLOSED)
+    req = _lock_request(request_id, expected_version, status=RequestStatus.CLOSED, membership_lock=False)
     old_completed_at = req.completed_at.isoformat()
     old_completed_by_id = req.completed_by_id
     req.status = RequestStatus.DRAFT
