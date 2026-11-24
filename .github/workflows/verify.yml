@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   verify:
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 45
     env:
       COVERAGE_FILE: test-results/coverage/.coverage
@@ -36,10 +36,11 @@ jobs:
           sudo install -d /usr/share/postgresql-common/pgdg
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
             | sudo tee /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc >/dev/null
-          sudo tee /etc/apt/sources.list.d/veqta-pgdg.sources >/dev/null <<'APT'
+          PGDG_SUITE="$(. /etc/os-release && printf '%s-pgdg' "$VERSION_CODENAME")"
+          sudo tee /etc/apt/sources.list.d/veqta-pgdg.sources >/dev/null <<APT
           Types: deb
           URIs: https://apt.postgresql.org/pub/repos/apt
-          Suites: noble-pgdg
+          Suites: $PGDG_SUITE
           Components: main
           Signed-By: /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
           APT
