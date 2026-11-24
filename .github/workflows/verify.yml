@@ -27,7 +27,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends python3.14 python3.14-venv
-          expected="$(tr -d '\\r\\n' < .python-version)"
+          expected="$(tr -d '\r\n' < .python-version)"
           actual="$(python3.14 -c 'import platform; print(platform.python_version())')"
           test "$actual" = "$expected"
           python3.14 -m venv "$RUNNER_TEMP/veqta-python"
