@@ -90,9 +90,6 @@ USE_TZ = True
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 STATIC_URL = '/static/'
 STATIC_ROOT = Path(os.environ.get('DJANGO_STATIC_ROOT', str(BASE_DIR / 'staticfiles')))
-# Учётными записями управляют без электронной почты.
-MAILERS = {}
-# Отправка писем отключена; почтовый сервер для запуска не нужен.
 # Не включаем домен в браузерный preload-список: HSTS действует год на хост и его поддомены.
 SILENCED_SYSTEM_CHECKS = ["mail.W001", "security.W021"]
 LOGIN_URL = '/login/'
