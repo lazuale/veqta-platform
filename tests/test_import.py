@@ -14,6 +14,7 @@ from django.db import connection, IntegrityError
 from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from workwear.importers.directories_1c import parse, ImportRejected
 from workwear.importers.acceptance import accept, review
@@ -57,6 +58,36 @@ class ImportTests(TestCase):
         self.assertEqual((result.created, result.current), (1, 1))
         self.assertEqual(Employee.objects.get().personnel_number, "TEST-00001")
         self.assertEqual(EmployeeImport.objects.get().source_export_date, self.date)
+
+    def test_large_import_uses_bounded_guid_queries(self):
+        people = [
+            (str(uuid4()), f"TEST-{index:05d}", f"Тестовый сотрудник {index:05d}")
+            for index in range(501)
+        ]
+        make_sources(self.path, people=people)
+        batch = parse(self.path)
+
+        with CaptureQueriesContext(connection) as captured:
+            result = self.publish(batch)
+        self.assertEqual(result.created, 501)
+        lock_queries = [
+            query["sql"] for query in captured
+            if 'FROM "workwear_employee"' in query["sql"] and "FOR UPDATE" in query["sql"]
+        ]
+        self.assertEqual(len(lock_queries), 2)
+
+        make_sources(self.path, people=people[:-1])
+        reduced_batch = parse(self.path)
+        with CaptureQueriesContext(connection) as captured:
+            checked = review(reduced_batch)
+        self.assertEqual(checked.missing_current_count, 1)
+        self.assertEqual(checked.missing_current_guids, (people[-1][0],))
+        employee_queries = [
+            query["sql"] for query in captured
+            if 'FROM "workwear_employee"' in query["sql"]
+        ]
+        self.assertEqual(len(employee_queries), 1)
+        self.assertNotIn(" IN (", employee_queries[0])
 
     def test_tar_and_directory_have_same_hashes(self):
         target = self.path/"source.tar.gz"
