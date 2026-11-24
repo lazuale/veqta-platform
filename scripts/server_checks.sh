@@ -254,17 +254,17 @@ veqta_unit_value() {
   '
 }
 
-veqta_check_unit() {
+veqta_check_unit_config() {
   local state expected property actual exec_start argv
   state=$(systemctl show "$SERVICE" \
-    -p ActiveState -p SubState -p User -p Group -p WorkingDirectory \
+    -p User -p Group -p WorkingDirectory \
     -p NeedDaemonReload -p FragmentPath -p DropInPaths -p Type \
     -p Restart -p RestartUSec -p UMask -p NoNewPrivileges -p PrivateTmp \
     -p ProtectSystem -p ProtectHome -p EnvironmentFiles -p Environment \
     -p UnsetEnvironment -p ExecStart) || return 1
 
   for expected in \
-    'ActiveState=active' 'SubState=running' "User=$ACTOR" "Group=$ACTOR" \
+    "User=$ACTOR" "Group=$ACTOR" \
     "WorkingDirectory=$APP" 'NeedDaemonReload=no' "FragmentPath=$UNIT_FILE" \
     'DropInPaths=' 'Type=simple' 'Restart=on-failure' 'RestartUSec=5s' \
     'UMask=0027' 'NoNewPrivileges=yes' 'PrivateTmp=yes' 'ProtectSystem=strict' \
@@ -288,6 +288,19 @@ veqta_check_unit() {
   expected="$APP/.venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:$PORT --workers 2 --timeout 120 --error-logfile - --no-control-socket"
   if [[ "$exec_start" != *"path=$APP/.venv/bin/gunicorn"* || "$argv" != "$expected" ]]; then
     echo "FAIL: ${SERVICE}: ExecStart не соответствует штатной команде Gunicorn" >&2
+    return 1
+  fi
+  printf '%s\n' "$state"
+}
+
+veqta_check_unit() {
+  local state active sub
+  veqta_check_unit_config || return 1
+  state=$(systemctl show "$SERVICE" -p ActiveState -p SubState) || return 1
+  active=$(veqta_unit_value "$state" ActiveState) || active='[свойство отсутствует]'
+  sub=$(veqta_unit_value "$state" SubState) || sub='[свойство отсутствует]'
+  if [[ "$active" != active || "$sub" != running ]]; then
+    echo "FAIL: ${SERVICE}: ожидается active/running, получено ${active}/${sub}" >&2
     return 1
   fi
   printf '%s\n' "$state"
