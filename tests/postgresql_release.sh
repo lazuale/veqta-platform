@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Создаём два одноразовых кластера с локальными паролями и проверяем выпуск.
+# Создаём одноразовые кластеры с локальными паролями и проверяем выпуск.
 set -Eeuo pipefail
 umask 077
 [[ $# == 0 || ( $# == 1 && "$1" == --browser ) ]] || exit 2
@@ -14,7 +14,7 @@ done
 lab=$(mktemp -d)
 cleanup() {
   local cluster
-  for cluster in primary restore; do
+  for cluster in primary restore upgrade; do
     if [[ -s "$lab/$cluster/postmaster.pid" ]]; then
       pg_ctl -D "$lab/$cluster" -m fast -w stop >/dev/null || return
     fi
@@ -65,13 +65,15 @@ bootstrap() {
     python scripts/bootstrap_database.py "$VEQTA_ENV" "$@"
 }
 
-migrator() (
+migrator_python() (
   unset PGPASSWORD VEQTA_TEST_DEV_RUNTIME VEQTA_TEST_PROD_RUNTIME
   unset VEQTA_TEST_DEV_MIGRATOR VEQTA_TEST_PROD_MIGRATOR
   export DB_USER="svc_platform_${VEQTA_ENV}_migrator" DB_PASSWORD="$migrator_password"
   export DJANGO_SETTINGS_MODULE=config.migration
-  exec "${python_command[@]}" manage.py "$@"
+  exec "${python_command[@]}" "$@"
 )
+
+migrator() { migrator_python manage.py "$@"; }
 
 runtime() (
   unset PGPASSWORD VEQTA_TEST_DEV_RUNTIME VEQTA_TEST_PROD_RUNTIME
@@ -95,9 +97,9 @@ for contour in dev prod; do
   bootstrap
   expected_failure 'новый контур' bootstrap
   expected_failure 'Контур, имя БД и роль' runtime manage.py migrate --plan --settings=config.migration
-  expected_failure 'Неверная целевая база' migrator veqta_initialize --environment "$contour" --database-name postgres
-  migrator veqta_initialize --environment "$contour" --database-name "$DB_NAME"
-  expected_failure 'База уже содержит таблицы' migrator veqta_initialize --environment "$contour" --database-name "$DB_NAME"
+  DB_NAME=postgres expected_failure 'Контур, имя БД и роль' migrator migrate --noinput
+  migrator migrate --noinput
+  migrator_python -m scripts.database_access --protect-migrations
   expected_failure 'permission denied for table django_migrations' runtime manage.py migrate --plan
   migrator makemigrations --check --dry-run
   migrator migrate --plan
@@ -109,7 +111,9 @@ for contour in dev prod; do
   runtime -m tests.coldstart
   unset DJANGO_SUPERUSER_PASSWORD
   migrator migrate --noinput
+  migrator_python -m scripts.database_access --protect-migrations
   migrator migrate --check
+  migrator_python -m scripts.database_access
 done
 python - "$lab/primary.log" <<'PYTHON'
 import os
@@ -147,6 +151,64 @@ DB_USER=svc_platform_prod DB_PASSWORD="$runtime_password" \
   VEQTA_TEST_RESTORED_MIGRATOR="$migrator_password" \
     VEQTA_TEST_RESTORED_RUNTIME="$runtime_password" DB_USER=svc_platform_prod_migrator \
     DB_PASSWORD="$migrator_password" python -m tests.release_database "$restore_port"
+  DB_PORT="$restore_port" migrator_python -m scripts.database_access
+)
+
+# Собираем исходные базы кодом двух фактических выпусков и сохраняем их данные при переходе.
+(
+  start_cluster upgrade
+  export DB_PORT=$PGPORT
+  seed=$(cat <<'PYTHON'
+from tests.factories import make_employees, make_import, make_items, make_organization, make_user
+from workwear.services import create_request
+from workwear.sync import save_draft
+
+organization = make_organization("Организация предыдущего выпуска")
+employee = make_employees(make_import(), 1, organization)[0]
+item = make_items(1)[0]
+actor = make_user()
+request = create_request(organization_id=organization.pk, actor=actor)
+save_draft(request_id=request.pk, actor=actor, expected_version=request.version,
+    members=[{"employee_id": employee.pk, "item_ids": [item.pk]}], finish=True)
+PYTHON
+)
+  for contour in dev prod; do
+    export VEQTA_ENV=$contour DB_NAME="veqta_$contour"
+    runtime_password=$(new_password)
+    migrator_password=$(new_password)
+    export "VEQTA_TEST_${contour^^}_RUNTIME=$runtime_password"
+    export "VEQTA_TEST_${contour^^}_MIGRATOR=$migrator_password"
+    release="$lab/release-$contour"
+    mkdir "$release"
+    if [[ "$contour" == dev ]]; then
+      git archive 94172bac3166ea5d1882159f932b5d848164db58 | tar -x -C "$release"
+      (
+        cd "$release"
+        DB_PASSWORD="$runtime_password" DB_OWNER_PASSWORD="$migrator_password" psql -Xw -f deploy/postgresql/dev.sql
+        export DB_USER=veqta_dev_owner DB_PASSWORD="$migrator_password" DJANGO_SETTINGS_MODULE=config.settings
+        python manage.py veqta_initialize --environment dev --database-name veqta_dev
+        python manage.py shell -c "$seed"
+      )
+      # На сервере роли уже переименованы. Права и владельцы сохраняются по OID.
+      psql -Xw -c '
+        ALTER ROLE veqta_dev RENAME TO svc_platform_dev;
+        ALTER ROLE veqta_dev_owner RENAME TO svc_platform_dev_migrator;
+        ALTER ROLE svc_platform_dev NOINHERIT;
+        ALTER ROLE svc_platform_dev_migrator NOINHERIT NOCREATEDB;
+      '
+    else
+      git archive e689dc3d69e3aca69324d9e031655bb3c2af044e | tar -x -C "$release"
+      (
+        cd "$release"
+        bootstrap
+        DB_USER=svc_platform_prod_migrator DB_PASSWORD="$migrator_password" \
+          DJANGO_SETTINGS_MODULE=config.migration python manage.py veqta_initialize --environment prod --database-name veqta_prod
+        DB_USER=svc_platform_prod_migrator DB_PASSWORD="$migrator_password" \
+          DJANGO_SETTINGS_MODULE=config.migration python manage.py shell -c "$seed"
+      )
+    fi
+    python -m tests.release_database --upgrade "$contour"
+  done
 )
 
 export VEQTA_ENV=dev DB_NAME=veqta_dev

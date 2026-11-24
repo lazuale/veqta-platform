@@ -60,8 +60,10 @@ veqta_root_django config.migration migrate --plan
 if [[ "${2:-}" == --migrate ]]; then
   echo 'Применяем миграции целевого контура (флаг --migrate задан явно)'
   veqta_root_django config.migration migrate --noinput
+  veqta_root_python config.migration -m scripts.database_access --protect-migrations
 fi
 veqta_root_django config.migration migrate --check
+veqta_root_python config.migration -m scripts.database_access
 
 install -d -o root -g root -m 0755 /var/www/veqta
 install -d -o root -g www-data -m 2750 "$STATIC_ROOT"

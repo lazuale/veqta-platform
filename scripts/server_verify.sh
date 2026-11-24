@@ -25,6 +25,7 @@ systemctl show "$SERVICE" -p ActiveState -p SubState -p User -p WorkingDirectory
 echo '=== PostgreSQL ==='
 veqta_check_database
 veqta_root_django config.migration migrate --check
+veqta_root_python config.migration -m scripts.database_access
 
 echo '=== Gunicorn ==='
 veqta_check_http

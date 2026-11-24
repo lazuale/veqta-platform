@@ -145,11 +145,13 @@ class RuntimeGuardTests(SimpleTestCase):
             with self.assertRaisesRegex(RuntimeError, "PostgreSQL"):
                 lock_for_acceptance()
 
-    def test_initialize_rejects_existing_schema(self):
-        from workwear.management.commands.veqta_initialize import Command
+    def test_connection_closes_on_unexpected_identity(self):
+        from config.database import check_connection
 
-        with patch("workwear.management.commands.veqta_initialize.require_target"), \
-             patch("workwear.management.commands.veqta_initialize.connection") as database:
-            database.introspection.table_names.return_value = ["django_migrations"]
-            with self.assertRaisesRegex(CommandError, "База уже содержит таблицы"):
-                Command().handle(environment="dev", database_name="veqta_dev")
+        with patch("config.database.settings", VEQTA_ENV="dev", VEQTA_MIGRATION=True), \
+             patch("config.database.verify_connection", side_effect=CommandError("Неверная роль")), \
+             patch("config.database.connection") as database:
+            database.settings_dict = {"NAME": "veqta_dev"}
+            with self.assertRaisesRegex(CommandError, "Неверная роль"):
+                check_connection(None, database)
+            database.close.assert_called_once_with()

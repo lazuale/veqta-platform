@@ -141,7 +141,7 @@ veqta_load_migration_config() {
 }
 
 # Секреты передаём в окружении самого Python, без промежуточных аргументов env.
-veqta_root_django() (
+veqta_root_python() (
   local module=$1 name
   shift
   [[ $EUID -eq 0 ]] || { echo 'STOP: требуется root' >&2; exit 1; }
@@ -155,7 +155,7 @@ veqta_root_django() (
     *) exit 2 ;;
   esac
 
-  # Миграции и сборка статики не наследуют параметры загрузки Python и libpq.
+  # Служебные команды не наследуют параметры загрузки Python и libpq.
   while IFS= read -r name; do
     export -n "$name"
   done < <(compgen -e)
@@ -166,8 +166,14 @@ veqta_root_django() (
   export DJANGO_TRUST_PROXY DJANGO_CSRF_TRUSTED_ORIGINS DJANGO_SECURE_COOKIES DJANGO_STATIC_ROOT
   export DB_NAME DB_USER DB_PASSWORD DB_HOST DB_PORT DB_SSLMODE
   cd "$APP" || exit 1
-  exec "$APP/.venv/bin/python" -B manage.py "$@"
+  exec "$APP/.venv/bin/python" -B "$@"
 )
+
+veqta_root_django() {
+  local module=$1
+  shift
+  veqta_root_python "$module" manage.py "$@"
+}
 
 veqta_clean_checkout() {
   local status

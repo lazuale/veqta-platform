@@ -1,4 +1,4 @@
-"""Проверки ролей и восстановления в кластерах tests/postgresql_release.sh."""
+"""Проверяем права, обновление и восстановление в одноразовых кластерах."""
 import os
 import subprocess
 import sys
@@ -94,6 +94,12 @@ def inventory(conn):
                    defaclobjtype, defaclacl::text
             FROM pg_default_acl ORDER BY 1, 2, 3
         """,
+        "права столбцов": """
+            SELECT c.relname, a.attname, a.attacl::text FROM pg_attribute AS a
+            JOIN pg_class AS c ON c.oid = a.attrelid
+            WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+                AND a.attacl IS NOT NULL ORDER BY 1, 2
+        """,
     }
     state = {label: conn.execute(query).fetchall() for label, query in queries.items()}
     for name, kind, *_ in state["таблицы, последовательности, индексы"]:
@@ -110,11 +116,128 @@ def inventory(conn):
     return state
 
 
-def migration(*arguments, **changes):
+def migrator(contour, *arguments, **changes):
+    environment = os.environ | dict(
+        DB_USER=f"svc_platform_{contour}_migrator", DB_PASSWORD=os.environ[f"VEQTA_TEST_{contour.upper()}_MIGRATOR"],
+        DJANGO_SETTINGS_MODULE="config.migration",
+    ) | changes
     return subprocess.run(
-        [sys.executable, "manage.py", "migrate", *arguments],
-        env=os.environ | changes, capture_output=True, text=True, check=False, timeout=30,
+        [sys.executable, *arguments], env=environment, capture_output=True, text=True, check=False, timeout=45,
     )
+
+
+def workwear_migrations(conn):
+    return conn.execute("SELECT name FROM public.django_migrations WHERE app = 'workwear' ORDER BY name").fetchall()
+
+
+def object_ids(conn):
+    return conn.execute("""
+        SELECT oid FROM pg_class WHERE relnamespace='public'::regnamespace
+        UNION ALL SELECT oid FROM pg_proc WHERE pronamespace='public'::regnamespace
+        UNION ALL SELECT oid FROM pg_constraint WHERE connamespace='public'::regnamespace
+        UNION ALL SELECT oid FROM pg_trigger WHERE tgrelid IN (
+            SELECT oid FROM pg_class WHERE relnamespace='public'::regnamespace
+        )
+        ORDER BY 1
+    """).fetchall()
+
+
+def check_column_drift(owner):
+    # Отдельные GRANT имитируют отклонения на ранее применённой схеме.
+    owner.execute("""
+        GRANT SELECT (id) ON public.django_migrations TO PUBLIC;
+        GRANT INSERT (app) ON public.django_migrations TO svc_platform_prod;
+        GRANT SELECT (name) ON public.django_migrations TO svc_platform_dev;
+        GRANT UPDATE (details) ON public.workwear_workwearevent TO svc_platform_dev, svc_platform_prod;
+        ALTER TABLE public.workwear_workwearevent DISABLE TRIGGER ww_event_no_truncate;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON SEQUENCES TO svc_platform_prod;
+    """)
+    with psycopg.connect(dbname="postgres", user="postgres", connect_timeout=5, autocommit=True) as administrator:
+        administrator.execute("GRANT svc_platform_dev TO svc_platform_prod WITH INHERIT TRUE")
+        administrator.execute("ALTER ROLE svc_platform_prod IN DATABASE veqta_prod SET session_replication_role = replica")
+        try:
+            before = inventory(owner)
+            audit = migrator("prod", "-m", "scripts.database_access")
+            assert audit.returncode != 0, audit.stdout
+            for expected in (
+                "права столбца: public.django_migrations.id",
+                "права столбца: public.django_migrations.name",
+                "права столбца: public.django_migrations.app",
+                "права столбца: public.workwear_workwearevent.details",
+                "права по умолчанию (S)",
+                "недопустимое членство: svc_platform_prod → svc_platform_dev",
+                "недопустимая настройка session_replication_role",
+                "межконтурный доступ: svc_platform_prod → veqta_dev",
+                "public.workwear_workwearevent.ww_event_no_truncate",
+            ):
+                assert expected in audit.stderr, audit.stderr
+            assert before == inventory(owner)
+        finally:
+            administrator.execute("REVOKE svc_platform_dev FROM svc_platform_prod")
+            administrator.execute("ALTER ROLE svc_platform_prod IN DATABASE veqta_prod RESET session_replication_role")
+    owner.execute("""
+        ALTER TABLE public.workwear_workwearevent ENABLE TRIGGER ww_event_no_truncate;
+        ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON SEQUENCES FROM svc_platform_prod;
+    """)
+    print("Read-only проверка выявляет изменения ACL столбцов, default privileges, членства, изоляции и триггеров")
+
+
+def check_upgrade(contour):
+    audit_args = ("-m", "scripts.database_access")
+    with connect(contour, migration=True) as owner:
+        initial_history = [("0001_initial",)]
+        if contour == "dev":
+            assert owner.execute("""
+                SELECT has_sequence_privilege('svc_platform_dev', 'public.django_migrations_id_seq', 'SELECT'),
+                       has_function_privilege('svc_platform_dev', 'public.ww_reject_event_change()', 'EXECUTE')
+            """).fetchone() == (True, True)
+        else:
+            initial_history.append(("0002_database_acl",))
+            check_column_drift(owner)
+        assert workwear_migrations(owner) == initial_history
+        before = inventory(owner)
+        identities = object_ids(owner)
+        assert before["workwear_request"][0][0] > 0 and before["workwear_workwearevent"][0][0] > 0
+
+        with owner.transaction():
+            owner.execute("LOCK TABLE public.django_migrations IN SHARE MODE")
+            failed = migrator(contour, "manage.py", "migrate", "--noinput", PGOPTIONS="-c lock_timeout=2000")
+            assert failed.returncode != 0 and "lock timeout" in failed.stderr, failed.stderr
+            assert workwear_migrations(owner) == initial_history
+            assert before == inventory(owner)
+
+        for arguments in (("manage.py", "migrate", "--noinput"), (*audit_args, "--protect-migrations"), audit_args):
+            result = migrator(contour, *arguments)
+            assert result.returncode == 0, result.stdout + result.stderr
+        assert workwear_migrations(owner) == [("0001_initial",), ("0002_database_acl",), ("0003_event_access",)]
+        assert object_ids(owner) == identities
+        after = inventory(owner)
+        changed = {
+            "django_migrations", "django_migrations_id_seq", "права столбцов", "права по умолчанию",
+            "таблицы, последовательности, индексы", "функции",
+        }
+        assert all(after[label] == data for label, data in before.items() if label not in changed)
+        assert after["права столбцов"] == []
+
+        for arguments in (("manage.py", "migrate", "--noinput"), (*audit_args, "--protect-migrations"), audit_args):
+            result = migrator(contour, *arguments)
+            assert result.returncode == 0, result.stdout + result.stderr
+        assert after == inventory(owner)
+
+    with connect(contour) as runtime:
+        assert runtime.execute("SELECT count(*) FROM public.workwear_workwearevent").fetchone() == before["workwear_workwearevent"][0][:1]
+        for statement in (
+            "SELECT id FROM public.django_migrations WHERE false",
+            "SELECT name FROM public.django_migrations WHERE false",
+            "INSERT INTO public.django_migrations (app) SELECT 'probe' WHERE false",
+            "UPDATE public.workwear_workwearevent SET details = '{}' WHERE false",
+        ):
+            try:
+                runtime.execute(statement)
+            except psycopg.errors.InsufficientPrivilege:
+                continue
+            raise AssertionError(f"Прикладной роли разрешена операция: {statement}")
+    print(f"{contour.upper()}: обновление с {initial_history[-1][0]}, откат и повторный запуск подтверждены")
 
 
 def check_recovery(restore_port):
@@ -138,35 +261,6 @@ def check_recovery(restore_port):
         else:
             raise AssertionError("После восстановления доступен журнал миграций")
     print("pg_restore: данные, владельцы, индексы, ограничения, триггеры, ACL и права по умолчанию совпадают")
-
-    target = dict(DB_PORT=restore_port, DJANGO_SETTINGS_MODULE="config.migration")
-    result = migration("workwear", "0001", "--noinput", **target)
-    assert result.returncode == 0, result.stderr
-    recorded = "SELECT count(*) FROM django_migrations WHERE app='workwear' AND name='0002_database_acl'"
-    with connect("prod", migration=True, port=restore_port) as owner:
-        owner.execute("GRANT SELECT ON django_migrations TO svc_platform_prod")
-        owner.execute("GRANT UPDATE ON workwear_workwearevent TO svc_platform_prod")
-        assert owner.execute(recorded).fetchone() == (0,)
-        with owner.transaction():
-            owner.execute("LOCK TABLE django_migrations IN SHARE MODE")
-            result = migration("--noinput", PGOPTIONS="-c lock_timeout=2000", **target)
-            assert result.returncode != 0 and "lock timeout" in result.stderr, result.stderr
-            assert owner.execute(recorded).fetchone() == (0,)
-            assert owner.execute("""
-                SELECT has_table_privilege('svc_platform_prod', 'django_migrations', 'SELECT'),
-                       has_table_privilege('svc_platform_prod', 'workwear_workwearevent', 'UPDATE')
-            """).fetchone() == (True, True)
-
-        result = migration("--noinput", **target)
-        assert result.returncode == 0, result.stderr
-        result = migration("--check", **target)
-        assert result.returncode == 0, result.stderr
-        assert owner.execute(recorded).fetchone() == (1,)
-        after_retry = inventory(owner)
-        # Повторная запись миграции получает другой ID и время.
-        ignored = {"django_migrations", "django_migrations_id_seq"}
-        assert all(after_retry[label] == data for label, data in source_state.items() if label not in ignored)
-    print("Обновление с 0001: прерванная миграция откатила ACL, повтор завершился с сохранением данных")
 
     smoke = """
 from django.contrib.auth import get_user_model
@@ -198,7 +292,9 @@ assert WorkwearEvent.objects.exists()
 
 
 if __name__ == "__main__":
-    if len(sys.argv) == 2:
+    if len(sys.argv) == 3 and sys.argv[1] == "--upgrade":
+        check_upgrade(sys.argv[2])
+    elif len(sys.argv) == 2:
         check_recovery(sys.argv[1])
     else:
         check_isolation()

@@ -9,7 +9,7 @@ trap 'rm -rf -- "$APP"' EXIT
 chmod 0755 "$APP"
 mkdir -p "$APP/.git" "$APP/.venv/lib" "$APP/config" "$APP/scripts" "$APP/workwear/management/commands"
 for file in manage.py config/settings.py scripts/server_checks.sh \
-            workwear/management/commands/veqta_initialize.py .venv/lib/dependency.py; do
+            scripts/database_access.py .venv/lib/dependency.py; do
   printf '# synthetic trusted code\n' > "$APP/$file"
   chmod 0644 "$APP/$file"
 done
@@ -26,7 +26,7 @@ runuser -u nobody -- test -r "$APP/manage.py"
 runuser -u nobody -- test -r "$APP/.venv/lib/dependency.py"
 runuser -u nobody -- test -r "$APP/.venv/lib64/dependency.py"
 for file in manage.py config/settings.py scripts/server_checks.sh \
-            workwear/management/commands/veqta_initialize.py .venv/lib/dependency.py; do
+            scripts/database_access.py .venv/lib/dependency.py; do
   if runuser -u nobody -- sh -c 'printf malicious >> "$1"' sh "$APP/$file" 2>/dev/null; then
     echo "FAIL: прикладной UID изменил $file" >&2; exit 1
   fi

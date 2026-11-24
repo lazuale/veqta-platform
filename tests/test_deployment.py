@@ -478,6 +478,19 @@ printf '#!/bin/sh\nexit 0\n' > "$3/bin/python"
         self.assertIn("SERVER APPLY: PASS", result.stdout)
         self.assertTrue((self.app / ".venv/bin/python").is_file())
 
+    def test_acl_failure_stops_apply_before_service_restart(self):
+        python = self.app / ".venv/bin/python"
+        python.write_text("""#!/bin/sh
+if [ "$*" = '-B -m scripts.database_access' ]; then
+  echo 'Отклонения в PostgreSQL' >&2
+  exit 1
+fi
+""")
+        result = self.apply()
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Отклонения в PostgreSQL", result.stderr)
+        self.assertFalse((self.path / "systemctl.log").exists())
+
     def test_nginx_failure_restores_existing_file_without_reload(self):
         previous = "previous exact site\n"
         self.site.write_text(previous)

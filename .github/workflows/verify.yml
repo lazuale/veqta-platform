@@ -16,6 +16,8 @@ jobs:
       COVERAGE_FILE: test-results/coverage/.coverage
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version-file: .python-version
