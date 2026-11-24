@@ -20,7 +20,7 @@ def seed_matrix(actor):
     from django.contrib.auth.models import Permission
     from django.utils import timezone
     from workwear import services
-    from workwear.models import Employee, EmployeeImport, Organization, WorkwearItem
+    from workwear.models import Employee, Organization, WorkwearItem
     from workwear.sync import save_draft
     from .factories import make_import, make_user
     WorkwearItem.objects.update(is_active=False)
@@ -77,9 +77,8 @@ def seed_matrix(actor):
     journal_reason = 'Проверка <img src=x onerror="window.rcAuditXss=1">'
     services.reopen_request(request_id=journal.pk, actor=actor, expected_version=completed.version, reason=journal_reason)
     extra['journal'] = journal.pk
-    old_source = make_import()
-    # Датируем старую выгрузку раньше: действующей остаётся последняя принятая.
-    EmployeeImport.objects.filter(pk=old_source.pk).update(accepted_at=source.accepted_at-timedelta(days=1))
+    # Старая выгрузка получает дату до публикации, история не меняется после вставки.
+    old_source = make_import(accepted_at=source.accepted_at-timedelta(days=1))
     Employee.objects.create(employee_guid=uuid4(), personnel_number="RC-OLD", full_name="Устаревший Тестовый Сотрудник",
         organization=organization, last_seen_import=old_source)
     other_org = Organization.objects.create(name="Другая тестовая организация", external_id=str(uuid4()))
