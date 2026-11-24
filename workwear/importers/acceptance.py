@@ -36,7 +36,7 @@ def _review(batch, previous):
             str(guid)
             for guid in Employee.objects.filter(
                 last_seen_import_id=previous.pk,
-            ).values_list("employee_guid", flat=True).iterator(chunk_size=2000)
+            ).order_by().values_list("employee_guid", flat=True).iterator(chunk_size=2000)
             if guid not in incoming_guids
         ))
     else:
