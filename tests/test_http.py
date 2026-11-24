@@ -1,5 +1,6 @@
 """Проверяем вход, права, CSRF и HTTP API."""
 import json
+from datetime import datetime, timezone as datetime_timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -187,6 +188,52 @@ class HttpTests(TestCase):
             "expected_version": bulk.json()["version"],
         }, content_type="application/json")
         self.assertEqual(duplicate.status_code, 400)
+
+    def test_registry_sort_uses_selected_date_and_places_uncompleted_last(self):
+        organization = self.people[0].organization
+        created_first = datetime(2026, 11, 20, 10, tzinfo=datetime_timezone.utc)
+        created_second = datetime(2026, 11, 21, 10, tzinfo=datetime_timezone.utc)
+        created_draft = datetime(2026, 11, 22, 10, tzinfo=datetime_timezone.utc)
+        completed_first = datetime(2026, 11, 23, 10, tzinfo=datetime_timezone.utc)
+        completed_second = datetime(2026, 11, 22, 12, tzinfo=datetime_timezone.utc)
+
+        with patch("django.utils.timezone.now", return_value=created_first):
+            first = services.create_request(organization_id=organization.pk, actor=self.actor)
+        with patch("django.utils.timezone.now", return_value=completed_first):
+            save_draft(
+                request_id=first.pk, actor=self.actor, expected_version=first.version,
+                members=[{"employee_id": self.people[0].pk, "item_ids": [self.items[0].pk]}],
+                finish=True,
+            )
+
+        with patch("django.utils.timezone.now", return_value=created_second):
+            second = services.create_request(organization_id=organization.pk, actor=self.actor)
+        with patch("django.utils.timezone.now", return_value=completed_second):
+            save_draft(
+                request_id=second.pk, actor=self.actor, expected_version=second.version,
+                members=[{"employee_id": self.people[0].pk, "item_ids": [self.items[0].pk]}],
+                finish=True,
+            )
+
+        with patch("django.utils.timezone.now", return_value=created_draft):
+            draft = services.create_request(organization_id=organization.pk, actor=self.actor)
+
+        completed_order = self.client.get("/workwear/api/ui/requests/", {
+            "date_basis": "completed", "sort": "newest",
+        })
+        self.assertEqual(completed_order.status_code, 200)
+        self.assertEqual(
+            [row["id"] for row in completed_order.json()["results"]],
+            [first.pk, second.pk, draft.pk],
+        )
+
+        created_order = self.client.get("/workwear/api/ui/requests/", {
+            "date_basis": "created", "sort": "newest",
+        })
+        self.assertEqual(
+            [row["id"] for row in created_order.json()["results"]],
+            [draft.pk, second.pk, first.pk],
+        )
 
     def test_registry_history_repeat_scan_and_reopen_reason(self):
         organization = self.people[0].organization
