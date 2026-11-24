@@ -163,9 +163,10 @@ def add_assignment(*, request_id, member_id, item_id, actor, expected_version):
     item = WorkwearItem.objects.get(pk=item_id)
     if not item.is_active:
         raise ValidationError("Позиция спецодежды неактивна")
-    if RequestAssignment.objects.filter(request_employee_id=member.pk, item_id=item_id).exists():
+    assigned_item_ids = set(member.assignments.values_list("item_id", flat=True))
+    if item_id in assigned_item_ids:
         raise ValidationError("Позиция уже назначена сотруднику")
-    if member.assignments.count() >= MAX_ITEMS_PER_MEMBER:
+    if len(assigned_item_ids) >= MAX_ITEMS_PER_MEMBER:
         raise ValidationError("У сотрудника уже назначено максимальное число позиций")
     assignment = RequestAssignment.objects.create(request_employee=member, item=item)
     assignment.refresh_from_db()
