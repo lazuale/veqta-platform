@@ -121,6 +121,7 @@ class LifecycleTests(TestCase):
 
     def test_assignment_changes_do_not_lock_employee_import(self):
         self.save(people=[self.people[0]], items=[self.items[0]])
+        self.req.refresh_from_db()
         member = self.req.members.get()
         assignment = member.assignments.get()
         with patch("workwear.services.lock_for_membership") as membership_lock:
