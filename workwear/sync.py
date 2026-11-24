@@ -24,7 +24,7 @@ class SyncResult:
 def _validate(members):
     if not isinstance(members, list) or len(members) > MAX_REQUEST_MEMBERS:
         raise ValidationError("Некорректный состав заявки")
-    employee_ids, all_item_ids, desired = [], set(), {}
+    all_item_ids, desired = set(), {}
     for entry in members:
         if not isinstance(entry, dict) or set(entry) != {"employee_id", "item_ids"}:
             raise ValidationError("Некорректная запись сотрудника")
@@ -36,9 +36,8 @@ def _validate(members):
         ) or len(item_ids) != len(set(item_ids)):
             raise ValidationError("Некорректный список позиций")
         desired[employee_id] = set(item_ids)
-        employee_ids.append(employee_id)
         all_item_ids.update(item_ids)
-    return desired, employee_ids, all_item_ids
+    return desired, all_item_ids
 
 
 @transaction.atomic
@@ -47,21 +46,27 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
     services._authorize(actor, "change_request")
     if type(finish) is not bool:
         raise ValidationError("Некорректный признак завершения")
-    desired, employee_ids, item_ids = _validate(members)
+    desired, item_ids = _validate(members)
     req = services._lock_request(request_id, expected_version, status=RequestStatus.DRAFT, membership_lock=True)
-    employees = {e.pk: e for e in Employee.objects.select_related("organization").filter(pk__in=employee_ids)}
-    if set(employees) != set(employee_ids):
-        raise ValidationError("Некоторые сотрудники отсутствуют в справочнике")
     items = dict(WorkwearItem.objects.filter(pk__in=item_ids).values_list("pk", "is_active"))
     if set(items) != item_ids:
         raise ValidationError("Неизвестная позиция спецодежды")
     existing = list(RequestEmployee.objects.filter(request_id=req.pk).prefetch_related("assignments"))
     existing_by_employee = {m.employee_id: m for m in existing}
-    latest = latest_import()
-    # Составные FK PostgreSQL гарантируют организацию ранее включённых сотрудников.
-    # По последней выгрузке проверяем только новых участников.
-    for employee_id in desired.keys() - existing_by_employee.keys():
-        require_current(employees[employee_id], organization_id=req.organization_id, latest=latest)
+    additions = sorted(desired.keys() - existing_by_employee.keys())
+    employees = {}
+    if additions:
+        employees = {
+            employee.pk: employee
+            for employee in Employee.objects.select_related("organization")
+            .filter(pk__in=additions).order_by()
+        }
+        if set(employees) != set(additions):
+            raise ValidationError("Некоторые сотрудники отсутствуют в справочнике")
+        latest = latest_import()
+        # Составные FK PostgreSQL защищают организацию; выгрузку проверяем для новых участников.
+        for employee_id in additions:
+            require_current(employees[employee_id], organization_id=req.organization_id, latest=latest)
     # До записи рассчитываем изменения и сохраняем данные исключаемых участников для истории.
     old_items = {m.employee_id: {a.item_id for a in m.assignments.all()} for m in existing}
     added_item_ids = {
@@ -71,7 +76,6 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
     # Отключённые позиции можно сохранить в прежнем составе, но нельзя назначить заново.
     if any(not items[item_id] for added in added_item_ids.values() for item_id in added):
         raise ValidationError("Нельзя назначить неактивную позицию")
-    additions = sorted(desired.keys() - existing_by_employee.keys())
     removed_members = [
         existing_by_employee[employee_id]
         for employee_id in sorted(existing_by_employee.keys() - desired.keys())
