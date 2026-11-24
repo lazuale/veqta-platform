@@ -301,8 +301,10 @@ class InstallationConfigurationTests(unittest.TestCase):
 
     def load(self, changes=None, contour="prod"):
         hostname = "release.example.invalid" if contour == "prod" else "dev.example.invalid"
-        self.assertEqual(self.generate(contour, hostname).returncode, 0)
         config = self.project / f".env.{contour}"
+        if not config.exists():
+            generated = self.generate(contour, hostname)
+            self.assertEqual(generated.returncode, 0, generated.stderr)
         content = config.read_text()
         for name, value in (changes or {}).items():
             content = "\n".join(f"{name}={value}" if line.startswith(name + "=") else line for line in content.splitlines()) + "\n"
