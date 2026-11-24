@@ -268,7 +268,6 @@ veqta_check_unit_config() {
     "WorkingDirectory=$APP" 'NeedDaemonReload=no' "FragmentPath=$UNIT_FILE" \
     'DropInPaths=' 'Type=simple' 'Restart=on-failure' 'RestartUSec=5s' \
     'UMask=0027' 'NoNewPrivileges=yes' 'PrivateTmp=yes' 'ProtectSystem=strict' \
-    'ProtectHome=yes' "EnvironmentFiles={ path=$CONFIG (ignore_errors=no) }" \
     'Environment=PYTHONDONTWRITEBYTECODE=1' \
     'UnsetEnvironment=DJANGO_SETTINGS_MODULE PYTHONPATH PYTHONHOME DB_MIGRATION_PASSWORD'; do
     property=${expected%%=*}
@@ -278,6 +277,15 @@ veqta_check_unit_config() {
       return 1
     fi
   done
+
+  actual=$(veqta_unit_value "$state" EnvironmentFiles) || actual=''
+  case "$actual" in
+    "$CONFIG (ignore_errors=no)"|"{ path=$CONFIG (ignore_errors=no) }") ;;
+    *)
+      echo "FAIL: ${SERVICE}: неверное свойство EnvironmentFiles: ${actual:-[свойство отсутствует]}" >&2
+      return 1
+      ;;
+  esac
 
   exec_start=$(veqta_unit_value "$state" ExecStart) || {
     echo "FAIL: ${SERVICE}: отсутствует ExecStart" >&2
