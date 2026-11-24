@@ -4,7 +4,7 @@ from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
-from .database import database_role
+from .database import database_role, database_sslmode
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -110,9 +110,9 @@ if SECURE_COOKIES and not TRUST_PROXY:
 SESSION_COOKIE_SECURE = SECURE_COOKIES
 CSRF_COOKIE_SECURE = SECURE_COOKIES
 SECURE_SSL_REDIRECT = IS_PRODUCTION
-SECURE_HSTS_SECONDS = 3600 if IS_PRODUCTION else 0
+SECURE_HSTS_SECONDS = 31536000 if IS_PRODUCTION else 0
 SECURE_HSTS_INCLUDE_SUBDOMAINS = IS_PRODUCTION
-SECURE_HSTS_PRELOAD = IS_PRODUCTION
+SECURE_HSTS_PRELOAD = False
 CSRF_TRUSTED_ORIGINS = [v.strip() for v in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if v.strip()]
 if SECURE_COOKIES and any(not v.startswith('https://') or '*' in v for v in CSRF_TRUSTED_ORIGINS):
     raise ImproperlyConfigured('PROD допускает только явные HTTPS-источники CSRF')
@@ -127,14 +127,16 @@ def database_settings(*, migration=False):
     role = database_role(VEQTA_ENV, migration=migration)
     if required('DB_NAME') != EXPECTED_DATABASE or required('DB_USER') != role:
         raise ImproperlyConfigured('Контур, имя БД и роль подключения не совпадают')
+    host = required('DB_HOST')
+    sslmode = database_sslmode(host, os.environ.get('DB_SSLMODE', 'prefer'))
     return {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': EXPECTED_DATABASE,
         'USER': role,
         'PASSWORD': required('DB_PASSWORD'),
-        'HOST': required('DB_HOST'),
+        'HOST': host,
         'PORT': required('DB_PORT'),
         'CONN_MAX_AGE': 60 if IS_PRODUCTION and not migration else 0,
         'CONN_HEALTH_CHECKS': True,
-        'OPTIONS': {'sslmode': os.environ.get('DB_SSLMODE', 'prefer')},
+        'OPTIONS': {'sslmode': sslmode},
     }

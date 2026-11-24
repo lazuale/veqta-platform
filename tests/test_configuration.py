@@ -17,7 +17,7 @@ class ConfigurationTests(SimpleTestCase):
         # Не наследуем настройки HTTPS при проверке значений по умолчанию.
         env.pop("DJANGO_SECURE_COOKIES", None)
         env.update(DJANGO_SETTINGS_MODULE=module, VEQTA_ENV="dev", DB_NAME="veqta_dev", DB_USER="svc_platform_dev",
-                   DB_PASSWORD=secrets.token_urlsafe(32), DB_HOST="127.0.0.1", DB_PORT="5432",
+                   DB_PASSWORD=secrets.token_urlsafe(32), DB_HOST="127.0.0.1", DB_PORT="5432", DB_SSLMODE="prefer",
                    DJANGO_SECRET_KEY=secrets.token_urlsafe(64), DJANGO_ALLOWED_HOSTS="localhost",
                    DJANGO_DEBUG="1", DJANGO_TRUST_PROXY="0", DJANGO_CSRF_TRUSTED_ORIGINS="")
         env.update(changes)
@@ -54,6 +54,19 @@ class ConfigurationTests(SimpleTestCase):
             with self.subTest(changes=changes):
                 self.assertNotEqual(self.settings_process(**changes), 0)
 
+    def test_remote_database_requires_full_tls_verification(self):
+        for mode in ("disable", "allow", "prefer", "require", "verify-ca"):
+            with self.subTest(mode=mode):
+                self.assertNotEqual(
+                    self.settings_process(DB_HOST="db.example.invalid", DB_SSLMODE=mode),
+                    0,
+                )
+        self.assertEqual(
+            self.settings_process(DB_HOST="db.example.invalid", DB_SSLMODE="verify-full"),
+            0,
+        )
+        self.assertNotEqual(self.settings_process(DB_SSLMODE="unknown"), 0)
+
     def test_secret_and_hosts_required(self):
         for changes in ({"DJANGO_SECRET_KEY": ""}, {"DJANGO_SECRET_KEY": "short"},
                         {"DJANGO_ALLOWED_HOSTS": "*"}, {"DJANGO_ALLOWED_HOSTS": ""}):
@@ -64,6 +77,10 @@ class ConfigurationTests(SimpleTestCase):
         prod = {"VEQTA_ENV": "prod", "DB_NAME": "veqta_prod", "DB_USER": "svc_platform_prod",
                 "DJANGO_DEBUG": "0", "DJANGO_TRUST_PROXY": "1"}
         self.assertEqual(self.settings_process(**prod), 0)
+        self.assertEqual(self.settings_process(
+            **prod,
+            assertions="assert settings.SECURE_HSTS_SECONDS == 31536000; assert not settings.SECURE_HSTS_PRELOAD",
+        ), 0)
         for changes in ({"DJANGO_DEBUG": "1"}, {"DJANGO_TRUST_PROXY": "0"},
                         {"DJANGO_CSRF_TRUSTED_ORIGINS": "http://localhost"}):
             with self.subTest(changes=changes):
@@ -85,6 +102,7 @@ class ConfigurationTests(SimpleTestCase):
         self.assertEqual(self.settings_process(module="config.testing",
             assertions="assert not settings.DEBUG; assert settings.SESSION_COOKIE_SECURE; "
                        "assert settings.CSRF_COOKIE_SECURE; assert settings.SECURE_SSL_REDIRECT; "
+                       "assert settings.SECURE_HSTS_SECONDS == 31536000; assert not settings.SECURE_HSTS_PRELOAD; "
                        "assert settings.SECURE_PROXY_SSL_HEADER == ('HTTP_X_FORWARDED_PROTO', 'https'); "
                        "assert settings.DATABASES['default']['NAME'] == 'test_veqta_dev'"), 0)
 
@@ -133,6 +151,21 @@ class RuntimeGuardTests(SimpleTestCase):
                     cursor.fetchone.return_value = ("veqta_dev", role, "postgres", False)
                     with self.assertRaisesRegex(CommandError, "Подключение PostgreSQL"):
                         require_target("dev", "veqta_dev", migration=migration)
+
+    def test_remote_connection_requires_an_encrypted_session(self):
+        with patch("config.database.settings", VEQTA_ENV="dev"), \
+             patch("config.database.connection") as db:
+            db.vendor = "postgresql"
+            db.settings_dict = {
+                "NAME": "veqta_dev", "USER": "svc_platform_dev",
+                "HOST": "db.example.invalid",
+            }
+            cursor = db.cursor.return_value.__enter__.return_value
+            cursor.fetchone.return_value = ("veqta_dev", "svc_platform_dev", "svc_platform_dev", True, True)
+            require_target("dev", "veqta_dev")
+            cursor.fetchone.return_value = ("veqta_dev", "svc_platform_dev", "svc_platform_dev", True, False)
+            with self.assertRaisesRegex(CommandError, "TLS"):
+                require_target("dev", "veqta_dev")
 
     def test_ingest_lock_requires_transaction_and_postgresql(self):
         with patch("workwear.ingest_lock.transaction.get_connection") as transaction_connection, \

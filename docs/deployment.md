@@ -275,7 +275,7 @@ Apply выполняет `makemigrations --check --dry-run`, `migrate --plan` и
 | `VEQTA_ENV`, `DB_NAME`, `DB_USER` | Выбранный контур, его база и роль из таблицы выше |
 | `VEQTA_HOSTNAME` | Строчное DNS-имя, единое для Nginx, сертификата и проверки |
 | `DB_PASSWORD` | Разный пароль для каждой роли |
-| `DB_HOST`, `DB_PORT`, `DB_SSLMODE` | Адрес, порт и режим TLS PostgreSQL. По умолчанию `prefer` |
+| `DB_HOST`, `DB_PORT`, `DB_SSLMODE` | Адрес, порт и TLS PostgreSQL. Для локальной базы допустим `prefer`; для удалённой обязателен `verify-full` |
 | `DJANGO_SECRET_KEY` | Независимый случайный ключ каждого контура |
 | `DJANGO_DEBUG`, `DJANGO_TRUST_PROXY`, `DJANGO_SECURE_COOKIES` | Для HTTPS-сервера `0`, `1` и `1` |
 | `DJANGO_ALLOWED_HOSTS`, `DJANGO_CSRF_TRUSTED_ORIGINS` | Список хостов и HTTPS-адресов, включая домен выбранного контура |

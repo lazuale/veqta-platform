@@ -329,6 +329,14 @@ class InstallationConfigurationTests(unittest.TestCase):
     def test_configuration_rejects_missing_hostname(self):
         self.assertNotEqual(self.load({"VEQTA_HOSTNAME": ""}).returncode, 0)
 
+    def test_remote_database_requires_verify_full(self):
+        self.assertNotEqual(
+            self.load({"DB_HOST": "db.example.invalid", "DB_SSLMODE": "prefer"}).returncode,
+            0,
+        )
+        result = self.load({"DB_HOST": "db.example.invalid", "DB_SSLMODE": "verify-full"})
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_configuration_rejects_invalid_hostname(self):
         self.assertNotEqual(self.load({"VEQTA_HOSTNAME": "invalid..example.org"}).returncode, 0)
 
@@ -449,9 +457,27 @@ raise SystemExit(1 if os.environ.get('VEQTA_TEST_MODE')=='broken-new-site' and c
 echo "$*" >> "$VEQTA_TEST_DIR/systemctl.log"
 if [ "$1" = show ]; then
     actor=veqta-prod
+    dropins=
+    workers=2
+    env_file="$VEQTA_TEST_DIR/etc/veqta/prod.env"
+    protect=strict
     if [ "$VEQTA_TEST_MODE" = wrong-systemd-user ]; then actor=veqta-dev; fi
-    printf '%s\\n' 'ActiveState=active' 'SubState=running' "User=$actor" 'Group=veqta-prod' \\
-        "WorkingDirectory=$VEQTA_TEST_DIR/opt/veqta-prod" 'NeedDaemonReload=no'
+    if [ "$VEQTA_TEST_MODE" = wrong-systemd-dropin ]; then dropins=/etc/systemd/system/veqta-prod.service.d/override.conf; fi
+    if [ "$VEQTA_TEST_MODE" = wrong-systemd-execstart ]; then workers=1; fi
+    if [ "$VEQTA_TEST_MODE" = wrong-systemd-env ]; then env_file="$VEQTA_TEST_DIR/etc/veqta/dev.env"; fi
+    if [ "$VEQTA_TEST_MODE" = wrong-systemd-hardening ]; then protect=no; fi
+    exec_path="$VEQTA_TEST_DIR/opt/veqta-prod/.venv/bin/gunicorn"
+    exec_argv="$exec_path config.wsgi:application --bind 127.0.0.1:8765 --workers $workers --timeout 120 --error-logfile - --no-control-socket"
+    printf '%s\\n' \\
+      'ActiveState=active' 'SubState=running' "User=$actor" 'Group=veqta-prod' \\
+      "WorkingDirectory=$VEQTA_TEST_DIR/opt/veqta-prod" 'NeedDaemonReload=no' \\
+      "FragmentPath=$VEQTA_TEST_DIR/etc/systemd/system/veqta-prod.service" "DropInPaths=$dropins" \\
+      'Type=simple' 'Restart=on-failure' 'RestartUSec=5s' 'UMask=0027' \\
+      'NoNewPrivileges=yes' 'PrivateTmp=yes' "ProtectSystem=$protect" 'ProtectHome=yes' \\
+      "EnvironmentFiles={ path=$env_file (ignore_errors=no) }" \\
+      'Environment=PYTHONDONTWRITEBYTECODE=1' \\
+      'UnsetEnvironment=DJANGO_SETTINGS_MODULE PYTHONPATH PYTHONHOME DB_MIGRATION_PASSWORD' \\
+      "ExecStart={ path=$exec_path ; argv[]=$exec_argv ; ignore_errors=no ; }"
 fi
 ''')
         self.fake_curl()
@@ -502,10 +528,34 @@ fi
     def test_wrong_loaded_user_stops_apply_before_restart(self):
         result = self.apply("wrong-systemd-user")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("ожидается User=veqta-prod", result.stderr)
+        self.assertIn("неверное свойство User", result.stderr)
         calls = (self.path / "systemctl.log").read_text()
         self.assertNotIn("restart", calls)
         self.assertNotIn("reload nginx", calls)
+
+    def test_loaded_dropin_is_rejected_before_restart(self):
+        result = self.apply("wrong-systemd-dropin")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("неверное свойство DropInPaths", result.stderr)
+        self.assertNotIn("restart", (self.path / "systemctl.log").read_text())
+
+    def test_loaded_execstart_is_rejected_before_restart(self):
+        result = self.apply("wrong-systemd-execstart")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ExecStart не соответствует", result.stderr)
+        self.assertNotIn("restart", (self.path / "systemctl.log").read_text())
+
+    def test_loaded_environment_file_is_rejected_before_restart(self):
+        result = self.apply("wrong-systemd-env")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("неверное свойство EnvironmentFiles", result.stderr)
+        self.assertNotIn("restart", (self.path / "systemctl.log").read_text())
+
+    def test_loaded_hardening_is_rejected_before_restart(self):
+        result = self.apply("wrong-systemd-hardening")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("неверное свойство ProtectSystem", result.stderr)
+        self.assertNotIn("restart", (self.path / "systemctl.log").read_text())
 
     def test_nginx_failure_restores_existing_file_without_reload(self):
         previous = "previous exact site\n"

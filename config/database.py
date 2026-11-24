@@ -1,4 +1,6 @@
-"""Проверяем роль и базу для подключения VEQTA."""
+"""Проверяем роль, базу и транспорт PostgreSQL для VEQTA."""
+import ipaddress
+
 from django.conf import settings
 from django.core.exceptions import ImproperlyConfigured
 from django.core.management.base import CommandError
@@ -11,21 +13,49 @@ def database_role(environment, *, migration=False):
     return f"svc_platform_{environment}{suffix}"
 
 
+def is_local_database_host(host):
+    """Пустой HOST и путь сокета означают локальное подключение."""
+    value = (host or "").strip()
+    if not value or value.startswith("/") or value.casefold() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
+def database_sslmode(host, value=None):
+    """Удалённая база допускается только с проверкой имени сертификата."""
+    mode = (value or "prefer").strip().casefold()
+    allowed = {"disable", "allow", "prefer", "require", "verify-ca", "verify-full"}
+    if mode not in allowed:
+        raise ImproperlyConfigured("DB_SSLMODE имеет недопустимое значение")
+    if not is_local_database_host(host) and mode != "verify-full":
+        raise ImproperlyConfigured("Удалённая PostgreSQL требует DB_SSLMODE=verify-full")
+    return mode
+
+
 def require_runtime_settings():
     if settings.VEQTA_MIGRATION:
         raise ImproperlyConfigured("HTTP-сервер требует прикладную роль PostgreSQL")
 
 
 def verify_connection(database, name, role):
+    require_ssl = not is_local_database_host(database.settings_dict.get("HOST", ""))
     with database.cursor() as cursor:
         cursor.execute("""
             SELECT current_database(), session_user, current_user,
                    NOT (rolsuper OR rolcreatedb OR rolcreaterole OR rolreplication OR rolbypassrls)
-                   AND current_setting('session_replication_role') = 'origin'
+                   AND current_setting('session_replication_role') = 'origin',
+                   COALESCE((
+                       SELECT ssl FROM pg_stat_ssl WHERE pid = pg_backend_pid()
+                   ), false)
             FROM pg_roles WHERE rolname = session_user
         """)
-        if cursor.fetchone() != (name, role, role, True):
-            raise CommandError("Подключение PostgreSQL использует неверную БД, роль или режим триггеров")
+        identity = cursor.fetchone()
+        if (not identity or identity[:4] != (name, role, role, True)
+                or (require_ssl and (len(identity) < 5 or identity[4] is not True))):
+            raise CommandError("Подключение PostgreSQL использует неверную БД, роль, режим триггеров или TLS")
 
 
 def check_connection(sender, connection, **kwargs):
@@ -69,7 +99,6 @@ def revoke_relation_grants(cursor, name, *, sequence=False):
     if not result or not result[0]:
         raise CommandError(f"Объект public.{name} отсутствует или не принадлежит роли подключения")
     if result[1]:
-        # REVOKE на таблице также отзывает права её столбцов. CASCADE снимает выданные получателями права.
         grantees = [sql.Identifier(role) if role is not None else sql.SQL("PUBLIC") for role in result[1]]
         cursor.execute(sql.SQL("REVOKE ALL ON {} {} FROM {} CASCADE").format(
             sql.SQL("SEQUENCE" if sequence else "TABLE"), sql.Identifier("public", name),

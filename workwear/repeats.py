@@ -21,7 +21,7 @@ class RepeatWarning:
 def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
     """Исключаем будущие даты, чтобы они не скрыли последнюю завершённую выдачу."""
     reference = as_of_date if as_of_date is not None else timezone.localdate()
-    if not isinstance(reference, date):
+    if isinstance(reference, datetime) or not isinstance(reference, date):
         raise ValidationError("Неверная дата проверки повторов")
 
     wanted = set(pairs)

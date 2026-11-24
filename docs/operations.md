@@ -11,7 +11,7 @@ sudo journalctl -u veqta-dev.service -n 80 --no-pager
 sudo journalctl -u veqta-prod.service -n 80 --no-pager
 ```
 
-Verify показывает SHA checkout и сверяет рабочий каталог, пользователя, группу и состояние загруженного unit. Проверяет подключение Runtime, применённые миграции, права и ограничения PostgreSQL под Migrator. Для PROD запускает штатный `check --deploy --fail-level WARNING`. При отклонении команда завершается с ошибкой. Для Gunicorn, HTTPS и статики ожидается HTTP 200. Страница входа должна выставить CSRF-cookie с атрибутом `Secure`.
+Verify показывает SHA checkout и сверяет загруженный unit: команду Gunicorn, env-файл, отсутствие drop-in-переопределений и параметры изоляции. Проверяет подключение Runtime, применённые миграции, права, состав триггеров, SHA-256 защитных функций и критические ограничения PostgreSQL под Migrator. Для PROD запускает штатный `check --deploy --fail-level WARNING`. При отклонении команда завершается с ошибкой. Для Gunicorn, HTTPS и статики ожидается HTTP 200. Страница входа должна выставить CSRF-cookie с атрибутом `Secure`.
 
 ## Применение выпуска
 

@@ -1,5 +1,5 @@
 """Проверяем реальные граничные случаи поиска, повторов и изменения заявок."""
-from datetime import date
+from datetime import date, datetime
 from uuid import uuid4
 from unittest.mock import patch
 
@@ -75,6 +75,7 @@ class BoundaryPathsTests(TestCase):
     def test_repeat_scan_rejects_invalid_dates_and_pairs(self):
         for options in (
             {"pairs": {(self.people[0].pk, self.items[0].pk)}, "as_of_date": "bad"},
+            {"pairs": {(self.people[0].pk, self.items[0].pk)}, "as_of_date": datetime(2026, 1, 1)},
             {"pairs": {(True, self.items[0].pk)}},
             {"pairs": {(self.people[0].pk, 99999999)}},
             {"pairs": {(0, self.items[0].pk)}},

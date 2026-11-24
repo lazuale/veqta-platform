@@ -9,6 +9,7 @@ veqta_target() {
   CONFIG="/etc/veqta/${ENV_NAME}.env"
   MIGRATION_CONFIG="/etc/veqta/${ENV_NAME}-migrate.env"
   SERVICE="veqta-${ENV_NAME}.service"
+  UNIT_FILE="/etc/systemd/system/$SERVICE"
   NGINX_SITE="/etc/nginx/sites-available/veqta-${ENV_NAME}"
   NGINX_LINK="/etc/nginx/sites-enabled/veqta-${ENV_NAME}"
   STATIC_ROOT="/var/www/veqta/${ENV_NAME}-static"
@@ -38,6 +39,7 @@ veqta_load_config() {
   [[ -n "${DB_HOST:-}" && -n "${DB_PORT:-}" && -n "${DB_PASSWORD:-}" ]] || {
     echo 'STOP: не заданы реквизиты PostgreSQL' >&2; return 1;
   }
+  veqta_check_database_tls || return 1
   [[ "${DJANGO_DEBUG:-}" == 0 && "${DJANGO_TRUST_PROXY:-}" == 1 ]] || {
     echo 'STOP: для серверного HTTPS требуются DEBUG=0 и TRUST_PROXY=1' >&2; return 1;
   }
@@ -68,6 +70,22 @@ veqta_check_hostname() {
       echo 'STOP: недопустимый VEQTA_HOSTNAME' >&2; return 1;
     }
   done
+}
+
+veqta_check_database_tls() {
+  local host=${DB_HOST,,} mode=${DB_SSLMODE:-prefer}
+  mode=${mode,,}
+  case "$mode" in
+    disable|allow|prefer|require|verify-ca|verify-full) ;;
+    *) echo 'STOP: недопустимый DB_SSLMODE' >&2; return 1 ;;
+  esac
+  case "$host" in
+    localhost|127.*|::1|/*) return 0 ;;
+  esac
+  [[ "$mode" == verify-full ]] || {
+    echo 'STOP: удалённая PostgreSQL требует DB_SSLMODE=verify-full' >&2
+    return 1
+  }
 }
 
 veqta_render_nginx() {
@@ -138,6 +156,7 @@ veqta_load_migration_config() {
       -n "${DB_PASSWORD:-}" ]] || {
     echo 'STOP: настройки миграций не совпадают с целевой PostgreSQL' >&2; return 1;
   }
+  veqta_check_database_tls || return 1
 }
 
 # Секреты передаём в окружении самого Python, без промежуточных аргументов env.
@@ -224,16 +243,53 @@ veqta_check_django() {
   fi
 }
 
+veqta_unit_value() {
+  local state=$1 property=$2
+  printf '%s\n' "$state" | awk -v property="$property" '
+    index($0, property "=") == 1 {
+      print substr($0, length(property) + 2)
+      found=1
+    }
+    END { if (!found) exit 1 }
+  '
+}
+
 veqta_check_unit() {
-  local state expected
-  state=$(systemctl show "$SERVICE" -p ActiveState -p SubState -p User -p Group \
-    -p WorkingDirectory -p NeedDaemonReload) || return 1
-  for expected in "User=$ACTOR" "Group=$ACTOR" "WorkingDirectory=$APP" 'NeedDaemonReload=no'; do
-    if [[ $'\n'"$state"$'\n' != *$'\n'"$expected"$'\n'* ]]; then
-      echo "FAIL: ${SERVICE}: ожидается ${expected}" >&2
+  local state expected property actual exec_start argv
+  state=$(systemctl show "$SERVICE" \
+    -p ActiveState -p SubState -p User -p Group -p WorkingDirectory \
+    -p NeedDaemonReload -p FragmentPath -p DropInPaths -p Type \
+    -p Restart -p RestartUSec -p UMask -p NoNewPrivileges -p PrivateTmp \
+    -p ProtectSystem -p ProtectHome -p EnvironmentFiles -p Environment \
+    -p UnsetEnvironment -p ExecStart) || return 1
+
+  for expected in \
+    'ActiveState=active' 'SubState=running' "User=$ACTOR" "Group=$ACTOR" \
+    "WorkingDirectory=$APP" 'NeedDaemonReload=no' "FragmentPath=$UNIT_FILE" \
+    'DropInPaths=' 'Type=simple' 'Restart=on-failure' 'RestartUSec=5s' \
+    'UMask=0027' 'NoNewPrivileges=yes' 'PrivateTmp=yes' 'ProtectSystem=strict' \
+    'ProtectHome=yes' "EnvironmentFiles={ path=$CONFIG (ignore_errors=no) }" \
+    'Environment=PYTHONDONTWRITEBYTECODE=1' \
+    'UnsetEnvironment=DJANGO_SETTINGS_MODULE PYTHONPATH PYTHONHOME DB_MIGRATION_PASSWORD'; do
+    property=${expected%%=*}
+    actual=$(veqta_unit_value "$state" "$property") || actual='[свойство отсутствует]'
+    if [[ "$actual" != "${expected#*=}" ]]; then
+      echo "FAIL: ${SERVICE}: неверное свойство ${property}: ${actual}" >&2
       return 1
     fi
   done
+
+  exec_start=$(veqta_unit_value "$state" ExecStart) || {
+    echo "FAIL: ${SERVICE}: отсутствует ExecStart" >&2
+    return 1
+  }
+  argv=${exec_start#*argv[]=}
+  argv=${argv%% ; ignore_errors=*}
+  expected="$APP/.venv/bin/gunicorn config.wsgi:application --bind 127.0.0.1:$PORT --workers 2 --timeout 120 --error-logfile - --no-control-socket"
+  if [[ "$exec_start" != *"path=$APP/.venv/bin/gunicorn"* || "$argv" != "$expected" ]]; then
+    echo "FAIL: ${SERVICE}: ExecStart не соответствует штатной команде Gunicorn" >&2
+    return 1
+  fi
   printf '%s\n' "$state"
 }
 

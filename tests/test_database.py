@@ -4,7 +4,7 @@ from django.db import connection, IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
 from workwear import services
-from workwear.models import Employee, Request, RequestAssignment, RequestEmployee, WorkwearEvent
+from workwear.models import Employee, EmployeeImport, Request, RequestAssignment, RequestEmployee, WorkwearEvent
 from workwear.sync import save_draft
 from .factories import make_user, make_import, make_employees, make_items, make_organization
 
@@ -70,13 +70,29 @@ class DatabaseGuardsTests(TestCase):
         self.rejected(lambda: WorkwearEvent.objects.filter(pk=event.pk).update(details={}), "ww_event_append_only")
         self.rejected(lambda: WorkwearEvent.objects.filter(pk=event.pk).delete(), "ww_event_append_only")
 
+    def test_import_history_cannot_be_updated_or_deleted(self):
+        record = make_import()
+        self.rejected(
+            lambda: EmployeeImport.objects.filter(pk=record.pk).update(source_export_date=timezone.localdate()),
+            "ww_import_append_only",
+        )
+        self.rejected(
+            lambda: EmployeeImport.objects.filter(pk=record.pk).delete(),
+            "ww_import_append_only",
+        )
+
     def test_truncate_forbidden_including_cascade(self):
         # Проверяем отложенные внешние ключи до триггера TRUNCATE.
         self.sql("SET CONSTRAINTS ALL IMMEDIATE")
-        for table in ("workwear_request", "workwear_requestemployee", "workwear_requestassignment", "workwear_workwearevent"):
+        for table in ("workwear_request", "workwear_requestemployee", "workwear_requestassignment",
+                      "workwear_workwearevent", "workwear_employeeimport"):
             with self.subTest(table=table):
-                self.rejected(lambda: self.sql(f"TRUNCATE {table} CASCADE"),
-                              "ww_event_append_only" if table.endswith("workwearevent") else "ww_structure_no_truncate")
+                constraint = (
+                    "ww_event_append_only" if table.endswith("workwearevent")
+                    else "ww_import_append_only" if table == "workwear_employeeimport"
+                    else "ww_structure_no_truncate"
+                )
+                self.rejected(lambda: self.sql(f"TRUNCATE {table} CASCADE"), constraint)
 
     def test_initial_closed_request_forbidden(self):
         self.rejected(lambda: Request.objects.create(organization_id=make_organization().pk, status="closed",
