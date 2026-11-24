@@ -474,6 +474,8 @@ if [ "$1" = show ]; then
     if [ "$VEQTA_TEST_MODE" = wrong-systemd-execstart ]; then workers=1; fi
     if [ "$VEQTA_TEST_MODE" = wrong-systemd-env ]; then env_file="$VEQTA_TEST_DIR/etc/veqta/dev.env"; fi
     if [ "$VEQTA_TEST_MODE" = wrong-systemd-hardening ]; then protect=no; fi
+    home=yes
+    if [ "$VEQTA_TEST_MODE" = wrong-systemd-home ]; then home=no; fi
     exec_path="$VEQTA_TEST_DIR/opt/veqta-prod/.venv/bin/gunicorn"
     exec_argv="$exec_path config.wsgi:application --bind 127.0.0.1:8765 --workers $workers --timeout 120 --error-logfile - --no-control-socket"
     printf '%s\\n' \\
@@ -481,7 +483,7 @@ if [ "$1" = show ]; then
       "WorkingDirectory=$VEQTA_TEST_DIR/opt/veqta-prod" 'NeedDaemonReload=no' \\
       "FragmentPath=$VEQTA_TEST_DIR/etc/systemd/system/veqta-prod.service" "DropInPaths=$dropins" \\
       'Type=simple' 'Restart=on-failure' 'RestartUSec=5s' 'UMask=0027' \\
-      'NoNewPrivileges=yes' 'PrivateTmp=yes' "ProtectSystem=$protect" 'ProtectHome=yes' \\
+      'NoNewPrivileges=yes' 'PrivateTmp=yes' "ProtectSystem=$protect" "ProtectHome=$home" \\
       "EnvironmentFiles=$(if [ "$VEQTA_TEST_MODE" = braced-systemd-env ]; then printf '{ path=%s (ignore_errors=no) }' "$env_file"; else printf '%s (ignore_errors=no)' "$env_file"; fi)" \\
       'Environment=PYTHONDONTWRITEBYTECODE=1' \\
       'UnsetEnvironment=DJANGO_SETTINGS_MODULE PYTHONPATH PYTHONHOME DB_MIGRATION_PASSWORD' \\
@@ -556,6 +558,14 @@ fi
         result = self.apply("wrong-systemd-user")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("неверное свойство User", result.stderr)
+        calls = (self.path / "systemctl.log").read_text()
+        self.assertNotIn("restart", calls)
+        self.assertNotIn("reload nginx", calls)
+
+    def test_missing_protect_home_is_rejected_before_restart(self):
+        result = self.apply("wrong-systemd-home")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("неверное свойство ProtectHome", result.stderr)
         calls = (self.path / "systemctl.log").read_text()
         self.assertNotIn("restart", calls)
         self.assertNotIn("reload nginx", calls)
