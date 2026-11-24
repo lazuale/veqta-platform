@@ -93,7 +93,8 @@ STATIC_ROOT = Path(os.environ.get('DJANGO_STATIC_ROOT', str(BASE_DIR / 'staticfi
 # Учётными записями управляют без электронной почты.
 MAILERS = {}
 # Отправка писем отключена; почтовый сервер для запуска не нужен.
-SILENCED_SYSTEM_CHECKS = ["mail.W001"]
+# Не включаем домен в браузерный preload-список: HSTS действует год на хост и его поддомены.
+SILENCED_SYSTEM_CHECKS = ["mail.W001", "security.W021"]
 LOGIN_URL = '/login/'
 LOGIN_REDIRECT_URL = '/'
 LOGOUT_REDIRECT_URL = '/login/'
