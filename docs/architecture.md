@@ -4,7 +4,9 @@ VEQTA — проект Django с отдельной базой PostgreSQL для
 
 | Путь | Ответственность |
 |---|---|
-| `config/settings.py`, `config/database.py` | Окружение и проверка фактической БД и роли для служебных команд |
+| `config/base.py`, `config/urls.py` | Общие настройки, подключение приложений и состав меню |
+| `config/settings.py`, `config/migration.py`, `config/database.py` | Настройки Runtime и Migrator, проверка базы и роли при подключении |
+| `deploy/postgresql/`, `scripts/database_access.py` | Общие ACL PostgreSQL, права журнала миграций и проверка контура |
 | `portal/` | Страницы, шаблоны, навигация и общая статика |
 | `workwear/models.py`, `workwear/admin.py` | Модели и штатное ведение справочников |
 | `workwear/services.py`, `workwear/sync.py` | Жизненный цикл, атомарное изменение состава и журнал |
@@ -12,9 +14,9 @@ VEQTA — проект Django с отдельной базой PostgreSQL для
 | `workwear/employee_lookup.py`, `workwear/repeats.py` | Разрешение строк массового подбора и расчёт повторов |
 | `workwear/api.py`, `workwear/ui_api.py` | HTTP-контракт, сериализация, параметры и ошибки |
 | `workwear/importers/directories_1c.py`, `workwear/importers/acceptance.py` | Разбор CSV и транзакционная публикация справочника |
-| `workwear/management/commands/` | Инициализация пустой схемы и загрузка данных |
+| `workwear/management/commands/` | Импорт кадрового справочника и загрузка каталога |
 | `workwear/migrations/0001_initial.py` | Схема, составные FK и триггеры |
-| `workwear/migrations/0002_database_acl.py` | Права прикладной роли на служебные и защищённые объекты |
+| `workwear/migrations/0003_event_access.py`, `workwear/database_access.py` | Права журнала событий и перечень обязательных триггеров Workwear |
 
 ## Модели и снимки
 
@@ -55,7 +57,9 @@ PostgreSQL заполняет `snapshot_*` при вставке, включая
 
 В каждом контуре `svc_platform_<контур>_migrator` владеет базой и объектами схемы. `config.migration` проверяет базу, роль входа и действующую роль PostgreSQL до работы со схемой. Gunicorn использует `config.settings` и роль `svc_platform_<контур>`.
 
-По умолчанию Runtime получает `SELECT, INSERT, UPDATE, DELETE` обычных таблиц, `USAGE` последовательностей и `USAGE` схемы. `django_migrations` доступна Migrator. Для `workwear_workwearevent` у Runtime есть `SELECT` и `INSERT`. Изменение и удаление событий запрещены также триггерами, включая `TRUNCATE`. Функции-триггеры выполняются при записи. Права на прямой вызов новых функций выдаются явно по необходимости. [Развёртывание и права ролей](deployment.md).
+По умолчанию Runtime получает `SELECT, INSERT, UPDATE, DELETE` обычных таблиц, `USAGE` последовательностей и `USAGE` схемы. Bootstrap задаёт общие правила. После штатного `migrate` серверный скрипт закрепляет доступ к `django_migrations` и её последовательности только за Migrator. Workwear оставляет Runtime `SELECT` и `INSERT` в журнале событий. Триггеры журнала запрещают изменение, удаление и `TRUNCATE`. Миграция `0002_database_acl` сохранена для воспроизведения истории выпусков. [Развёртывание и права ролей](deployment.md).
+
+При открытии соединения Django сверяет имя БД, роль входа, текущую роль, привилегированные атрибуты и обычный режим срабатывания триггеров. Серверная приёмка отдельно читает каталоги PostgreSQL в транзакции только для чтения. Она проверяет права базы, схемы, таблиц, столбцов, последовательностей и функций, членство ролей, права по умолчанию и триггеры. Если обе базы находятся в одном кластере, проверяется их взаимная изоляция. [Проверка контура](operations.md#состояние-и-диагностика).
 
 ## HTTP API
 

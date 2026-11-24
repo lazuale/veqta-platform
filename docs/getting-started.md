@@ -47,7 +47,9 @@ SQL создаёт `veqta_dev` и две роли. Схему создаёт в�
 (
   export DB_USER=svc_platform_dev_migrator DB_PASSWORD="$VEQTA_MIGRATOR_PASSWORD"
   export DJANGO_SETTINGS_MODULE=config.migration
-  python manage.py veqta_initialize --environment dev --database-name veqta_dev
+  python manage.py migrate --noinput
+  python -m scripts.database_access --protect-migrations
+  python -m scripts.database_access
   python manage.py migrate --check
   python manage.py createsuperuser
 )

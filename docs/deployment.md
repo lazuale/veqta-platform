@@ -130,7 +130,9 @@ runuser -u "$actor" -- test -x "$app/.venv/bin/python"
 veqta_target "$target"
 veqta_check_trusted_code
 veqta_load_config
-veqta_root_django config.migration veqta_initialize --environment "$target" --database-name "$database"
+veqta_root_django config.migration migrate --noinput
+veqta_root_python config.migration -m scripts.database_access --protect-migrations
+veqta_root_python config.migration -m scripts.database_access
 VEQTA_BOOTSTRAP
 ```
 
@@ -262,11 +264,11 @@ sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_apply.sh" "$VEQTA_TARGET" --m
 sudo bash "/opt/veqta-$VEQTA_TARGET/scripts/server_verify.sh" "$VEQTA_TARGET"
 ```
 
-Apply выполняет `makemigrations --check --dry-run`, `migrate --plan` и `migrate --check` под Migrator. Флаг `--migrate` разрешает применить найденные миграции. При наличии `0001_initial` обновление применяет `0002_database_acl` без переноса данных. Возврат к предыдущему SHA допустим после проверки его совместимости со схемой. [Порядок восстановления](operations.md#возврат-рабочей-бд-из-проверенной-копии).
+Apply выполняет `makemigrations --check --dry-run`, `migrate --plan` и `migrate --check` под Migrator. Флаг `--migrate` разрешает применить миграции и привести права журнала Django и его последовательности к утверждённым. Workwear применяет миграции прав после `0001_initial` без переноса данных. До запуска службы apply проверяет ACL PostgreSQL. Возврат к предыдущему SHA допустим после проверки его совместимости со схемой. [Порядок восстановления](operations.md#возврат-рабочей-бд-из-проверенной-копии).
 
 ## Настройки и права процессов
 
-`scripts/create_config.py --environment dev|prod --hostname DNS` создаёт два файла с отдельными паролями. Шаблоны приложения находятся в `deploy/dev.env.example` и `deploy/prod.env.example`. Runtime получает только файл приложения. Служебный запуск `veqta_root_django config.migration` читает защищённый env от root и проверяет фактический сеанс PostgreSQL. `veqta_initialize` предназначена для новой пустой базы. В рабочем контуре применяйте `migrate`.
+`scripts/create_config.py --environment dev|prod --hostname DNS` создаёт два файла с отдельными паролями. Шаблоны приложения находятся в `deploy/dev.env.example` и `deploy/prod.env.example`. Runtime получает только файл приложения. Служебные команды с `config.migration` читают защищённый env от root и сверяют фактический сеанс PostgreSQL.
 
 | Переменная | Назначение |
 |---|---|
@@ -281,4 +283,4 @@ Apply выполняет `makemigrations --check --dry-run`, `migrate --plan` и
 
 Gunicorn слушает только локальный интерфейс. Nginx передаёт `X-Forwarded-Proto`. PROD перенаправляет HTTP на HTTPS и включает HSTS. Для каждого контура используется своё имя cookie с атрибутом `Secure`. Удалённая PostgreSQL требует соединения с `verify-full` и доверенным центром сертификации libpq. Штатная установка рассчитана на локальную PostgreSQL.
 
-`veqta_initialize`, `workwear_import_1c` и `workwear_load_catalog` сверяют указанный контур, настройки и фактические `current_database()` и `current_user`. Для миграций `server_apply.sh --migrate` дополнительно сравнивает адрес, порт и режим TLS файлов приложения и владельца. Права PostgreSQL описаны в [архитектуре](architecture.md#инварианты-postgresql). Управление организациями и СИЗ выполняется [через Admin](directories.md).
+`workwear_import_1c` и `workwear_load_catalog` сверяют указанный контур, настройки и фактические `current_database()` и `current_user`. Служебные серверные команды сравнивают адрес, порт и режим TLS двух файлов окружения. Права PostgreSQL описаны в [архитектуре](architecture.md#инварианты-postgresql). Управление организациями и СИЗ выполняется [через Admin](directories.md).

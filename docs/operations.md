@@ -11,7 +11,7 @@ sudo journalctl -u veqta-dev.service -n 80 --no-pager
 sudo journalctl -u veqta-prod.service -n 80 --no-pager
 ```
 
-Verify показывает SHA checkout, проверяет подключение Runtime и состояние миграций под Migrator. Для Gunicorn, HTTPS и статики ожидается HTTP 200, а для страницы входа нужен CSRF-cookie с атрибутом `Secure`.
+Verify показывает SHA checkout, проверяет подключение Runtime, состояние миграций и права PostgreSQL под Migrator. При отклонении команда возвращает ненулевой код и перечисляет нарушения. Для Gunicorn, HTTPS и статики ожидается HTTP 200, а для страницы входа нужен CSRF-cookie с атрибутом `Secure`.
 
 ## Применение выпуска
 
@@ -19,9 +19,9 @@ Verify показывает SHA checkout, проверяет подключен�
 2. Убедитесь, что действующие env используют канонические роли, адрес и порт совпадают для Runtime и Migrator, а `*-migrate.env` имеет права `root:root 0600`. Запишите PostgreSQL 19, владельцев и состояние миграций. Проверьте `0001_initial` и права журнала событий до применения. Используйте `veqta_root_django config.migration migrate --plan` из доверенного checkout выпуска.
 3. Снимите резервную копию DEV и проверьте её восстановление. Примените [проверенный SHA](deployment.md#7-обновление-существующего-контура-и-откат) в согласованное окно. Проверьте статус службы, вход, Admin, сохранение и завершение тестовой заявки, историю, ACL и счётчики рабочих данных.
 4. Для PROD согласуйте окно и разрешение на изменение схемы и перезапуск. Приостановите запись в выбранный контур на время подготовки точки возврата. Запишите SHA, сделайте свежую копию и проверьте её полным восстановлением. Остановите только выбранную службу на время переключения checkout и конфигурации. Убедитесь, что другие приложения продолжают обслуживаться.
-5. Выполните `server_apply.sh prod --migrate` и `server_verify.sh prod`. Сверьте `0002_database_acl`, права на объекты и отсутствие неприменённых миграций. Проверьте вход по HTTPS, Admin, реестр Workwear и историю существующей заявки. Сопоставьте счётчики с зафиксированной точкой до обновления и сохраните результаты с SHA каждого контура.
+5. Выполните `server_apply.sh prod --migrate` и `server_verify.sh prod`. Проверьте вход по HTTPS, Admin, реестр Workwear и историю существующей заявки. Сопоставьте счётчики с зафиксированной точкой до обновления и сохраните результаты с SHA каждого контура.
 
-Чтобы получить план для выбранной базы без записи в неё, используйте служебную команду из доверенного checkout выпуска. Пример для PROD.
+План миграций и проверку ACL можно выполнить отдельно от проверки службы и HTTPS. Команды для PROD из доверенного checkout выпуска.
 
 ```bash
 sudo bash -c '
@@ -30,28 +30,11 @@ sudo bash -c '
     veqta_target prod
     veqta_load_config
     veqta_root_django config.migration migrate --plan
+    veqta_root_python config.migration -m scripts.database_access
 '
 ```
 
-
-Проверьте владельцев и права через административное подключение к выбранной базе. Пример для PROD.
-
-```sql
-SELECT current_database(), current_setting('server_version');
-SELECT datdba::regrole, datacl FROM pg_database WHERE datname = current_database();
-SELECT app, name, applied FROM django_migrations WHERE app = 'workwear' ORDER BY name;
-SELECT c.relname, c.relowner::regrole,
-       has_table_privilege('svc_platform_prod', c.oid, 'SELECT') AS can_select,
-       has_table_privilege('svc_platform_prod', c.oid, 'INSERT') AS can_insert,
-       has_table_privilege('svc_platform_prod', c.oid, 'UPDATE,DELETE,TRUNCATE') AS can_change_history
-FROM pg_class AS c
-WHERE c.oid IN ('public.django_migrations'::regclass, 'public.workwear_workwearevent'::regclass)
-ORDER BY c.relname;
-SELECT tgname, tgenabled FROM pg_trigger WHERE tgname IN
-    ('ww_event_no_update_delete', 'ww_event_no_truncate') ORDER BY tgname;
-```
-
-Ожидаемый владелец обеих таблиц — `svc_platform_prod_migrator`. У Runtime все три флага `django_migrations` равны `false`. Для журнала событий ожидается `true, true, false`. Оба триггера имеют состояние `O`.
+Проверка ACL работает в транзакции только для чтения. Изменения ролей и прав выполняются отдельной служебной операцией после разбора причины отклонения.
 
 ## Отказ посередине установки
 
@@ -60,7 +43,7 @@ SELECT tgname, tgenabled FROM pg_trigger WHERE tgname IN
 | Clone или права checkout | Проверьте владельца, статус Git и SHA. Сохраните неполный каталог для проверки, если потребуется новый checkout. |
 | Пользователь, роль или БД уже есть | Определите последний выполненный шаг. Сохраните действующие базы и закрытые настройки. |
 | Роли созданы, создание БД прервалось | Проверьте обе роли и свободное имя базы. Используйте имеющиеся пароли. Создайте отсутствующую базу с владельцем Migrator и примените `deploy/postgresql/access.sql` с параметрами её контура. |
-| База есть, миграция прервалась | Проверьте `django_migrations`, блокировки и применённую схему под Migrator. `0002_database_acl` выполняется транзакционно. После устранения причины проверьте план и повторите `migrate --noinput`, затем `migrate --check`. |
+| База есть, миграция прервалась | Проверьте `django_migrations`, блокировки и план под Migrator. После устранения причины повторите `server_apply.sh <контур> --migrate` в согласованное окно. |
 | pip, статика или unit | Проверьте частично изменённые файлы, зависимости и состояние systemd. Выберите совместимый SHA до повторного запуска. |
 | Nginx, Gunicorn или HTTPS | Apply возвращает прежние файлы сайта при отказе. Если уже запрашивался reload, проверяет прежнюю конфигурацию и запрашивает его повторно. Проверьте журнал службы, соседние сайты и активную конфигурацию. |
 | Certbot | Проверьте DNS, A/AAAA и порт 80. Временный сайт обслуживает ACME и возвращает 503 для приложения до применения HTTPS. |
@@ -99,7 +82,7 @@ SELECT count(*) FROM workwear_workwearevent;
 \ddp
 ```
 
-Проверьте вход и реестр Workwear через Runtime на изолированном экземпляре с записанным SHA. Проверьте отказ доступа Runtime к `django_migrations` и запрет изменения или удаления истории. Для автоматического прогона с синтетическими данными используйте [проверку выпуска](testing.md).
+Выполните проверку ACL на восстановленной базе под Migrator. Через Runtime проверьте вход и реестр Workwear на изолированном экземпляре с записанным SHA. Для автоматического прогона с синтетическими данными используйте [проверку выпуска](testing.md).
 
 ## Возврат рабочей БД из проверенной копии
 
