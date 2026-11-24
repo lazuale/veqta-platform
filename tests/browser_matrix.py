@@ -477,6 +477,31 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
                     'tab_selection_preserved':True,'cancelled_read_unchanged':True,'local_removal_resolved':True,
                     'edited_list_invalidates_old_results':True}
 
+        def registry_after_delete():
+            from workwear import services
+            from workwear.models import Organization, Request
+
+            def seed_page():
+                organization = Organization.objects.create(name="Проверка страниц реестра", requests_enabled=True)
+                drafts = [services.create_request(organization_id=organization.pk, actor=actor) for _ in range(31)]
+                return organization.pk, drafts[0].pk
+
+            organization_id, oldest_id = database_call(seed_page)
+            page.goto(base + '/workwear/')
+            page.locator('[data-filter="organization_id"]').select_option(str(organization_id))
+            expect(page.locator('#registryCount')).to_have_text('Найдено: 31')
+            page.locator('[data-action="registry-next"]').click()
+            rows = page.locator('tr.registry-row')
+            expect(rows).to_have_count(1)
+            rows.get_by_role('button', name=f'Открыть заявку {oldest_id}').click()
+            page.locator('[data-action="delete-draft"]').click()
+            page.locator('[data-action="confirm-delete"]').click()
+            expect(page.locator('#registryCount')).to_have_text('Найдено: 30')
+            expect(rows).to_have_count(30)
+            expect(page.locator('[data-filter="organization_id"]')).to_have_value(str(organization_id))
+            assert not database_call(lambda: Request.objects.filter(pk=oldest_id).exists())
+            return {'visible_requests_after_delete': 30, 'organization_filter_preserved': True}
+
         def unsaved_navigation():
             request_id=data['extra']['lookup']
             open_matrix(request_id)
@@ -902,6 +927,7 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
         run("cells-modes-save", cells_and_modes)
         run("pagination-and-batch", pagination_and_batch)
         run("bulk-lookup-and-cancel", lookup_and_cancellation)
+        run("registry-pagination-after-delete", registry_after_delete)
         run("unsaved-navigation", unsaved_navigation)
         run("network-and-conflict", network_and_conflict)
         run("close-history-reader", close_history_reader)

@@ -69,6 +69,11 @@ export function installRegistry(ctx) {
             const result = await api('ui/requests/?' + query.toString());
             if (id !== settings.pageEpoch || settings.screen !== 'registry')
                 return;
+            if (result.offset > 0 && result.offset >= result.count) {
+                const lastPage = Math.max(0, Math.ceil(result.count / result.limit) - 1);
+                settings.registry.offset = lastPage * result.limit;
+                return loadRegistry();
+            }
             counter.textContent = `Найдено: ${result.count}`;
             periodError.textContent = '';
             body.innerHTML = result.results.length ? `<table class="vq-registry-table"><colgroup><col style="width:100px"><col><col style="width:156px"><col style="width:156px"><col style="width:112px"><col style="width:150px"><col style="width:36px"></colgroup><thead><tr><th>Заявка</th><th>Организация</th><th>Создана</th><th>Завершена</th><th>Сотрудников</th><th>Состояние</th><th></th></tr></thead><tbody>${result.results.map(r => `<tr data-open="${r.id}" class="registry-row"><td class="registry-number"><button type="button" class="vq-name-action" data-open="${r.id}" aria-label="Открыть заявку ${r.id}">№ ${r.id}</button></td><td>${esc(r.snapshot_organization_name)}</td><td>${fmt(r.created_at)}<div class="secondary">${fmtTime(r.created_at)}</div></td><td>${r.completed_at ? `${fmt(r.completed_at)}<div class="secondary">${fmtTime(r.completed_at)}</div>` : '<span class="quiet">—</span>'}</td><td>${r.members_count}</td><td><span class="status-inline ${r.status === 'closed' ? 'finished' : ''}">${tone(r.status)}</span></td><td class="row-open" aria-hidden="true">${icon('chev')}</td></tr>`).join('')}</tbody></table>` : `<div class="vq-empty"><div class="symbol">${icon('search')}</div><h3>Совпадений нет</h3><p>Измените запрос или сбросьте фильтры, чтобы вернуться к полному списку.</p>${btn('Сбросить фильтры', 'reset-filters')}</div>`;
