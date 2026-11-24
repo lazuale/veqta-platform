@@ -31,16 +31,16 @@ TRIGGERS = (
 
 # SHA-256 тела функций обнаруживает замену защитной логики при сохранении триггера.
 FUNCTIONS = {
-    "ww_guard_employee_identity": "7ea1945a01acedbfcad9bc2a47f661b614f98659068272b9c39092f1a4769c17",
-    "ww_guard_request_identity": "eca611553d273bcea32179f72de0fa1c3e4e2283946752e0e6a2e3a6aa95068b",
-    "ww_reject_event_change": "b15dead6d5c250e4957d692ea52dd4db8b3442303e4de66912a081de70173eee",
-    "ww_guard_member_write": "30d87c1f0e883da64fa72867d8cf9cdefb91b07e3096574f39d66ad365609db5",
-    "ww_guard_assignment_write": "e155ecdc664221dbbf2107d1974fe3d2a905855bb096084530ed32d683ed9d48",
-    "ww_guard_request_lifecycle": "a6ab2d3d8642b66f273605d59e17bc297bec8e2e175f92430eb07f2d6df386b0",
-    "ww_reject_structure_truncate": "67260899df7dcfd1bdd417b7edd3431d1a2b9c728f7da65f8ed6314c3420227b",
-    "ww_guard_request_insert": "da85233b6ab0e2d784bf2a477e8a97556c3dc360a8bd545dc04a59013071fecd",
-    "ww_guard_organization_identity": "3846cc85ed255b7adc8a459ef1fe5751818a6dd826adb5e9b4cf65d44f44cf97",
-    "ww_guard_item_identity": "e717ba8e6e2e516479b17f84ab5ff1b4e5850260fc6f73adf48ef20071a64e6d",
+    "ww_guard_employee_identity": "b0a6535eafda2cea492ec1fda60fc8b038369715759d59989668325a7b2a57a9",
+    "ww_guard_request_identity": "77a72bac036642213b245b0670f98beaef9c2716b72505fbb3b2ab9dcc02e0ca",
+    "ww_reject_event_change": "7248190d1fef07b1033aaf035dd39754ef6db4e3e09ff4979e26393827b2337c",
+    "ww_guard_member_write": "d71a65f10110bbc85347030a8ee7b26212e67fa7e3f94bd5c1bebb1c1024f1f9",
+    "ww_guard_assignment_write": "5ba23288832f5bfe07e11907da592be9bc72f5b5a2ce5fc1ddc4ef7f307ed632",
+    "ww_guard_request_lifecycle": "534da8f0418043e39bc3cb48a1dce095c6ab96d596f4fa9925ffb3afaecee2ad",
+    "ww_reject_structure_truncate": "68bc000a46741723e88abd70e7041134e8ccbb882a0c85fa3a0daaaf480350df",
+    "ww_guard_request_insert": "90e05aa630910495815ecc6e2e984e5d8b5860b4d26ca5e13ea72aff024afcb8",
+    "ww_guard_organization_identity": "66e131bd35f5260d3ac8f95861fb83fb56fb4a00fcc7026d93351e7ec3d2a92c",
+    "ww_guard_item_identity": "b18816f41edac0ad83ff19c8577ea2b772e58bb5334cbf221c6e455d92a5628e",
     "ww_reject_import_change": "e665e1714c4feb5f3ca67ac352375840c7d85baf91e6480f1c7176fd6813e1ee",
 }
 

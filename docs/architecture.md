@@ -16,7 +16,7 @@ VEQTA — проект Django с отдельной базой PostgreSQL для
 | `workwear/importers/directories_1c.py`, `workwear/importers/acceptance.py` | Разбор CSV и транзакционная публикация справочника |
 | `workwear/management/commands/` | Импорт кадрового справочника и загрузка каталога |
 | `workwear/migrations/0001_initial.py` | Схема, составные FK и триггеры |
-| `workwear/migrations/0003_event_access.py`, `workwear/migrations/0004_import_history_append_only.py`, `workwear/database_access.py` | Права журналов и перечень обязательных объектов защиты Workwear |
+| `workwear/migrations/0003_event_access.py`, `workwear/migrations/0004_import_history_append_only.py`, `workwear/migrations/0005_russian_guard_messages.py`, `workwear/database_access.py` | Права журналов, русские сообщения и перечень обязательных объектов защиты Workwear |
 
 ## Модели и снимки
 

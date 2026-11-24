@@ -81,6 +81,57 @@ class DatabaseGuardsTests(TestCase):
             "ww_import_append_only",
         )
 
+    def test_guard_diagnostics_are_in_russian(self):
+        names = (
+            "ww_guard_employee_identity", "ww_guard_request_identity",
+            "ww_reject_event_change", "ww_guard_member_write",
+            "ww_guard_assignment_write", "ww_guard_request_lifecycle",
+            "ww_reject_structure_truncate", "ww_guard_request_insert",
+            "ww_guard_organization_identity", "ww_guard_item_identity",
+        )
+        with connection.cursor() as cursor:
+            cursor.execute("""
+                SELECT proname, prosrc
+                FROM pg_proc
+                WHERE pronamespace = 'public'::regnamespace
+                  AND proname = ANY(%s)
+            """, [list(names)])
+            bodies = dict(cursor.fetchall())
+
+        self.assertEqual(set(bodies), set(names))
+        english_messages = (
+            "Employee identity is immutable",
+            "Request identity and origin are immutable",
+            "Workwear event history is append-only",
+            "Employee is absent from the latest accepted roster",
+            "Membership identity is immutable",
+            "Parent request does not exist",
+            "Closed request membership cannot be modified",
+            "Assignment identity is immutable",
+            "Parent membership does not exist",
+            "Closed request assignment cannot be modified",
+            "Unknown catalog item",
+            "Inactive item cannot be assigned",
+            "Closed request cannot be deleted",
+            "Closed request cannot be edited",
+            "Request version cannot decrease",
+            "Status transition must increment version",
+            "Request has no assignments",
+            "Request members are incomplete",
+            "Workwear structural TRUNCATE is forbidden",
+            "New requests must start as drafts",
+            "New requests must start at version 1",
+            "Organization is not enabled for new requests",
+            "Organization identity is immutable",
+            "Item identity is immutable",
+        )
+        combined = "\n".join(bodies.values())
+        for message in english_messages:
+            with self.subTest(message=message):
+                self.assertNotIn(message, combined)
+        self.assertIn("Сотрудник отсутствует в последнем принятом справочнике", bodies["ww_guard_member_write"])
+        self.assertIn("В заявке нет назначений", bodies["ww_guard_request_lifecycle"])
+
     def test_truncate_forbidden_including_cascade(self):
         # Проверяем отложенные внешние ключи до триггера TRUNCATE.
         self.sql("SET CONSTRAINTS ALL IMMEDIATE")
