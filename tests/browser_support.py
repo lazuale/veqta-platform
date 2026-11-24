@@ -164,7 +164,7 @@ def https_server(environment, nginx_executable, artifacts):
                             assert csrf_cookie["secure"] and csrf_cookie["samesite"] == "Lax"
                             assert response.headers["X-Frame-Options"] == "DENY"
                             assert response.headers["X-Content-Type-Options"] == "nosniff"
-                            assert response.headers["Strict-Transport-Security"].startswith("max-age=3600")
+                            assert response.headers["Strict-Transport-Security"].startswith("max-age=31536000")
                         break
                     except OSError:
                         time.sleep(0.1)
