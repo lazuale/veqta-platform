@@ -169,7 +169,15 @@ def check_upgrade_delta(before, after, before_ids, after_ids, contour):
         assert after["права по умолчанию"] != before["права по умолчанию"]
     else:
         assert after["права по умолчанию"] == before["права по умолчанию"]
-    assert before["права столбцов"] == after["права столбцов"] == []
+    protected_column_tables = {
+        "django_migrations",
+        "workwear_workwearevent",
+        "workwear_employeeimport",
+    }
+    assert after["права столбцов"] == []
+    assert all(row[0] in protected_column_tables for row in before["права столбцов"]), (
+        "Обнаружены старые права на столбцы вне защищаемых журналов"
+    )
 
     previous_relations = {row[0]: row for row in before["таблицы, последовательности, индексы"]}
     current_relations = {row[0]: row for row in after["таблицы, последовательности, индексы"]}
