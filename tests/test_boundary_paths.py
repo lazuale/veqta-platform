@@ -4,7 +4,9 @@ from uuid import uuid4
 from unittest.mock import patch
 
 from django.core.exceptions import ValidationError
+from django.db import connection
 from django.test import TestCase
+from django.test.utils import CaptureQueriesContext
 
 from workwear import services
 from workwear.eligibility import require_current
@@ -82,6 +84,30 @@ class BoundaryPathsTests(TestCase):
         ):
             with self.subTest(options=options), self.assertRaises(ValidationError):
                 scan_repeats(**options)
+
+    def test_assignment_only_sync_does_not_read_employee_directory(self):
+        initial = save_draft(
+            request_id=self.request.pk, actor=self.actor, expected_version=1,
+            members=[{
+                "employee_id": self.people[0].pk,
+                "item_ids": [self.items[0].pk],
+            }],
+        )
+        with CaptureQueriesContext(connection) as captured:
+            changed = save_draft(
+                request_id=self.request.pk, actor=self.actor,
+                expected_version=initial.version,
+                members=[{
+                    "employee_id": self.people[0].pk,
+                    "item_ids": [self.items[0].pk, self.items[1].pk],
+                }],
+            )
+        self.assertTrue(changed.changed)
+        employee_queries = [
+            query["sql"] for query in captured
+            if 'FROM "workwear_employee"' in query["sql"]
+        ]
+        self.assertEqual(employee_queries, [])
 
     def test_full_sync_removes_members_and_assignments(self):
         initial = save_draft(
