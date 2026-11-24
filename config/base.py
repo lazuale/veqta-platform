@@ -45,6 +45,16 @@ INSTALLED_APPS = [
     'django.contrib.sessions', 'django.contrib.messages', 'django.contrib.staticfiles',
     'portal.apps.PortalConfig', 'workwear.apps.WorkwearConfig',
 ]
+VEQTA_APPLICATIONS = (
+    {
+        'key': 'workwear',
+        'icon': 'shirt',
+        'label': 'Спецодежда',
+        'description': 'Создание заявок на спецодежду, подбор сотрудников и контроль повторных назначений.',
+        'url_name': 'workwear_page:index',
+        'permission': 'workwear.view_request',
+    },
+)
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
@@ -111,7 +121,6 @@ CSRF_COOKIE_NAME = f'veqta_{VEQTA_ENV}_csrf'
 # HSTS действует на весь хост: DEV и PROD нужны разные домены.
 X_FRAME_OPTIONS = 'DENY'
 SECURE_CONTENT_TYPE_NOSNIFF = True
-
 
 
 def database_settings(*, migration=False):

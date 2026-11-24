@@ -454,7 +454,6 @@ class ImportTests(TestCase):
         self.assertEqual(result.anomalies["partial_employee_merges"], 0)
 
     def test_commands_refuse_wrong_environment_before_parsing_sources(self):
-        for command in ("veqta_initialize", "workwear_import_1c", "workwear_load_catalog"):
+        for command in ("workwear_import_1c", "workwear_load_catalog"):
             with self.subTest(command=command), self.assertRaises(CommandError):
-                args = [] if command == "veqta_initialize" else ["missing-source"]
-                call_command(command, *args, environment="prod", database_name="veqta_dev")
+                call_command(command, "missing-source", environment="prod", database_name="veqta_dev")

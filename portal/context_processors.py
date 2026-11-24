@@ -1,23 +1,12 @@
 """Меню учитывает права Django. Доступ к страницам проверяется отдельно."""
+from django.conf import settings
 from django.urls import reverse
-
-
-APPLICATIONS = (
-    {
-        "key": "workwear",
-        "icon": "shirt",
-        "label": "Спецодежда",
-        "description": "Создание заявок на спецодежду, подбор сотрудников и контроль повторных назначений.",
-        "url_name": "workwear_page:index",
-        "permission": "workwear.view_request",
-    },
-)
 
 
 def platform_navigation(request):
     available = [
         {**app, "url": reverse(app["url_name"])}
-        for app in APPLICATIONS
+        for app in settings.VEQTA_APPLICATIONS
         if request.user.is_authenticated and request.user.has_perm(app["permission"])
     ]
     namespace = request.resolver_match.namespace if request.resolver_match else ""
