@@ -169,6 +169,7 @@ def request_detail(request, request_id):
     return respond({"request": result})
 
 
+# Удерживаем блокировку заявки до чтения версии для ответа.
 @endpoint("POST")
 @transaction.atomic
 def member_add(request, request_id):
@@ -188,6 +189,7 @@ def member_remove(request, request_id, member_id):
     return respond({"deleted": True, "version": result})
 
 
+# Удерживаем блокировку заявки до чтения версии для ответа.
 @endpoint("POST")
 @transaction.atomic
 def assignment_add(request, request_id):
