@@ -62,7 +62,7 @@ def _audit(request_id, actor, event_type, **details):
     return event
 
 
-def _lock_request(request_id, expected_version, *, status, membership_lock=True):
+def _lock_request(request_id, expected_version, *, status, membership_lock):
     # При изменении состава блокируем импорт до блокировки строки заявки.
     if membership_lock:
         lock_for_membership()
@@ -110,7 +110,7 @@ def add_employees(*, request_id, employee_ids, actor, expected_version):
             or any(type(value) is not int or value <= 0 for value in employee_ids)
             or len(set(employee_ids)) != len(employee_ids)):
         raise ValidationError("Требуется от 1 до 1000 уникальных идентификаторов сотрудников")
-    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
+    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT, membership_lock=True)
     people = Employee.objects.in_bulk(employee_ids)
     if len(people) != len(employee_ids):
         raise Employee.DoesNotExist("Сотрудник отсутствует в справочнике")
@@ -144,7 +144,7 @@ def add_employee(*, request_id, employee_id, actor, expected_version):
 @transaction.atomic
 def remove_employee(*, request_id, member_id, actor, expected_version):
     _authorize(actor, "change_request")
-    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
+    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT, membership_lock=False)
     member = RequestEmployee.objects.get(pk=member_id, request_id=req.pk)
 
     employee_id = member.employee_id
@@ -197,7 +197,7 @@ def remove_assignment(*, request_id, assignment_id, actor, expected_version):
 @transaction.atomic
 def complete_request(*, request_id, actor, expected_version):
     _authorize(actor, "change_request")
-    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
+    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT, membership_lock=False)
     return _complete_locked_draft(req, actor)
 
 
@@ -260,7 +260,7 @@ def reopen_request(*, request_id, actor, expected_version, reason=""):
 def delete_draft(*, request_id, actor, expected_version):
     """История удаления сохраняется после самого черновика."""
     _authorize(actor, "delete_request")
-    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
+    req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT, membership_lock=False)
 
     _audit(req.pk, actor, "draft_deleted", version=req.version)
     req.delete()
