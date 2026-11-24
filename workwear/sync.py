@@ -141,11 +141,5 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
                 "assignments_removed": assignment_removed,
             },
         )
-    completion = None
-    if finish:
-
-        completion = asdict(services.complete_request(
-            request_id=req.pk, actor=actor, expected_version=req.version,
-        ))
-        req.version = completion["version"]
+    completion = asdict(services._complete_locked_draft(req, actor)) if finish else None
     return SyncResult(req.pk, req.version, changed, completion)

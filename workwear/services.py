@@ -3,7 +3,7 @@ from dataclasses import dataclass
 
 from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
-from django.db.models import Count, F
+from django.db.models import F
 from django.utils import timezone
 
 from .eligibility import latest_import, require_current
@@ -195,21 +195,17 @@ def remove_assignment(*, request_id, assignment_id, actor, expected_version):
 
 @transaction.atomic
 def complete_request(*, request_id, actor, expected_version):
-    """Сначала исключаем сотрудников без назначений. Если заявка опустела, закрытие отменяется."""
     _authorize(actor, "change_request")
     req = _lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
+    return _complete_locked_draft(req, actor)
 
-    # Убираем пустые строки до закрытия: после него удалять участников нельзя.
-    empty_ids = list(
-        RequestEmployee.objects.filter(request_id=req.pk)
-        .annotate(assigned_count=Count("assignments"))
-        .filter(assigned_count=0)
-        .values_list("pk", flat=True)
-    )
-    excluded_people = list(RequestEmployee.objects.filter(pk__in=empty_ids)
+
+def _complete_locked_draft(req, actor):
+    """Завершаем черновик после проверки прав и версии под блокировкой заявки."""
+    excluded_people = list(RequestEmployee.objects.filter(request_id=req.pk, assignments__isnull=True)
         .values("id", "employee_id", "snapshot_full_name", "snapshot_personnel_number"))
-    if empty_ids:
-        RequestEmployee.objects.filter(pk__in=empty_ids).delete()
+    if excluded_people:
+        RequestEmployee.objects.filter(pk__in=[member["id"] for member in excluded_people]).delete()
 
     final_members = RequestEmployee.objects.filter(request_id=req.pk).count()
     final_assignments = RequestAssignment.objects.filter(
@@ -225,13 +221,13 @@ def complete_request(*, request_id, actor, expected_version):
     req.completed_by = actor
     req.save(update_fields=["status", "version", "completed_at", "completed_by"])
     _audit(
-        req.pk, actor, "completed", excluded_members=len(empty_ids),
+        req.pk, actor, "completed", excluded_members=len(excluded_people),
         final_members=final_members, final_assignments=final_assignments,
         excluded_people=excluded_people,
     )
     return CompletionResult(
         request_id=req.pk, version=req.version,
-        excluded_members=len(empty_ids), final_members=final_members,
+        excluded_members=len(excluded_people), final_members=final_members,
         final_assignments=final_assignments,
     )
 

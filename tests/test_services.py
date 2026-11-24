@@ -95,12 +95,20 @@ class LifecycleTests(TestCase):
         self.assertEqual(self.req.members.count(), 1)
 
     def test_audit_failure_rolls_back_members_version_and_assignments(self):
-        with patch("workwear.services._audit", side_effect=RuntimeError("Тестовый сбой")):
+        record = services._audit
+
+        def fail_completion(request_id, actor, event_type, **details):
+            if event_type == "completed":
+                raise RuntimeError("Тестовый сбой записи завершения")
+            return record(request_id, actor, event_type, **details)
+
+        with patch("workwear.services._audit", side_effect=fail_completion):
             with self.assertRaises(RuntimeError):
                 self.save(finish=True)
         self.req.refresh_from_db()
         self.assertEqual((self.req.status, self.req.version, self.req.members.count()), ("draft", 1, 0))
         self.assertEqual(RequestAssignment.objects.count(), 0)
+        self.assertEqual(list(WorkwearEvent.objects.values_list("event_type", flat=True)), ["created"])
 
     def test_reopen_requires_separate_permission(self):
         result = self.save(finish=True)
