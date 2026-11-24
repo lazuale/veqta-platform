@@ -13,12 +13,18 @@ def make_user(*, administrator=True):
     )
 
 
-def make_import():
-    return EmployeeImport.objects.create(
-        employees_sha256=secrets.token_hex(32), positions_sha256=secrets.token_hex(32),
-        units_sha256=secrets.token_hex(32), source_row_count=1000, employee_count=1000,
-        source_export_date=timezone.localdate(),
-    )
+def make_import(*, accepted_at=None):
+    values = {
+        "employees_sha256": secrets.token_hex(32),
+        "positions_sha256": secrets.token_hex(32),
+        "units_sha256": secrets.token_hex(32),
+        "source_row_count": 1000,
+        "employee_count": 1000,
+        "source_export_date": timezone.localdate(),
+    }
+    if accepted_at is not None:
+        values["accepted_at"] = accepted_at
+    return EmployeeImport.objects.create(**values)
 
 
 def make_organization(name="Тестовая организация А", *, enabled=True, external_id=None):
