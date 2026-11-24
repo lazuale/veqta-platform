@@ -30,9 +30,17 @@ class PublicationReview:
 
 
 def _review(batch, previous):
-    missing = tuple(sorted(str(value) for value in Employee.objects.filter(
-        last_seen_import_id=previous.pk,
-    ).exclude(employee_guid__in={p.guid for p in batch.people}).values_list("employee_guid", flat=True))) if previous else ()
+    if previous:
+        incoming_guids = {person.guid for person in batch.people}
+        missing = tuple(sorted(
+            str(guid)
+            for guid in Employee.objects.filter(
+                last_seen_import_id=previous.pk,
+            ).values_list("employee_guid", flat=True).iterator(chunk_size=2000)
+            if guid not in incoming_guids
+        ))
+    else:
+        missing = ()
     return PublicationReview(
         previous.pk if previous else 0, len(batch.people), len(missing),
         hashlib.sha256("\n".join(missing).encode("ascii")).hexdigest(), missing,
@@ -90,8 +98,14 @@ def accept(batch: ParsedBatch, *, source_export_date: date,
     by_guid = {p.guid: p for p in batch.people}
     if len(by_guid) != len(batch.people):
         raise ValidationError("Повтор GUID в подготовленном наборе")
-    stored = {e.employee_guid: e for e in
-              Employee.objects.select_for_update().filter(employee_guid__in=by_guid)}
+    stored = {}
+    for chunk in _chunks(list(by_guid)):
+        stored.update({
+            employee.employee_guid: employee
+            for employee in Employee.objects.select_for_update()
+            .filter(employee_guid__in=chunk)
+            .order_by("employee_guid")
+        })
     organizations = {}
     for external_id, source_name in sorted(batch.organizations.items()):
         organization = Organization.objects.select_for_update().filter(external_id=external_id).first()
