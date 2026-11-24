@@ -84,7 +84,7 @@ def verify_database(environment, *, append_tables=(), triggers=(), foreign_keys=
                 actual_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
                 if (actual_hash != expected_hash or language != "plpgsql"
                         or security_definer or not returns_trigger):
-                    problems.append(f"неверное определение защитной функции: public.{name}")
+                    problems.append(f"неверное определение защитной функции: public.{name} (SHA-256: {actual_hash})")
 
         if constraints:
             constraint_tables = sorted({table for table, *_ in constraints})
