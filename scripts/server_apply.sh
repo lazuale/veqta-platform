@@ -124,9 +124,12 @@ veqta_check_nginx || { echo 'STOP: конфигурация Nginx не прин�
 
 install -o root -g root -m 0644 "$APP/deploy/systemd/$SERVICE" "/etc/systemd/system/$SERVICE"
 systemctl daemon-reload
-veqta_check_unit
+# Сначала проверяем конфигурацию загруженного unit, не требуя запуска.
+veqta_check_unit_config
 systemctl enable "$SERVICE"
 systemctl restart "$SERVICE"
+# Состояние active/running проверяем только после запуска.
+veqta_check_unit
 
 veqta_check_http || { journalctl -u "$SERVICE" -n 50 --no-pager; exit 1; }
 systemctl is-active --quiet "$SERVICE"
