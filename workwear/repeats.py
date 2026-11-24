@@ -37,7 +37,7 @@ def scan_repeats(*, pairs, as_of_date=None, exclude_request_id=None):
 
     people = {employee for employee, _ in wanted}
     items = {item for _, item in wanted}
-    known_items = set(WorkwearItem.objects.filter(pk__in=items).values_list("pk", flat=True))
+    known_items = set(WorkwearItem.objects.filter(pk__in=items).order_by().values_list("pk", flat=True))
     if known_items != items:
         raise ValidationError("Неизвестная позиция спецодежды")
 
