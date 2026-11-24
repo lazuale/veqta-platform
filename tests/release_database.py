@@ -142,6 +142,69 @@ def object_ids(conn):
     """).fetchall()
 
 
+TRANSLATED_GUARDS = {
+    "ww_guard_employee_identity",
+    "ww_guard_request_identity",
+    "ww_reject_event_change",
+    "ww_guard_member_write",
+    "ww_guard_assignment_write",
+    "ww_guard_request_lifecycle",
+    "ww_reject_structure_truncate",
+    "ww_guard_request_insert",
+    "ww_guard_organization_identity",
+    "ww_guard_item_identity",
+}
+
+
+def check_upgrade_delta(before, after, before_ids, after_ids):
+    """Проверяем только ожидаемые изменения новых миграций и сохранность остального."""
+    previous_ids, current_ids = set(before_ids), set(after_ids)
+    assert previous_ids <= current_ids, "Миграция пересоздала существующие объекты PostgreSQL"
+    assert len(current_ids - previous_ids) == 3, "Миграция добавила неожиданные объекты PostgreSQL"
+
+    for label in ("база", "схема", "ограничения", "права по умолчанию"):
+        assert after[label] == before[label], f"Неожиданно изменились: {label}"
+    assert before["права столбцов"] == after["права столбцов"] == []
+
+    previous_relations = {row[0]: row for row in before["таблицы, последовательности, индексы"]}
+    current_relations = {row[0]: row for row in after["таблицы, последовательности, индексы"]}
+    assert previous_relations.keys() == current_relations.keys(), "Изменился состав таблиц, последовательностей или индексов"
+    for name, previous in previous_relations.items():
+        current = current_relations[name]
+        if name == "workwear_employeeimport":
+            # Миграция 0004 намеренно меняет только права самой таблицы.
+            assert previous[:3] == current[:3] and previous[4:] == current[4:]
+        else:
+            assert current == previous, f"Неожиданно изменились метаданные public.{name}"
+
+        if previous[1] == "r" and name not in {"django_migrations"}:
+            assert after[name] == before[name], f"Миграция изменила данные public.{name}"
+        elif previous[1] == "S" and name != "django_migrations_id_seq":
+            assert after[name] == before[name], f"Миграция изменила состояние последовательности public.{name}"
+
+    previous_functions = {row[0]: row[1:] for row in before["функции"]}
+    current_functions = {row[0]: row[1:] for row in after["функции"]}
+    assert set(current_functions) - set(previous_functions) == {"ww_reject_import_change"}
+    assert set(previous_functions) - set(current_functions) == set()
+    for name, previous in previous_functions.items():
+        current = current_functions[name]
+        assert current[:2] == previous[:2], f"Изменились владелец или права функции public.{name}"
+        if name in TRANSLATED_GUARDS:
+            assert current[2] != previous[2], f"Сообщения функции public.{name} не переведены"
+        else:
+            assert current[2] == previous[2], f"Неожиданно изменилась функция public.{name}"
+    assert "История принятых выгрузок неизменяема" in current_functions["ww_reject_import_change"][2]
+
+    previous_triggers = set(before["триггеры"])
+    current_triggers = set(after["триггеры"])
+    assert previous_triggers <= current_triggers, "Миграция изменила или удалила существующий триггер"
+    added_triggers = {(row[0], row[1]) for row in current_triggers - previous_triggers}
+    assert added_triggers == {
+        ("workwear_employeeimport", "ww_import_no_update_delete"),
+        ("workwear_employeeimport", "ww_import_no_truncate"),
+    }, f"Неожиданные новые триггеры: {added_triggers}"
+
+
 def check_column_drift(owner):
     # Отдельные GRANT имитируют отклонения на ранее применённой схеме.
     owner.execute("""
@@ -244,15 +307,16 @@ def check_upgrade(contour):
         for arguments in (("manage.py", "migrate", "--noinput"), (*audit_args, "--protect-migrations"), audit_args):
             result = migrator(contour, *arguments)
             assert result.returncode == 0, result.stdout + result.stderr
-        assert workwear_migrations(owner) == [("0001_initial",), ("0002_database_acl",), ("0003_event_access",)]
-        assert object_ids(owner) == identities
+        expected_history = [
+            ("0001_initial",),
+            ("0002_database_acl",),
+            ("0003_event_access",),
+            ("0004_import_history_append_only",),
+            ("0005_russian_guard_messages",),
+        ]
+        assert workwear_migrations(owner) == expected_history
         after = inventory(owner)
-        changed = {
-            "django_migrations", "django_migrations_id_seq", "права столбцов", "права по умолчанию",
-            "таблицы, последовательности, индексы", "функции",
-        }
-        assert all(after[label] == data for label, data in before.items() if label not in changed)
-        assert after["права столбцов"] == []
+        check_upgrade_delta(before, after, identities, object_ids(owner))
 
         for arguments in (("manage.py", "migrate", "--noinput"), (*audit_args, "--protect-migrations"), audit_args):
             result = migrator(contour, *arguments)
