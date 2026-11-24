@@ -4,13 +4,14 @@ from .repeats import scan_repeats
 from .employee_lookup import employee_data, resolve_many
 from datetime import date
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.db.models import Case, CharField, Count, F, Func, IntegerField, Q, Value, When
 from django.utils import timezone
 
 from .limits import MAX_REQUEST_MEMBERS, MAX_ITEMS_PER_MEMBER, MAX_REPEAT_PAIRS, MAX_JSON_BYTES, MAX_SYNC_JSON_BYTES
 from . import services
-from .api import endpoint, payload, positive_int, require_permission, respond, version, query_organization_id
+from .api import as_request, endpoint, payload, positive_int, require_permission, respond, version, query_organization_id
+from .sync import save_draft
 from .models import (
     Employee, Organization, Request, RequestEmployee,
     RequestStatus, WorkwearEvent, WorkwearItem,
@@ -251,12 +252,6 @@ def resolve(request):
 def bulk_add(request, request_id):
     obj = payload(request, "employee_ids", "expected_version")
     ids = obj["employee_ids"]
-    if not isinstance(ids, list) or not 1 <= len(ids) <= MAX_REQUEST_MEMBERS:
-        raise ValidationError("Требуется от 1 до 1000 сотрудников")
-    if any(type(value) is not int or value <= 0 for value in ids):
-        raise ValidationError("Некорректные идентификаторы сотрудников")
-    if len(ids) != len(set(ids)):
-        raise ValidationError("Повторяющиеся сотрудники в списке")
     members, next_version = services.add_employees(
         request_id=request_id, employee_ids=ids, expected_version=version(obj), actor=request.user,
     )
@@ -275,7 +270,6 @@ def events(request, request_id):
         raise ValidationError("Лимит должен быть положительным")
     qs = WorkwearEvent.objects.filter(request_number=request_id)
     if not Request.objects.filter(pk=request_id).exists() and not qs.exists():
-        from django.core.exceptions import ObjectDoesNotExist
         raise ObjectDoesNotExist("Неизвестная заявка")
     count = qs.count()
     rows = qs.order_by("-occurred_at", "-pk")[offset:offset + limit]
@@ -322,7 +316,6 @@ def employee_history(request, request_id, employee_id):
 
 @endpoint("POST")
 def sync_request(request, request_id):
-    from .sync import save_draft
     obj = payload(request, "members", "expected_version", "finish", max_bytes=MAX_SYNC_JSON_BYTES)
     result = save_draft(
         request_id=request_id, actor=request.user,
@@ -377,7 +370,6 @@ def repeat_scan(request, request_id):
 
 @endpoint("POST")
 def reopen_with_reason(request, request_id):
-    from .api import as_request
     obj = payload(request, "expected_version", "reason")
     req = services.reopen_request(request_id=request_id, actor=request.user,
         expected_version=version(obj), reason=obj["reason"])
