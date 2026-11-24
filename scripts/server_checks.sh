@@ -267,7 +267,7 @@ veqta_check_unit_config() {
     "User=$ACTOR" "Group=$ACTOR" \
     "WorkingDirectory=$APP" 'NeedDaemonReload=no' "FragmentPath=$UNIT_FILE" \
     'DropInPaths=' 'Type=simple' 'Restart=on-failure' 'RestartUSec=5s' \
-    'UMask=0027' 'NoNewPrivileges=yes' 'PrivateTmp=yes' 'ProtectSystem=strict' \
+    'UMask=0027' 'NoNewPrivileges=yes' 'PrivateTmp=yes' 'ProtectSystem=strict' 'ProtectHome=yes' \
     'Environment=PYTHONDONTWRITEBYTECODE=1' \
     'UnsetEnvironment=DJANGO_SETTINGS_MODULE PYTHONPATH PYTHONHOME DB_MIGRATION_PASSWORD'; do
     property=${expected%%=*}
