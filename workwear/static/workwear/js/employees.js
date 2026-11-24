@@ -82,13 +82,16 @@ export function installEmployees(ctx) {
             apply.textContent = `Добавить (${picked.length})`;
         }
     }
+    function bulkLines() {
+        return settings.bulkText.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+    }
     /** Смена текста или диалога отменяет незавершённый поиск. */
     async function resolveBulk() {
         settings.bulkAbort?.abort();
         const controller = new AbortController(); settings.bulkAbort = controller;
         const epoch = ++settings.bulkEpoch, dialog = settings.dialogEpoch;
         const text = settings.bulkText, requestId = settings.request.id;
-        const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+        const lines = bulkLines();
         if (!lines.length || lines.length > ctx.limits().request_members) {
             notice(`Вставьте от 1 до ${ctx.limits().request_members} строк`, true); return;
         }
@@ -129,7 +132,9 @@ export function installEmployees(ctx) {
         return result;
     }
     function addBulk() {
+        if (!settings.bulkChecked) return;
         const count = ctx.addLocals(bulkCandidates());
+        if (!count) return;
         settings.modal = null; settings.resolved = []; settings.bulkText = '';
         refreshMemberRows(); ctx.renderOverlay();
         notice(`Добавлено в черновик: ${count}. Не забудьте сохранить заявку.`);
@@ -192,6 +197,6 @@ export function installEmployees(ctx) {
         batchChange('add');
     }
     Object.assign(ctx, {
-        searchEmployees, patchSearchResults, resolveBulk, bulkCandidates, addBulk, batchChange, scanBatchBeforeAdd
+        searchEmployees, patchSearchResults, bulkLines, resolveBulk, bulkCandidates, addBulk, batchChange, scanBatchBeforeAdd
     });
 }

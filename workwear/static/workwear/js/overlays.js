@@ -119,15 +119,31 @@ export function installOverlays(ctx) {
             subtitle = 'Доступны сотрудники организации заявки из последней принятой выгрузки 1С.';
             tabs = `<div class="vq-modal-tabs"><button type="button" data-tab="bulk" class="${settings.tab === 'bulk' ? 'active' : ''}">Массовый поиск</button><button type="button" data-tab="single" class="${settings.tab === 'single' ? 'active' : ''}">Поиск и выбор</button></div>`;
             if (settings.tab === 'bulk') {
-                const rows = settings.bulkChecked ? settings.resolved : settings.bulkText.split(/\r?\n/).map(x => x.trim()).filter(Boolean).map(input => ({ input, status: 'not_found', candidates: [] }));
-                const found = settings.bulkChecked ? rows.filter(r => r.status === 'matched') : [];
-                const attention = settings.bulkChecked ? rows.filter(r => ['ambiguous', 'not_found', 'other_organization', 'outdated', 'import_unavailable'].includes(r.status)) : [];
-                const others = settings.bulkChecked ? rows.filter(r => r.status === 'duplicate' || r.status === 'included') : [];
-                const resultIndices = new Map(settings.resolved.map((r, i) => [r, i]));
+                const rows = settings.bulkChecked ? settings.resolved : [];
+                const found = rows.filter(r => r.status === 'matched');
+                const attention = rows.filter(r => ['ambiguous', 'not_found', 'other_organization', 'outdated', 'import_unavailable'].includes(r.status));
+                const others = rows.filter(r => r.status === 'duplicate' || r.status === 'included');
+                const resultIndices = new Map(rows.map((r, i) => [r, i]));
                 const renderGroup = (label, part) => part.length ? `<div class="vq-result-header">${label}<span>${part.length}</span></div><div class="vq-result-list">${part.map(r => { const i = resultIndices.get(r); const candidate = r.candidates?.[0]; return `<div class="vq-result ${r.status === 'ambiguous' ? 'vq-resolved' : ''}"><div class="who"><strong>${esc(candidate?.full_name || r.input)}</strong><small>${esc(candidate?.personnel_number || '')}</small>${r.status === 'ambiguous' ? `<select class="vq-select vq-result-select" data-resolve="${i}" aria-label="Уточнить сотрудника"><option value="">Выберите сотрудника по табельному номеру</option>${(r.candidates || []).map(c => `<option value="${c.id}" ${r.chosen === c.id ? 'selected' : ''}>${esc(c.full_name)} · ${esc(c.personnel_number)} · ${esc(c.department_name || '')}</option>`).join('')}</select>` : ''}</div><span class="result-tag ${r.status === 'matched' ? 'good' : 'warn'}">${esc(({ matched: 'Найден', duplicate: 'Дубликат ввода', included: 'Уже в заявке', ambiguous: 'Неоднозначно', not_found: 'Не найден', other_organization: 'Другая организация', outdated: 'Нет в актуальном справочнике', import_unavailable: 'Нет принятой выгрузки 1С' })[r.status] || r.status)}</span></div>`; }).join('')}</div>` : '';
-                body = rosterHint() + `<label class="vq-field-label" for="bulkText">ФИО или табельный номер — по одной записи в строке</label><textarea class="vq-textarea" id="bulkText" placeholder="Вставьте список из любого источника">${esc(settings.bulkText)}</textarea><p id="bulkReadProgress" class="vq-caption" role="status"></p><div class="vq-counts"><span>Строк <b>${rows.length}</b></span>${settings.bulkChecked ? `<span>Найдено <b>${found.length}</b></span><span>Требуют внимания <b>${attention.length}</b></span><span>Пропущено <b>${others.length}</b></span>` : ''}</div>${settings.bulkChecked ? `<div class="vq-result-scroll">${renderGroup('Готовы к добавлению', found)}${renderGroup('Требуют внимания', attention)}${renderGroup('Уже включены и дубликаты', others)}</div>` : ''}`;
+                const resultCounts = settings.bulkChecked ?
+                    `<span data-bulk-result>Найдено <b>${found.length}</b></span>` +
+                    `<span data-bulk-result>Требуют внимания <b>${attention.length}</b></span>` +
+                    `<span data-bulk-result>Пропущено <b>${others.length}</b></span>` : '';
+                const resultRows = settings.bulkChecked ? `<div class="vq-result-scroll" data-bulk-result>
+                    ${renderGroup('Готовы к добавлению', found)}${renderGroup('Требуют внимания', attention)}
+                    ${renderGroup('Уже включены и дубликаты', others)}</div>` : '';
+                body = rosterHint() +
+                    `<label class="vq-field-label" for="bulkText">ФИО или табельный номер — по одной записи в строке</label>` +
+                    `<textarea class="vq-textarea" id="bulkText" placeholder="Вставьте список из любого источника">${esc(settings.bulkText)}</textarea>` +
+                    `<p id="bulkReadProgress" class="vq-caption" role="status"></p>` +
+                    `<div class="vq-counts"><span>Строк <b id="bulkLineCount">${ctx.bulkLines().length}</b></span>${resultCounts}</div>${resultRows}`;
                 const ready = ctx.bulkCandidates().length;
-                footer = `<span class="note" id="bulkReadyNote">${settings.bulkChecked ? `Готовы к добавлению: ${ready}` : 'Введите список и проверьте совпадения'}</span><div class="vq-actions">${btn('Отмена', 'cancel')}${settings.bulkChecked ? btn('Проверить повторно', 'check-bulk') + btn(`Добавить найденных (${ready})`, 'apply-bulk', 'primary', !ready ? 'disabled' : '') : btn('Проверить список', 'check-bulk', 'primary', !settings.bulkText.trim() ? 'disabled' : '')}</div>`;
+                const bulkActions = settings.bulkChecked
+                    ? btn('Проверить повторно', 'check-bulk', 'primary') +
+                        btn(`Добавить найденных (${ready})`, 'apply-bulk', 'primary', `data-bulk-result ${!ready ? 'disabled' : ''}`)
+                    : btn('Проверить список', 'check-bulk', 'primary', !settings.bulkText.trim() ? 'disabled' : '');
+                footer = `<span class="note" id="bulkReadyNote">${settings.bulkChecked ? `Готовы к добавлению: ${ready}` : 'Введите список и проверьте совпадения'}</span>` +
+                    `<div class="vq-actions">${btn('Отмена', 'cancel')}${bulkActions}</div>`;
             }
             else {
                 body = rosterHint() + `<div class="vq-picker-search"><label class="vq-field-label" for="oneSearch">Найти сотрудников</label><div class="vq-field vq-picker-input">${icon('search')}<input id="oneSearch" type="search" data-input="one-search" placeholder="Фамилия, ФИО или табельный номер" autocomplete="off" value="${esc(settings.singleQuery)}"></div><p class="vq-picker-help">От 2 символов. Отмечайте нескольких сотрудников, затем нажмите «Добавить».</p></div><div class="vq-picker-selected" id="singleSelected" hidden></div><div class="vq-picker-summary" id="singleMatchCount" aria-live="polite"></div><div class="vq-result-scroll vq-picker-results" id="singleResults"></div>`;

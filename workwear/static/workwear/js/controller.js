@@ -523,9 +523,14 @@ export function installController(ctx) {
             settings.bulkText = t.value;
             settings.resolved = [];
             settings.bulkChecked = false;
-            const check = $('[data-action="check-bulk"]');
-            if (check)
-                check.disabled = !t.value.trim();
+            const lineCount = ctx.bulkLines().length;
+            $('#bulkLineCount', overlays).textContent = lineCount;
+            $('#bulkReadProgress', overlays).textContent = '';
+            for (const result of $$('[data-bulk-result]', overlays)) result.remove();
+            $('#bulkReadyNote', overlays).textContent = 'Введите список и проверьте совпадения';
+            const check = $('[data-action="check-bulk"]', overlays);
+            check.textContent = 'Проверить список';
+            check.disabled = lineCount === 0;
         }
         if (t.id === 'reopenReason') {
             settings.reopenReason = t.value;

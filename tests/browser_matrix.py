@@ -414,6 +414,16 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             page.locator('select[data-resolve]').select_option(str(data['people'][998]))
             expect(page.locator('[data-action="apply-bulk"]')).to_contain_text('(2)')
             page.screenshot(path=str(artifacts/'bulk-lookup-states.png'),full_page=True)
+            bulk_text = page.locator('#bulkText')
+            revised = bulk_text.input_value() + '\nНЕСУЩЕСТВУЮЩИЙ-НОМЕР-2'
+            bulk_text.fill(revised)
+            expect(bulk_text).to_be_focused()
+            expect(page.locator('.vq-result')).to_have_count(0)
+            expect(page.locator('[data-action="apply-bulk"]')).to_be_hidden()
+            expect(page.locator('#bulkLineCount')).to_have_text('7')
+            expect(bulk_text).to_have_value(revised)
+            page.locator('[data-action="check-bulk"]').click()
+            page.locator('select[data-resolve]').select_option(str(data['people'][998]))
             page.locator('[data-action="apply-bulk"]').click()
             expect(page.locator('tr[data-row]')).to_have_count(2)
             page.locator('[data-action="add"]').first.click()
@@ -464,7 +474,8 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             expect(page.locator('[data-action="save"]')).to_be_disabled()
             assert database_call(lambda: persisted(request_id)) == saved
             return {'statuses':statuses,'ambiguous_chosen_by_id':True,'partial_search':True,
-                    'tab_selection_preserved':True,'cancelled_read_unchanged':True,'local_removal_resolved':True}
+                    'tab_selection_preserved':True,'cancelled_read_unchanged':True,'local_removal_resolved':True,
+                    'edited_list_invalidates_old_results':True}
 
         def unsaved_navigation():
             request_id=data['extra']['lookup']
