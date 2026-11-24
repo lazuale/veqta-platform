@@ -48,7 +48,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
         raise ValidationError("Некорректный признак завершения")
     desired, item_ids = _validate(members)
     req = services._lock_request(request_id, expected_version, status=RequestStatus.DRAFT, membership_lock=True)
-    items = dict(WorkwearItem.objects.filter(pk__in=item_ids).values_list("pk", "is_active"))
+    items = dict(WorkwearItem.objects.filter(pk__in=item_ids).order_by().values_list("pk", "is_active"))
     if set(items) != item_ids:
         raise ValidationError("Неизвестная позиция спецодежды")
     existing = list(RequestEmployee.objects.filter(request_id=req.pk).prefetch_related("assignments"))
