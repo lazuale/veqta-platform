@@ -156,28 +156,38 @@ TRANSLATED_GUARDS = {
 }
 
 
-def check_upgrade_delta(before, after, before_ids, after_ids):
+def check_upgrade_delta(before, after, before_ids, after_ids, contour):
     """Проверяем только ожидаемые изменения новых миграций и сохранность остального."""
     previous_ids, current_ids = set(before_ids), set(after_ids)
     assert previous_ids <= current_ids, "Миграция пересоздала существующие объекты PostgreSQL"
     assert len(current_ids - previous_ids) == 3, "Миграция добавила неожиданные объекты PostgreSQL"
 
-    for label in ("база", "схема", "ограничения", "права по умолчанию"):
+    for label in ("база", "схема", "ограничения"):
         assert after[label] == before[label], f"Неожиданно изменились: {label}"
+    if contour == "dev":
+        # В DEV миграция 0002 впервые закрепляет права по умолчанию.
+        assert after["права по умолчанию"] != before["права по умолчанию"]
+    else:
+        assert after["права по умолчанию"] == before["права по умолчанию"]
     assert before["права столбцов"] == after["права столбцов"] == []
 
     previous_relations = {row[0]: row for row in before["таблицы, последовательности, индексы"]}
     current_relations = {row[0]: row for row in after["таблицы, последовательности, индексы"]}
     assert previous_relations.keys() == current_relations.keys(), "Изменился состав таблиц, последовательностей или индексов"
+    acl_relations = {"django_migrations", "django_migrations_id_seq", "workwear_employeeimport"}
+    if contour == "dev":
+        # Миграция 0002 также ограничивает журнал событий и права последовательностей.
+        acl_relations.add("workwear_workwearevent")
     for name, previous in previous_relations.items():
         current = current_relations[name]
-        if name in {"django_migrations", "django_migrations_id_seq", "workwear_employeeimport"}:
-            # Защита журнала и истории импорта намеренно меняет только ACL этих объектов.
-            assert previous[:3] == current[:3] and previous[4:] == current[4:]
+        if name in acl_relations or (contour == "dev" and previous[1] == "S"):
+            assert previous[:3] == current[:3] and previous[4:] == current[4:], (
+                f"Неожиданно изменились метаданные public.{name}, кроме ACL"
+            )
         else:
             assert current == previous, f"Неожиданно изменились метаданные public.{name}"
 
-        if previous[1] == "r" and name not in {"django_migrations"}:
+        if previous[1] == "r" and name != "django_migrations":
             assert after[name] == before[name], f"Миграция изменила данные public.{name}"
         elif previous[1] == "S" and name != "django_migrations_id_seq":
             assert after[name] == before[name], f"Миграция изменила состояние последовательности public.{name}"
@@ -188,7 +198,9 @@ def check_upgrade_delta(before, after, before_ids, after_ids):
     assert set(previous_functions) - set(current_functions) == set()
     for name, previous in previous_functions.items():
         current = current_functions[name]
-        assert current[:2] == previous[:2], f"Изменились владелец или права функции public.{name}"
+        assert current[0] == previous[0], f"Изменился владелец функции public.{name}"
+        if contour != "dev" or name not in TRANSLATED_GUARDS:
+            assert current[1] == previous[1], f"Неожиданно изменились права функции public.{name}"
         if name in TRANSLATED_GUARDS:
             assert current[2] != previous[2], f"Сообщения функции public.{name} не переведены"
         else:
@@ -316,7 +328,7 @@ def check_upgrade(contour):
         ]
         assert workwear_migrations(owner) == expected_history
         after = inventory(owner)
-        check_upgrade_delta(before, after, identities, object_ids(owner))
+        check_upgrade_delta(before, after, identities, object_ids(owner), contour)
 
         for arguments in (("manage.py", "migrate", "--noinput"), (*audit_args, "--protect-migrations"), audit_args):
             result = migrator(contour, *arguments)
