@@ -482,7 +482,7 @@ if [ "$1" = show ]; then
       "FragmentPath=$VEQTA_TEST_DIR/etc/systemd/system/veqta-prod.service" "DropInPaths=$dropins" \\
       'Type=simple' 'Restart=on-failure' 'RestartUSec=5s' 'UMask=0027' \\
       'NoNewPrivileges=yes' 'PrivateTmp=yes' "ProtectSystem=$protect" 'ProtectHome=yes' \\
-      "EnvironmentFiles={ path=$env_file (ignore_errors=no) }" \\
+      "$(if [ "$VEQTA_TEST_MODE" = braced-systemd-env ]; then printf '{ path=%s (ignore_errors=no) }' "$env_file"; else printf '%s (ignore_errors=no)' "$env_file"; fi)" \\
       'Environment=PYTHONDONTWRITEBYTECODE=1' \\
       'UnsetEnvironment=DJANGO_SETTINGS_MODULE PYTHONPATH PYTHONHOME DB_MIGRATION_PASSWORD' \\
       "ExecStart={ path=$exec_path ; argv[]=$exec_argv ; ignore_errors=no ; }"
@@ -518,6 +518,11 @@ fi
         self.assertLess(show_indexes[0], enable_index)
         self.assertLess(enable_index, restart_index)
         self.assertTrue(any(i > restart_index for i in show_indexes))
+        self.assertIn("SERVER APPLY: PASS", result.stdout)
+
+    def test_unit_accepts_braced_systemd_environment_file_format(self):
+        result = self.apply("braced-systemd-env")
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
         self.assertIn("SERVER APPLY: PASS", result.stdout)
 
     def test_apply_recreates_missing_virtualenv_before_readiness_check(self):
