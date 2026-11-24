@@ -119,6 +119,40 @@ class LifecycleTests(TestCase):
         self.assertIsNone(reopened.completed_at)
         self.assertEqual(WorkwearEvent.objects.first().event_type, "reopened")
 
+    def test_assignment_changes_do_not_lock_employee_import(self):
+        self.save(people=[self.people[0]], items=[self.items[0]])
+        member = self.req.members.get()
+        assignment = member.assignments.get()
+        with patch("workwear.services.lock_for_membership") as membership_lock:
+            added = services.add_assignment(
+                request_id=self.req.pk, member_id=member.pk, item_id=self.items[1].pk,
+                actor=self.actor, expected_version=self.req.version,
+            )
+            self.req.refresh_from_db()
+            services.remove_assignment(
+                request_id=self.req.pk, assignment_id=added.pk,
+                actor=self.actor, expected_version=self.req.version,
+            )
+            membership_lock.assert_not_called()
+        self.assertTrue(RequestAssignment.objects.filter(pk=assignment.pk).exists())
+
+    def test_membership_changes_keep_import_lock(self):
+        with patch("workwear.services.lock_for_membership") as membership_lock:
+            services.add_employee(
+                request_id=self.req.pk, employee_id=self.people[0].pk,
+                actor=self.actor, expected_version=self.req.version,
+            )
+            membership_lock.assert_called_once_with()
+
+    def test_reopening_does_not_lock_employee_import(self):
+        result = self.save(finish=True)
+        with patch("workwear.services.lock_for_membership") as membership_lock:
+            services.reopen_request(
+                request_id=self.req.pk, actor=self.actor, expected_version=result.version,
+                reason="Проверка блокировки",
+            )
+            membership_lock.assert_not_called()
+
     def test_deleting_draft_preserves_history(self):
         services.delete_draft(request_id=self.req.pk, actor=self.actor, expected_version=1)
         self.assertFalse(Request.objects.filter(pk=self.req.pk).exists())
