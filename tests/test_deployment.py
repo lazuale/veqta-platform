@@ -482,7 +482,7 @@ if [ "$1" = show ]; then
       "FragmentPath=$VEQTA_TEST_DIR/etc/systemd/system/veqta-prod.service" "DropInPaths=$dropins" \\
       'Type=simple' 'Restart=on-failure' 'RestartUSec=5s' 'UMask=0027' \\
       'NoNewPrivileges=yes' 'PrivateTmp=yes' "ProtectSystem=$protect" 'ProtectHome=yes' \\
-      "$(if [ "$VEQTA_TEST_MODE" = braced-systemd-env ]; then printf '{ path=%s (ignore_errors=no) }' "$env_file"; else printf '%s (ignore_errors=no)' "$env_file"; fi)" \\
+      "EnvironmentFiles=$(if [ "$VEQTA_TEST_MODE" = braced-systemd-env ]; then printf '{ path=%s (ignore_errors=no) }' "$env_file"; else printf '%s (ignore_errors=no)' "$env_file"; fi)" \\
       'Environment=PYTHONDONTWRITEBYTECODE=1' \\
       'UnsetEnvironment=DJANGO_SETTINGS_MODULE PYTHONPATH PYTHONHOME DB_MIGRATION_PASSWORD' \\
       "ExecStart={ path=$exec_path ; argv[]=$exec_argv ; ignore_errors=no ; }"
