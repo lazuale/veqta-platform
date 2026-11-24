@@ -97,7 +97,7 @@ def inventory(conn):
         "права столбцов": """
             SELECT c.relname, a.attname, a.attacl::text FROM pg_attribute AS a
             JOIN pg_class AS c ON c.oid = a.attrelid
-            WHERE c.relnamespace = 'public'::regnamespace AND a.attnum > 0 AND NOT a.attisdropped
+            WHERE c.relnamespace = 'public'::regnamespace AND NOT a.attisdropped
                 AND a.attacl IS NOT NULL ORDER BY 1, 2
         """,
     }
@@ -147,8 +147,10 @@ def check_column_drift(owner):
     owner.execute("""
         GRANT SELECT (id) ON public.django_migrations TO PUBLIC;
         GRANT INSERT (app) ON public.django_migrations TO svc_platform_prod;
-        GRANT SELECT (name) ON public.django_migrations TO svc_platform_dev;
+        GRANT SELECT (name) ON public.django_migrations TO svc_platform_dev_migrator;
+        GRANT SELECT (ctid) ON public.django_migrations TO svc_platform_dev;
         GRANT UPDATE (details) ON public.workwear_workwearevent TO svc_platform_dev, svc_platform_prod;
+        GRANT SELECT (ctid) ON public.workwear_workwearevent TO svc_platform_dev_migrator;
         ALTER TABLE public.workwear_workwearevent DISABLE TRIGGER ww_event_no_truncate;
         ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON SEQUENCES TO svc_platform_prod;
     """)
@@ -163,7 +165,9 @@ def check_column_drift(owner):
                 "права столбца: public.django_migrations.id",
                 "права столбца: public.django_migrations.name",
                 "права столбца: public.django_migrations.app",
+                "права столбца: public.django_migrations.ctid",
                 "права столбца: public.workwear_workwearevent.details",
+                "права столбца: public.workwear_workwearevent.ctid",
                 "права по умолчанию (S)",
                 "недопустимое членство: svc_platform_prod → svc_platform_dev",
                 "недопустимая настройка session_replication_role",
@@ -179,7 +183,7 @@ def check_column_drift(owner):
         ALTER TABLE public.workwear_workwearevent ENABLE TRIGGER ww_event_no_truncate;
         ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE SELECT ON SEQUENCES FROM svc_platform_prod;
     """)
-    print("Read-only проверка выявляет изменения ACL столбцов, default privileges, членства, изоляции и триггеров")
+    print("Проверка только для чтения выявляет изменения ACL столбцов, прав по умолчанию, членства, изоляции и триггеров")
 
 
 def check_upgrade(contour):
@@ -229,6 +233,7 @@ def check_upgrade(contour):
         for statement in (
             "SELECT id FROM public.django_migrations WHERE false",
             "SELECT name FROM public.django_migrations WHERE false",
+            "SELECT ctid FROM public.django_migrations WHERE false",
             "INSERT INTO public.django_migrations (app) SELECT 'probe' WHERE false",
             "UPDATE public.workwear_workwearevent SET details = '{}' WHERE false",
         ):

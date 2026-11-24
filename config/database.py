@@ -59,7 +59,7 @@ def revoke_relation_grants(cursor, name, *, sequence=False):
                    UNION
                    SELECT grant_entry.grantee FROM pg_attribute AS attribute
                    CROSS JOIN LATERAL aclexplode(attribute.attacl) AS grant_entry
-                   WHERE attrelid = relation.oid AND attnum > 0 AND NOT attisdropped
+                   WHERE attrelid = relation.oid AND NOT attisdropped
                ) AS grants LEFT JOIN pg_roles AS roles ON roles.oid = grants.grantee
                WHERE grants.grantee <> relowner)
         FROM pg_class AS relation

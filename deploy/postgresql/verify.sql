@@ -47,7 +47,7 @@ WITH target AS (
     UNION ALL SELECT 'django_migrations_id_seq', 'S'::"char"
 ), columns AS (
     SELECT r.*, attname, attnum, attacl FROM relations AS r
-    JOIN pg_attribute ON attrelid = r.oid AND attnum > 0 AND NOT attisdropped
+    JOIN pg_attribute ON attrelid = r.oid AND NOT attisdropped
     WHERE r.kind = 'r'
 )
 SELECT 'версия PostgreSQL отличается от 19 или сеанс вне режима origin' AS problem
@@ -147,7 +147,8 @@ WHERE EXISTS (
         OR grantee <> runtime OR is_grantable OR NOT (privilege_type = ANY(allowed)))
 ) OR EXISTS (
     SELECT FROM unnest(ARRAY['SELECT', 'INSERT', 'UPDATE', 'REFERENCES']) AS privilege(name)
-    WHERE has_column_privilege(runtime, columns.oid, attnum, privilege.name)
+    WHERE (attnum > 0 OR privilege.name = 'SELECT')
+        AND has_column_privilege(runtime, columns.oid, attnum, privilege.name)
         IS DISTINCT FROM (privilege.name = ANY(allowed))
 )
 UNION ALL
