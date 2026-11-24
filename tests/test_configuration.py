@@ -28,6 +28,9 @@ class ConfigurationTests(SimpleTestCase):
     def test_valid_dev_configuration(self):
         self.assertEqual(self.settings_process(), 0)
 
+    def test_email_sending_is_disabled_by_native_django_setting(self):
+        self.assertEqual(self.settings_process(assertions="assert settings.MAILERS == {}"), 0)
+
     def test_settings_accept_only_their_contour_and_role(self):
         for contour, other in (("dev", "prod"), ("prod", "dev")):
             changes = {"VEQTA_ENV": contour, "DB_NAME": f"veqta_{contour}",
