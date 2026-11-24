@@ -2,6 +2,14 @@
 
 EVENT_TABLE = "workwear_workwearevent"
 
+# Составные ключи заданы SQL в начальной миграции. Django проверяет историю их применения.
+FOREIGN_KEYS = (
+    ("workwear_requestemployee", "ww_member_req_org_fk",
+     "FOREIGN KEY (request_id, organization_id) REFERENCES public.workwear_request(id, organization_id) ON UPDATE RESTRICT"),
+    ("workwear_requestemployee", "ww_member_emp_org_fk",
+     "FOREIGN KEY (employee_id, organization_id) REFERENCES public.workwear_employee(id, organization_id) ON UPDATE RESTRICT"),
+)
+
 # tgtype кодирует момент, события и уровень срабатывания триггера.
 TRIGGERS = (
     ("workwear_employee", "ww_employee_identity_bu", "ww_guard_employee_identity", 19),

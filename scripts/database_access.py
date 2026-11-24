@@ -14,7 +14,7 @@ from config.database import database_role, require_target, revoke_relation_grant
 VERIFY_SQL = Path(__file__).resolve().parents[1] / "deploy" / "postgresql" / "verify.sql"
 
 
-def verify_database(environment, *, append_tables=(), triggers=()):
+def verify_database(environment, *, append_tables=(), triggers=(), foreign_keys=()):
     other_environment = "prod" if environment == "dev" else "dev"
     with transaction.atomic(), connection.cursor() as cursor:
         cursor.execute("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
@@ -39,6 +39,15 @@ def verify_database(environment, *, append_tables=(), triggers=()):
             """)
             for table, trigger, *_ in sorted(set(triggers) - set(cursor.fetchall())):
                 problems.append(f"нет обязательного триггера в ожидаемом состоянии: public.{table}.{trigger}")
+        if foreign_keys:
+            cursor.execute("""
+                SELECT c.relname, k.conname, pg_get_constraintdef(k.oid)
+                FROM pg_constraint AS k JOIN pg_class AS c ON c.oid = k.conrelid
+                WHERE c.relnamespace = 'public'::regnamespace AND k.contype = 'f'
+                    AND k.convalidated AND k.conenforced
+            """)
+            for table, name, _ in sorted(set(foreign_keys) - set(cursor.fetchall())):
+                problems.append(f"нет обязательного внешнего ключа в ожидаемом состоянии: public.{table}.{name}")
     if problems:
         raise CommandError("Отклонения в PostgreSQL:\n" + "\n".join(problems))
 
@@ -61,11 +70,11 @@ def main():
         else:
             # Здесь собирается состав проверки установленных приложений.
             if apps.is_installed("workwear"):
-                from workwear.database_access import EVENT_TABLE, TRIGGERS
-                verify_database(environment, append_tables=(EVENT_TABLE,), triggers=TRIGGERS)
+                from workwear.database_access import EVENT_TABLE, FOREIGN_KEYS, TRIGGERS
+                verify_database(environment, append_tables=(EVENT_TABLE,), triggers=TRIGGERS, foreign_keys=FOREIGN_KEYS)
             else:
                 verify_database(environment)
-            print("PostgreSQL: версия, роли, права и триггеры проверены")
+            print("PostgreSQL: версия, роли, права и ограничения схемы проверены")
     except CommandError as error:
         parser.exit(1, f"{error}\n")
 

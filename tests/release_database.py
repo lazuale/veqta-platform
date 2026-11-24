@@ -186,6 +186,37 @@ def check_column_drift(owner):
     print("Проверка только для чтения выявляет изменения ACL столбцов, прав по умолчанию, членства, изоляции и триггеров")
 
 
+def check_foreign_key_drift():
+    with connect("prod", migration=True) as owner:
+        original = inventory(owner)
+        owner.execute("""
+            ALTER TABLE public.workwear_requestemployee
+                DROP CONSTRAINT ww_member_req_org_fk,
+                DROP CONSTRAINT ww_member_emp_org_fk,
+                ADD CONSTRAINT ww_member_emp_org_fk
+                    FOREIGN KEY (employee_id, organization_id)
+                    REFERENCES public.workwear_employee (id, organization_id)
+                    ON UPDATE RESTRICT NOT VALID;
+        """)
+        try:
+            drifted = inventory(owner)
+            audit = migrator("prod", "-m", "scripts.database_access")
+            assert audit.returncode != 0, audit.stdout
+            for name in ("ww_member_req_org_fk", "ww_member_emp_org_fk"):
+                assert f"public.workwear_requestemployee.{name}" in audit.stderr, audit.stderr
+            assert inventory(owner) == drifted
+        finally:
+            owner.execute("""
+                ALTER TABLE public.workwear_requestemployee
+                    ADD CONSTRAINT ww_member_req_org_fk
+                        FOREIGN KEY (request_id, organization_id)
+                        REFERENCES public.workwear_request (id, organization_id) ON UPDATE RESTRICT,
+                    VALIDATE CONSTRAINT ww_member_emp_org_fk;
+            """)
+        assert inventory(owner) == original
+    print("Проверка схемы выявляет отсутствующий и непроверенный составные FK Workwear")
+
+
 def check_upgrade(contour):
     audit_args = ("-m", "scripts.database_access")
     with connect(contour, migration=True) as owner:
@@ -303,3 +334,4 @@ if __name__ == "__main__":
         check_recovery(sys.argv[1])
     else:
         check_isolation()
+        check_foreign_key_drift()
