@@ -269,9 +269,9 @@ def events(request, request_id):
     if limit == 0:
         raise ValidationError("Лимит должен быть положительным")
     qs = WorkwearEvent.objects.filter(request_number=request_id)
-    if not Request.objects.filter(pk=request_id).exists() and not qs.exists():
-        raise ObjectDoesNotExist("Неизвестная заявка")
     count = qs.count()
+    if count == 0 and not Request.objects.filter(pk=request_id).exists():
+        raise ObjectDoesNotExist("Неизвестная заявка")
     rows = qs.order_by("-occurred_at", "-pk")[offset:offset + limit]
     return respond({"results": [
         {"id": r.pk, "event_type": r.event_type,
@@ -345,7 +345,8 @@ def repeat_scan(request, request_id):
     if len(wanted) != len(normalized):
         raise ValidationError("Дублирующиеся пары")
     req = Request.objects.get(pk=request_id)
-    people = dict(Employee.objects.filter(pk__in={x[0] for x in wanted}).values_list("pk", "organization_id"))
+    people = dict(Employee.objects.filter(pk__in={x[0] for x in wanted})
+                  .order_by().values_list("pk", "organization_id"))
     if len(people) != len({x[0] for x in wanted}) or any(org != req.organization_id for org in people.values()):
         raise ValidationError("Недопустимая организация сотрудника")
 
