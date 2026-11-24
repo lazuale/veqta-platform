@@ -154,6 +154,37 @@ class LifecycleTests(TestCase):
             )
             membership_lock.assert_not_called()
 
+    def test_removing_employee_does_not_lock_employee_import(self):
+        self.save()
+        self.req.refresh_from_db()
+        member = self.req.members.first()
+        with patch("workwear.services.lock_for_membership") as membership_lock:
+            services.remove_employee(
+                request_id=self.req.pk, member_id=member.pk,
+                actor=self.actor, expected_version=self.req.version,
+            )
+            membership_lock.assert_not_called()
+
+    def test_completing_request_does_not_lock_employee_import(self):
+        self.save()
+        self.req.refresh_from_db()
+        with patch("workwear.services.lock_for_membership") as membership_lock:
+            result = services.complete_request(
+                request_id=self.req.pk, actor=self.actor, expected_version=self.req.version,
+            )
+            membership_lock.assert_not_called()
+        self.assertEqual(result.final_members, 2)
+
+    def test_deleting_draft_does_not_lock_employee_import(self):
+        self.save()
+        self.req.refresh_from_db()
+        with patch("workwear.services.lock_for_membership") as membership_lock:
+            services.delete_draft(
+                request_id=self.req.pk, actor=self.actor, expected_version=self.req.version,
+            )
+            membership_lock.assert_not_called()
+        self.assertFalse(Request.objects.filter(pk=self.req.pk).exists())
+
     def test_deleting_draft_preserves_history(self):
         services.delete_draft(request_id=self.req.pk, actor=self.actor, expected_version=1)
         self.assertFalse(Request.objects.filter(pk=self.req.pk).exists())
