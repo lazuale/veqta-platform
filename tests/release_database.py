@@ -171,8 +171,8 @@ def check_upgrade_delta(before, after, before_ids, after_ids):
     assert previous_relations.keys() == current_relations.keys(), "Изменился состав таблиц, последовательностей или индексов"
     for name, previous in previous_relations.items():
         current = current_relations[name]
-        if name == "workwear_employeeimport":
-            # Миграция 0004 намеренно меняет только права самой таблицы.
+        if name in {"django_migrations", "django_migrations_id_seq", "workwear_employeeimport"}:
+            # Защита журнала и истории импорта намеренно меняет только ACL этих объектов.
             assert previous[:3] == current[:3] and previous[4:] == current[4:]
         else:
             assert current == previous, f"Неожиданно изменились метаданные public.{name}"
