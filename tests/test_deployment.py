@@ -458,6 +458,12 @@ raise SystemExit(1 if os.environ.get('VEQTA_TEST_MODE')=='broken-new-site' and c
         self.script("systemctl", '''#!/bin/sh
 echo "$*" >> "$VEQTA_TEST_DIR/systemctl.log"
 if [ "$1" = show ]; then
+    active=inactive
+    sub=dead
+    if grep -qx 'restart veqta-prod.service' "$VEQTA_TEST_DIR/systemctl.log"; then
+        active=active
+        sub=running
+    fi
     actor=veqta-prod
     dropins=
     workers=2
@@ -471,7 +477,7 @@ if [ "$1" = show ]; then
     exec_path="$VEQTA_TEST_DIR/opt/veqta-prod/.venv/bin/gunicorn"
     exec_argv="$exec_path config.wsgi:application --bind 127.0.0.1:8765 --workers $workers --timeout 120 --error-logfile - --no-control-socket"
     printf '%s\\n' \\
-      'ActiveState=active' 'SubState=running' "User=$actor" 'Group=veqta-prod' \\
+      "ActiveState=$active" "SubState=$sub" "User=$actor" 'Group=veqta-prod' \\
       "WorkingDirectory=$VEQTA_TEST_DIR/opt/veqta-prod" 'NeedDaemonReload=no' \\
       "FragmentPath=$VEQTA_TEST_DIR/etc/systemd/system/veqta-prod.service" "DropInPaths=$dropins" \\
       'Type=simple' 'Restart=on-failure' 'RestartUSec=5s' 'UMask=0027' \\
@@ -499,6 +505,20 @@ fi
             self.assertEqual(self.link.resolve(), self.site)
             self.assertEqual(neighbor.read_text(), "unchanged neighbor")
         self.assertNotIn("veqta-dev", (self.path / "systemctl.log").read_text())
+
+    def test_unit_is_checked_before_start_without_requiring_active_state(self):
+        result = self.apply()
+        self.assertEqual(result.returncode, 0, result.stderr + result.stdout)
+        calls = (self.path / "systemctl.log").read_text().splitlines()
+        reload_index = calls.index("daemon-reload")
+        enable_index = calls.index("enable veqta-prod.service")
+        restart_index = calls.index("restart veqta-prod.service")
+        show_indexes = [i for i, line in enumerate(calls) if line.startswith("show veqta-prod.service")]
+        self.assertLess(reload_index, show_indexes[0])
+        self.assertLess(show_indexes[0], enable_index)
+        self.assertLess(enable_index, restart_index)
+        self.assertTrue(any(i > restart_index for i in show_indexes))
+        self.assertIn("SERVER APPLY: PASS", result.stdout)
 
     def test_apply_recreates_missing_virtualenv_before_readiness_check(self):
         shutil.rmtree(self.app / ".venv")
