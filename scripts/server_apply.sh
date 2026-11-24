@@ -54,7 +54,7 @@ veqta_clean_checkout
   echo 'STOP: SHA изменился во время подготовки' >&2; exit 2;
 }
 veqta_check_database
-veqta_django check
+veqta_check_django
 veqta_root_django config.migration makemigrations --check --dry-run
 veqta_root_django config.migration migrate --plan
 if [[ "${2:-}" == --migrate ]]; then
@@ -124,6 +124,7 @@ veqta_check_nginx || { echo 'STOP: конфигурация Nginx не прин�
 
 install -o root -g root -m 0644 "$APP/deploy/systemd/$SERVICE" "/etc/systemd/system/$SERVICE"
 systemctl daemon-reload
+veqta_check_unit
 systemctl enable "$SERVICE"
 systemctl restart "$SERVICE"
 

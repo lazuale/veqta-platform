@@ -104,6 +104,9 @@ for contour in dev prod; do
   migrator makemigrations --check --dry-run
   migrator migrate --plan
   migrator migrate --check
+  if [[ "$contour" == prod ]]; then
+    runtime manage.py check --deploy --fail-level WARNING
+  fi
 
   DJANGO_SUPERUSER_PASSWORD=$(new_password)
   export DJANGO_SUPERUSER_PASSWORD

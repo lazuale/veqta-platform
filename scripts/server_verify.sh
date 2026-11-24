@@ -8,7 +8,6 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "$SCRIPT_DIR/server_checks.sh"
 veqta_target "$1"
 
-systemctl is-active --quiet "$SERVICE"
 test -d "$APP/.git"
 test -f "$CONFIG"
 veqta_check_trusted_code
@@ -16,16 +15,20 @@ veqta_clean_checkout
 veqta_load_config
 veqta_check_nginx
 
-echo '=== Фактическая версия ==='
+echo '=== Ревизия checkout ==='
 git --no-pager -c safe.directory="$APP" -C "$APP" log -1 --format='%H %s'
 
 echo '=== systemd ==='
-systemctl show "$SERVICE" -p ActiveState -p SubState -p User -p WorkingDirectory
+systemctl is-active --quiet "$SERVICE"
+veqta_check_unit
 
 echo '=== PostgreSQL ==='
 veqta_check_database
 veqta_root_django config.migration migrate --check
 veqta_root_python config.migration -m scripts.database_access
+
+echo '=== Django ==='
+veqta_check_django
 
 echo '=== Gunicorn ==='
 veqta_check_http

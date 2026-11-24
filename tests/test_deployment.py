@@ -445,7 +445,15 @@ count=int(path.read_text())+1 if path.exists() else 1
 path.write_text(str(count))
 raise SystemExit(1 if os.environ.get('VEQTA_TEST_MODE')=='broken-new-site' and count==2 else 0)
 ''')
-        self.script("systemctl", '#!/bin/sh\necho "$*" >> "$VEQTA_TEST_DIR/systemctl.log"\n')
+        self.script("systemctl", '''#!/bin/sh
+echo "$*" >> "$VEQTA_TEST_DIR/systemctl.log"
+if [ "$1" = show ]; then
+    actor=veqta-prod
+    if [ "$VEQTA_TEST_MODE" = wrong-systemd-user ]; then actor=veqta-dev; fi
+    printf '%s\\n' 'ActiveState=active' 'SubState=running' "User=$actor" 'Group=veqta-prod' \\
+        "WorkingDirectory=$VEQTA_TEST_DIR/opt/veqta-prod" 'NeedDaemonReload=no'
+fi
+''')
         self.fake_curl()
 
     def apply(self, mode="ok"):
@@ -490,6 +498,14 @@ fi
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Отклонения в PostgreSQL", result.stderr)
         self.assertFalse((self.path / "systemctl.log").exists())
+
+    def test_wrong_loaded_user_stops_apply_before_restart(self):
+        result = self.apply("wrong-systemd-user")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("ожидается User=veqta-prod", result.stderr)
+        calls = (self.path / "systemctl.log").read_text()
+        self.assertNotIn("restart", calls)
+        self.assertNotIn("reload nginx", calls)
 
     def test_nginx_failure_restores_existing_file_without_reload(self):
         previous = "previous exact site\n"

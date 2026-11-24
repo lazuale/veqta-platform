@@ -216,6 +216,27 @@ veqta_check_database() {
   fi
 }
 
+veqta_check_django() {
+  if [[ "$ENV_NAME" == prod ]]; then
+    veqta_django check --deploy --fail-level WARNING
+  else
+    veqta_django check
+  fi
+}
+
+veqta_check_unit() {
+  local state expected
+  state=$(systemctl show "$SERVICE" -p ActiveState -p SubState -p User -p Group \
+    -p WorkingDirectory -p NeedDaemonReload) || return 1
+  for expected in "User=$ACTOR" "Group=$ACTOR" "WorkingDirectory=$APP" 'NeedDaemonReload=no'; do
+    if [[ $'\n'"$state"$'\n' != *$'\n'"$expected"$'\n'* ]]; then
+      echo "FAIL: ${SERVICE}: ожидается ${expected}" >&2
+      return 1
+    fi
+  done
+  printf '%s\n' "$state"
+}
+
 veqta_check_nginx() {
   local output
   # nginx -t проверяет все подключённые файлы конфигурации.
