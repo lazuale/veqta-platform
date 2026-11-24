@@ -30,9 +30,9 @@ def main():
         assert not model.objects.exists(), model.__name__
     with connection.cursor() as cursor:
         cursor.execute("SELECT count(*) FROM pg_proc WHERE pronamespace='public'::regnamespace AND proname LIKE 'ww_%'")
-        assert cursor.fetchone()[0] == 10
+        assert cursor.fetchone()[0] == 11
         cursor.execute("SELECT count(*) FROM pg_trigger WHERE tgname LIKE 'ww_%' AND NOT tgisinternal AND tgenabled='O'")
-        assert cursor.fetchone()[0] == 13
+        assert cursor.fetchone()[0] == 15
         cursor.execute("SELECT conname, pg_get_constraintdef(oid) FROM pg_constraint WHERE conname IN (%s,%s)",
             ["ww_member_emp_org_fk", "ww_member_req_org_fk"])
         constraints = cursor.fetchall()
@@ -42,7 +42,7 @@ def main():
             assert "organization_name" not in columns
         columns = {col.name for col in connection.introspection.get_table_description(cursor, "workwear_request")}
         assert "snapshot_organization_name" in columns and "organization_name" not in columns
-    print(f"{environment.upper()} Cold Start: пустые справочники, 10 функций, 13 триггеров и составные FK")
+    print(f"{environment.upper()} Cold Start: пустые справочники, 11 функций, 15 триггеров и составные FK")
 
     password = os.environ["DJANGO_SUPERUSER_PASSWORD"]
     client = Client(HTTP_HOST="localhost", HTTP_X_FORWARDED_PROTO="https")
