@@ -48,7 +48,7 @@ def save_draft(*, request_id, actor, expected_version, members, finish=False):
     if type(finish) is not bool:
         raise ValidationError("Некорректный признак завершения")
     desired, employee_ids, item_ids = _validate(members)
-    req = services._lock_request(request_id, expected_version, status=RequestStatus.DRAFT)
+    req = services._lock_request(request_id, expected_version, status=RequestStatus.DRAFT, membership_lock=True)
     employees = {e.pk: e for e in Employee.objects.select_related("organization").filter(pk__in=employee_ids)}
     if set(employees) != set(employee_ids):
         raise ValidationError("Некоторые сотрудники отсутствуют в справочнике")
