@@ -128,7 +128,7 @@ def parse(path):
         "duplicate_employee_rows": 0, "partial_employee_merges": 0,
         "duplicate_position_rows": 0, "duplicate_unit_rows": 0,
         "employees_without_position": 0, "employees_without_unit": 0,
-        "employees_without_tabnumber": 0, "unit_without_organization": 0,
+        "unit_without_organization": 0,
     }
 
     positions = {}
