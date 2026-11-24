@@ -129,7 +129,13 @@ def registry(request):
                 query |= Q(pk=numeric_id)
         qs = qs.filter(query).distinct()
     count = qs.count()
-    requests = list(qs.order_by("-created_at" if sort_order == "newest" else "created_at", "-pk" if sort_order == "newest" else "pk")[offset:offset + limit])
+    sort_date = F(field)
+    ordering = (
+        (sort_date.desc(nulls_last=True), "-pk")
+        if sort_order == "newest"
+        else (sort_date.asc(nulls_last=True), "pk")
+    )
+    requests = list(qs.order_by(*ordering)[offset:offset + limit])
     ids = [r.pk for r in requests]
     member_counts = {
         row["request_id"]: row["total"]
