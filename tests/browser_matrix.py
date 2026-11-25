@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 from uuid import uuid4
 
 from .browser_support import database_call, delayed_requests, live_server, sign_in
+from .browser_ui import check_ui
 
 
 VIEWPORTS = [(1920, 1080), (1440, 900), (1366, 768), (1024, 768), (768, 1024), (390, 844)]
@@ -25,7 +26,10 @@ def seed_matrix(actor):
     from .factories import make_import, make_user
     WorkwearItem.objects.update(is_active=False)
     Organization.objects.update(requests_enabled=False)
-    organization = Organization.objects.create(name="Испытания матрицы", external_id=str(uuid4()), requests_enabled=True)
+    organization = Organization.objects.create(
+        name="Испытания матрицы — обособленное производственно-эксплуатационное подразделение",
+        external_id=str(uuid4()), requests_enabled=True,
+    )
     source = make_import()
     people = Employee.objects.bulk_create([
         Employee(employee_guid=uuid4(), personnel_number=f"RC-{i:04d}", full_name=f"Сотрудник Испытаний {i:04d}",
@@ -109,7 +113,8 @@ def persisted(request_id):
                         .values_list("request_employee__employee_id", "item_id"))}
 
 
-def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=None, *, server_options=None, http_load=False):
+def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=None, *, server_options=None,
+                 http_load=False, ui_baseline=None):
     from playwright.sync_api import sync_playwright, expect
     data = seed_matrix(actor)
     artifacts = Path(artifacts).resolve()
@@ -489,9 +494,10 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             page.goto(base + '/workwear/')
             page.locator('[data-filter="organization_id"]').select_option(str(organization_id))
             expect(page.locator('#registryCount')).to_have_text('Найдено: 31')
-            page.locator('[data-action="registry-next"]').click()
+            page.locator('[data-action="registry-next"]').press('Enter')
             rows = page.locator('tr.registry-row')
             expect(rows).to_have_count(1)
+            expect(page.locator('[data-action="registry-prev"]')).to_be_focused()
             rows.get_by_role('button', name=f'Открыть заявку {oldest_id}').click()
             page.locator('[data-action="delete-draft"]').click()
             page.locator('[data-action="confirm-delete"]').click()
@@ -861,17 +867,6 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             snapshot = page.locator('table.matrix').aria_snapshot()
             assert 'rowheader' in snapshot and 'columnheader' in snapshot
             (artifacts/'matrix-accessibility.txt').write_text(snapshot,encoding='utf-8')
-            if axe_script:
-                page.add_script_tag(path=str(Path(axe_script).resolve()))
-                result = page.evaluate('''async () => {
-                    const result=await axe.run('#editorTable',{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']}});
-                    return {version:axe.version,violations:result.violations.map(v=>({id:v.id,impact:v.impact,
-                        description:v.description,nodes:v.nodes.map(n=>({target:n.target,summary:n.failureSummary}))})),
-                        incomplete:result.incomplete.map(v=>({id:v.id,count:v.nodes.length})),passed:result.passes.length};
-                }''')
-                (artifacts/'accessibility.json').write_text(json.dumps(result,ensure_ascii=False,indent=2))
-                assert not result['violations'], result['violations']
-                structure['axe'] = result
             return structure
 
         def benchmarks():
@@ -919,6 +914,8 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             (artifacts/'matrix-performance.json').write_text(json.dumps(measurements,ensure_ascii=False,indent=2))
             return {"measurements":measurements}
 
+        run("portal-and-workwear", lambda: check_ui(browser, server, data, VIEWPORTS,
+            artifacts, axe_script, ui_baseline, server_options))
         run("headers-and-data", headers)
         run("accessibility", accessibility)
         run("keyboard-navigation", keyboard)

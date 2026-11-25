@@ -67,7 +67,7 @@ def sign_in(page, base, username, password):
 
 
 @contextmanager
-def live_server(*, nginx_executable=None, artifacts=None):
+def live_server(*, nginx_executable=None, artifacts=None, source_root=None):
     names = (
         "PATH", "HOME", "LANG", "LC_ALL", "TMPDIR", "LD_LIBRARY_PATH", "PYTHONPATH",
         "VEQTA_ENV", "DB_NAME", "DB_HOST", "DB_PORT", "DB_SSLMODE",
@@ -78,7 +78,7 @@ def live_server(*, nginx_executable=None, artifacts=None):
     environment.update(DB_USER="svc_platform_dev", DB_PASSWORD=os.environ["DB_RUNTIME_PASSWORD"])
     migration_password = os.environ["DB_PASSWORD"]
     assert migration_password and all(migration_password not in value for value in environment.values())
-    with https_server(environment, nginx_executable, artifacts) as server:
+    with https_server(environment, nginx_executable, artifacts, source_root=source_root) as server:
         yield server
 
 
@@ -97,12 +97,12 @@ def expose_fixture_static(folder):
 
 
 @contextmanager
-def https_server(environment, nginx_executable, artifacts):
+def https_server(environment, nginx_executable, artifacts, *, source_root=None):
     """Сертификат и конфигурация временного HTTPS-сервера не попадают в рабочие файлы."""
     executable = nginx_executable or shutil.which("nginx")
     if not executable or not shutil.which("openssl"):
         raise RuntimeError("HTTPS-приёмке нужны Nginx и OpenSSL в изолированной среде")
-    root = Path(__file__).resolve().parent.parent
+    root = Path(source_root).resolve() if source_root else Path(__file__).resolve().parent.parent
     destination = Path(artifacts).resolve() if artifacts else None
     if destination:
         destination.mkdir(parents=True, exist_ok=True)

@@ -225,6 +225,25 @@ if [[ ${1:-} == --browser ]]; then
   options=(--browser --matrix)
   [[ -z "${VEQTA_TEST_AXE:-}" ]] || options+=(--axe-script "$VEQTA_TEST_AXE")
   [[ -z "${VEQTA_TEST_NGINX:-}" ]] || options+=(--nginx-executable "$VEQTA_TEST_NGINX")
+  baseline=${VEQTA_TEST_UI_BASELINE:-}
+  if [[ -z "$baseline" && -n "${GITHUB_EVENT_PATH:-}" ]]; then
+    baseline=$(python - "$GITHUB_EVENT_PATH" <<'PYTHON'
+import json
+from pathlib import Path
+import sys
+
+event = json.loads(Path(sys.argv[1]).read_text())
+print(event.get("pull_request", {}).get("base", {}).get("sha") or event.get("before") or "")
+PYTHON
+    )
+  fi
+  if [[ -n "$baseline" && ! "$baseline" =~ ^0+$ ]]; then
+    baseline=$(git rev-parse --verify --end-of-options "$baseline^{commit}")
+    mkdir "$lab/ui-baseline"
+    git archive "$baseline" | tar -x -C "$lab/ui-baseline"
+    printf 'Исходная ревизия интерфейса: %s\n' "$baseline"
+    options+=(--ui-baseline "$lab/ui-baseline")
+  fi
   failed=0
   for engine in chromium firefox webkit; do
     psql -Xw -c 'DROP DATABASE test_veqta_dev'

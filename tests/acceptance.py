@@ -253,13 +253,13 @@ def check_registry(page, base, actor, organization_id, organization_name):
 
     expect_results(total, page_size)
     expect(footer).to_contain_text(f"Показано 1–{page_size} из {total}")
-    next_page = page.get_by_role("button", name="Далее →")
+    next_page = page.get_by_role("button", name="Далее", exact=True)
     with delayed_requests(page, "**/ui/requests/?*"):
         next_page.dblclick()
         expect(next_page).to_be_disabled()
     expect_results(total, total - page_size)
     expect(footer).to_contain_text(f"Показано {page_size + 1}–{total} из {total}")
-    page.get_by_role("button", name="← Назад").click()
+    page.get_by_role("button", name="Назад", exact=True).click()
     expect_results(total, page_size)
     organization.select_option(str(organization_id))
     expect_results(page_size, page_size)
@@ -484,6 +484,7 @@ def main():
     parser.add_argument("--http-load", action="store_true", help="Восемь одновременных HTTP-пользователей; требует --matrix")
     parser.add_argument("--engine", choices=["chromium", "firefox", "webkit"], default="chromium")
     parser.add_argument("--axe-script", help="Локальный axe.min.js для расширенной проверки доступности")
+    parser.add_argument("--ui-baseline", help="Каталог исходной ревизии для сравнения снимков")
     parser.add_argument("--matrix", action="store_true", help="Расширенная приёмка матрицы и профилей нагрузки")
     parser.add_argument("--artifacts", default="test-results/rc", help="Скриншоты и измерения браузера")
     args = parser.parse_args()
@@ -517,7 +518,8 @@ def main():
     if args.matrix:
         from .browser_matrix import check_matrix
         check_matrix(actor, args.browser_executable, Path(args.artifacts), args.engine, args.axe_script,
-            server_options=server_options | {"artifacts": Path(args.artifacts) / "servers/matrix"}, http_load=args.http_load)
+            server_options=server_options | {"artifacts": Path(args.artifacts) / "servers/matrix"},
+            http_load=args.http_load, ui_baseline=args.ui_baseline)
 
 
 if __name__ == "__main__":
