@@ -5,11 +5,47 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parent.parent
 EXCLUDED = {".git", ".venv", "venv", "__pycache__", "node_modules", "staticfiles", "media", "private", "data", "backups", "test-results", ".pytest_cache"}
-ALLOWED_SUFFIXES = {".sh", ".py", ".js", ".css", ".html", ".md", ".sql", ".txt", ".lock", ".service", ".conf", ".example", ".yml"}
+ALLOWED_SUFFIXES = {".sh", ".py", ".js", ".css", ".html", ".md", ".sql", ".txt", ".lock", ".service", ".conf", ".example", ".yml", ".svg"}
+SVG_STATIC_ROOTS = (Path("portal/static"), Path("workwear/static"))
+SVG_ELEMENTS = {"svg", "g", "path", "circle", "rect", "line", "polyline", "polygon", "ellipse"}
+SVG_ATTRIBUTES = {"width", "height", "viewBox", "fill", "stroke", "stroke-width", "stroke-linecap", "stroke-linejoin", "d", "cx", "cy", "r", "x", "y", "x1", "y1", "x2", "y2", "points", "aria-hidden", "aria-label", "role"}
 ALLOWED_NAMES = {".gitignore", ".gitattributes", ".python-version"}
+
+
+def inspect_svg(path, text):
+    """Разрешаем только простой SVG без скриптов и внешних ссылок."""
+    problems = []
+    if not any(path.is_relative_to(root) for root in SVG_STATIC_ROOTS):
+        problems.append("SVG разрешён только в каталогах статических ресурсов")
+    if re.search(r"<!\\s*(?:DOCTYPE|ENTITY)", text, re.IGNORECASE):
+        return problems + ["SVG не должен содержать DTD или объявления сущностей"]
+    try:
+        root = ET.fromstring(text)
+    except ET.ParseError:
+        return problems + ["Некорректная структура SVG"]
+    namespace = "{http://www.w3.org/2000/svg}"
+    if root.tag != namespace + "svg":
+        problems.append("Корневой элемент должен быть SVG")
+    for element in root.iter():
+        if not isinstance(element.tag, str) or not element.tag.startswith(namespace):
+            problems.append("SVG содержит элемент вне пространства имён SVG")
+            continue
+        name = element.tag[len(namespace):]
+        if name not in SVG_ELEMENTS:
+            problems.append("SVG содержит недопустимый элемент")
+        for attribute, value in element.attrib.items():
+            attr_name = attribute.rsplit("}", 1)[-1]
+            if attr_name not in SVG_ATTRIBUTES:
+                problems.append("SVG содержит недопустимый атрибут")
+            if re.search(r"(?:javascript:|https?:|data:|url\\s*\\()", value, re.IGNORECASE):
+                problems.append("SVG не должен содержать ссылки или исполняемые значения")
+        if element.text and element.text.strip():
+            problems.append("SVG не должен содержать текстовые узлы")
+    return list(dict.fromkeys(problems))
 
 
 def inspect(path, data):
@@ -23,6 +59,8 @@ def inspect(path, data):
         text = data.decode("utf-8")
     except UnicodeDecodeError:
         return problems+["Ожидался текст UTF-8"]
+    if path.suffix == ".svg":
+        problems.extend(inspect_svg(path, text))
     if re.search(r"-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----", text):
         problems.append("Обнаружен приватный ключ")
     if re.search(r"\b(?:ghp|gho|ghs)_[A-Za-z0-9]{30,}\b", text):
