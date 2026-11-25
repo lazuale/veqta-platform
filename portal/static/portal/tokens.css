@@ -49,6 +49,7 @@
   --vq-shadow-panel: 0 2px 11px rgb(31 45 64 / .035);
   --vq-shadow-float: 0 16px 48px rgb(31 45 64 / .16);
   --vq-motion: 120ms;
+  --vq-icon-chevron-down: url("icons/chevron-down.svg");
 }
 @media(max-width:900px) { :root { --vq-page-x:16px; --vq-page-y:20px; --vq-title-page:24px; } }
 @media(max-width:680px) { :root { --vq-title-page:22px; } }

@@ -1037,12 +1037,20 @@
 }
 
 #veq-app .vq-filter-toggle:after {
-  content: "▾";
-  font-size: var(--vq-text-xs);
+  content: "";
+  display: block;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  background-image: var(--vq-icon-chevron-down);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+  transition: transform var(--vq-motion);
 }
 
 #veq-app .vq-filter-toggle[aria-expanded=true]:after {
-  content: "▴";
+  transform: rotate(180deg);
 }
 
 #veq-app .vq-advanced-fields {

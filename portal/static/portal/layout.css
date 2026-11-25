@@ -8,7 +8,8 @@
 .vq-menu {position:relative;flex:none}
 .vq-menu-trigger {display:flex;align-items:center;gap:8px;list-style:none;border:0;border-radius:var(--vq-radius-control);font-size:var(--vq-text-sm);color:var(--vq-text-muted);min-height:36px;padding:4px 8px;cursor:pointer;white-space:nowrap}
 .vq-menu-trigger::-webkit-details-marker {display:none}
-.vq-menu-trigger::after {content:"⌄";font-size:15px;line-height:1}
+.vq-menu-trigger::after {content:"";width:12px;height:12px;flex:none;background-image:var(--vq-icon-chevron-down);background-repeat:no-repeat;background-position:center;background-size:contain;transition:transform var(--vq-motion)}
+.vq-menu[open]>.vq-menu-trigger::after {transform:rotate(180deg)}
 .vq-menu-trigger:hover,.vq-menu[open]>.vq-menu-trigger {background:var(--vq-surface-muted);color:var(--vq-text)}
 .vq-menu-popover {position:absolute;left:0;top:calc(100% + 8px);z-index:50;min-width:260px;max-width:calc(100vw - 32px);padding:6px;background:var(--vq-surface);border:1px solid var(--vq-border);border-radius:var(--vq-radius-panel);box-shadow:var(--vq-shadow-float)}
 .vq-menu-popover.end {left:auto;right:0;min-width:220px}
@@ -34,7 +35,7 @@
 .vq-error-page h1 {margin-bottom:12px}
 .vq-error-page p {color:var(--vq-text-muted);line-height:1.7;margin-bottom:24px}
 @media(max-width:900px) {.vq-head{align-items:flex-start;flex-wrap:wrap;margin-bottom:18px}.vq-header-start,.vq-header-right{gap:12px}}
-@media(max-width:680px) {.vq-header-start,.vq-header-right{gap:6px}.vq-account-name{display:none}.vq-header-start>.vq-menu>.vq-menu-trigger{font-size:0;gap:4px}.vq-header-start>.vq-menu>.vq-menu-trigger::before{content:"Приложения";font-size:12px}.vq-header-start>.vq-menu>.vq-menu-trigger::after{font-size:13px}.vq-logo{font-size:14px}.vq-brand{gap:7px}.vq-head .vq-actions{gap:6px}.vq-error-page{margin:36px auto}}
+@media(max-width:680px) {.vq-header-start,.vq-header-right{gap:6px}.vq-account-name{display:none}.vq-header-start>.vq-menu>.vq-menu-trigger{font-size:0;gap:4px}.vq-header-start>.vq-menu>.vq-menu-trigger::before{content:"Приложения";font-size:12px}.vq-logo{font-size:14px}.vq-brand{gap:7px}.vq-head .vq-actions{gap:6px}.vq-error-page{margin:36px auto}}
 
 
 .vq-app-list {display:flex;flex-direction:column;border:1px solid var(--vq-border);border-radius:var(--vq-radius-panel);background:var(--vq-surface);overflow:hidden}

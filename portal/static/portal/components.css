@@ -26,7 +26,7 @@
 .vq-field input:focus-visible {outline:none}
 .vq-field input::placeholder,.vq-textarea::placeholder {color:var(--vq-text-muted);opacity:1}
 .vq-select,.vq-form input:not([type=checkbox]):not([type=radio]) {min-height:var(--vq-control-height);padding:7px 11px;border:1px solid var(--vq-control-border);border-radius:var(--vq-radius-control);color:var(--vq-text);background:var(--vq-surface);font-size:var(--vq-text-sm);max-width:100%;min-width:0}
-.vq-select {height:var(--vq-control-height);max-width:230px}
+.vq-select {height:var(--vq-control-height);max-width:230px;appearance:none;-webkit-appearance:none;padding-right:34px;background-image:var(--vq-icon-chevron-down);background-repeat:no-repeat;background-position:right 12px center;background-size:12px 12px}
 .vq-form input:not([type=checkbox]):not([type=radio]) {width:100%}
 .vq-form {display:grid;gap:20px}
 .vq-form-field {display:grid;gap:7px;min-width:0;align-content:start}
