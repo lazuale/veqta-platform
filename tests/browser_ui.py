@@ -13,12 +13,13 @@ def axe_report(page, script):
         const {violations, incomplete, passes} = await axe.run(document, {
             runOnly: {type: 'tag', values: ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa']}
         });
+        const describe = ({id, impact, nodes}) => ({
+            id, impact, nodes: nodes.map(({target, failureSummary}) => ({target, failureSummary}))
+        });
         return {
             version: axe.version,
-            violations: violations.map(({id, impact, nodes}) => ({
-                id, impact, nodes: nodes.map(({target, failureSummary}) => ({target, failureSummary}))
-            })),
-            incomplete: incomplete.map(({id, nodes}) => ({id, count: nodes.length})),
+            violations: violations.map(describe),
+            incomplete: incomplete.map(describe),
             passed: passes.length
         };
     }""")
@@ -313,9 +314,63 @@ def compare_screens(browser, destination):
     return comparisons
 
 
+def check_touch_controls(browser, server, data, destination):
+    from playwright.sync_api import expect
+
+    context = browser.new_context(viewport={"width": 390, "height": 844}, has_touch=True,
+        locale="ru-RU", reduced_motion="reduce", ignore_https_errors=server.ca_file is not None)
+    page = context.new_page()
+    measured = {}
+
+    def check(name, selector, *, input_selector=None):
+        control = page.locator(selector).first
+        expect(control).to_be_visible()
+        height = control.evaluate("el => el.getBoundingClientRect().height")
+        assert height >= 44, {name: height}
+        reading = {"height": height}
+        if input_selector:
+            font = page.locator(input_selector).first.evaluate("el => getComputedStyle(el).fontSize")
+            assert font == "16px", {name: font}
+            reading["font_size"] = font
+        measured[name] = reading
+
+    try:
+        page.goto(server.url + "/login/")
+        assert page.evaluate("matchMedia('(pointer: coarse)').matches")
+        check("login_input", '[name="username"]', input_selector='[name="username"]')
+        check("login_submit", 'main button[type="submit"]')
+        page.screenshot(path=destination / "touch-login.png", animations="disabled")
+        sign_in(page, server.url, data["username"], data["password"])
+        check("navigation", '.vq-menu-trigger')
+
+        page.goto(server.url + "/workwear/")
+        check("registry_search", '.vq-registry-tools .vq-field', input_selector='[data-input="registry-search"]')
+        check("registry_select", '[data-filter="status"]', input_selector='[data-filter="status"]')
+        trigger = page.locator('[data-action="toggle-filters"]')
+        trigger.tap()
+        expect(trigger).to_have_attribute("aria-expanded", "true")
+        check("registry_date", '[data-filter="date_from"]', input_selector='[data-filter="date_from"]')
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        page.screenshot(path=destination / "touch-filters.png", animations="disabled")
+
+        page.goto(server.url + f"/workwear/?request={data['request']}")
+        page.locator('.vq-toolbar [data-action="add"]').tap()
+        expect(page.get_by_role("dialog")).to_be_visible()
+        check("bulk_input", "#bulkText", input_selector="#bulkText")
+        page.locator('[data-tab="single"]').tap()
+        check("picker_search", '.vq-picker-input', input_selector='#oneSearch')
+        assert page.locator('.vq-modal-body').evaluate("el => el.scrollWidth <= el.clientWidth + 1")
+        page.screenshot(path=destination / "touch-picker.png", animations="disabled")
+    finally:
+        (destination / "touch.json").write_text(json.dumps(measured, ensure_ascii=False, indent=2))
+        context.close()
+    return measured
+
+
 def check_ui(browser, server, data, viewports, artifacts, axe_script, reference, server_options):
     target = artifacts / "ui"
     current = capture_screens(browser, server, data, viewports, target / "after", axe_script)
+    current["touch"] = check_touch_controls(browser, server, data, target)
     summary = {"current": current}
     if reference:
         with live_server(source_root=reference, nginx_executable=(server_options or {}).get("nginx_executable")) as original:

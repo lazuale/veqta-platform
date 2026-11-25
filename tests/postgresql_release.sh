@@ -226,6 +226,9 @@ if [[ ${1:-} == --browser ]]; then
   [[ -z "${VEQTA_TEST_AXE:-}" ]] || options+=(--axe-script "$VEQTA_TEST_AXE")
   [[ -z "${VEQTA_TEST_NGINX:-}" ]] || options+=(--nginx-executable "$VEQTA_TEST_NGINX")
   baseline=${VEQTA_TEST_UI_BASELINE:-}
+  if [[ -z "$baseline" ]]; then
+    baseline=$(git log -1 --format='%(trailers:key=UI-Baseline,valueonly)')
+  fi
   if [[ -z "$baseline" && -n "${GITHUB_EVENT_PATH:-}" ]]; then
     baseline=$(python - "$GITHUB_EVENT_PATH" <<'PYTHON'
 import json

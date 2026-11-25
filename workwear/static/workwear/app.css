@@ -234,8 +234,7 @@
   margin-top: 2px;
 }
 
-.vq-workwear .vq-registry-table .row-open .vq-icon,
-.vq-workwear .vq-member-list > tbody > tr > td:last-child .vq-icon {
+.vq-workwear :is(.row-open, .vq-member-arrow) .vq-icon {
   width: 13px;
   height: 13px;
 }
@@ -311,6 +310,13 @@
 .vq-workwear .vq-member-list .dept-col {
   max-width: 300px;
   line-height: 1.45;
+}
+
+.vq-workwear .vq-member-arrow {
+  display: inline-flex;
+  justify-content: center;
+  width: .35em;
+  vertical-align: middle;
 }
 
 .vq-workwear .small-dept {
@@ -1257,6 +1263,10 @@
 
   .vq-workwear .vq-picker-row {padding: 9px}
   .vq-workwear .vq-picker-results {max-height: 35vh}
+}
+
+@media (pointer: coarse) {
+  .vq-workwear .vq-advanced-fields input {font-size: var(--vq-control-input-text)}
 }
 
 @media (forced-colors: active) {

@@ -42,6 +42,7 @@
   --vq-radius-panel: 12px;
   --vq-control-height: 38px;
   --vq-control-small: 32px;
+  --vq-control-input-text: var(--vq-text-sm);
   --vq-header-height: 60px;
   --vq-content-width: 1680px;
   --vq-page-x: 28px;
@@ -57,4 +58,5 @@
 @media(max-width:900px) { :root { --vq-page-x:16px; --vq-page-y:20px; --vq-title-page:24px; } }
 @media(max-width:680px) { :root { --vq-title-page:22px; } }
 @media(max-height:800px) { :root { --vq-header-height:56px; --vq-page-y:16px; } }
+@media(pointer:coarse) { :root { --vq-control-height:44px; --vq-control-input-text:var(--vq-text-lg); } }
 @media(prefers-reduced-motion:reduce) { :root { --vq-motion:0ms; } }
