@@ -31,3 +31,13 @@ class SvgSourcePolicyTests(SimpleTestCase):
     def test_svg_rejects_invalid_xml(self):
         problems = inspect(Path("portal/static/portal/icons/example.svg"), b"<svg>")
         self.assertIn("Некорректная структура SVG", problems)
+
+    def test_svg_rejects_document_type_declarations(self):
+        content = b'<!DOCTYPE svg [<!ENTITY x "bad">]><svg xmlns="http://www.w3.org/2000/svg"/>'
+        problems = inspect(Path("portal/static/portal/icons/example.svg"), content)
+        self.assertIn("SVG не должен содержать DTD или объявления сущностей", problems)
+
+    def test_svg_rejects_external_references(self):
+        content = b'<svg xmlns="http://www.w3.org/2000/svg"><path fill="url(http://example.invalid/a)" d="M2 2h20"/></svg>'
+        problems = inspect(Path("portal/static/portal/icons/example.svg"), content)
+        self.assertIn("SVG не должен содержать ссылки или исполняемые значения", problems)

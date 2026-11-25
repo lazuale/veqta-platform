@@ -21,7 +21,7 @@ def inspect_svg(path, text):
     problems = []
     if not any(path.is_relative_to(root) for root in SVG_STATIC_ROOTS):
         problems.append("SVG разрешён только в каталогах статических ресурсов")
-    if re.search(r"<!\\s*(?:DOCTYPE|ENTITY)", text, re.IGNORECASE):
+    if re.search(r"<!\s*(?:DOCTYPE|ENTITY)", text, re.IGNORECASE):
         return problems + ["SVG не должен содержать DTD или объявления сущностей"]
     try:
         root = ET.fromstring(text)
@@ -41,7 +41,7 @@ def inspect_svg(path, text):
             attr_name = attribute.rsplit("}", 1)[-1]
             if attr_name not in SVG_ATTRIBUTES:
                 problems.append("SVG содержит недопустимый атрибут")
-            if re.search(r"(?:javascript:|https?:|data:|url\\s*\\()", value, re.IGNORECASE):
+            if re.search(r"(?:javascript:|https?:|data:|url\s*\()", value, re.IGNORECASE):
                 problems.append("SVG не должен содержать ссылки или исполняемые значения")
         if element.text and element.text.strip():
             problems.append("SVG не должен содержать текстовые узлы")
