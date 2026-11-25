@@ -219,12 +219,15 @@ def capture_screens(browser, server, data, viewports, destination, axe_script, *
                 journal = page.locator('[data-action="events"]')
                 journal.press("Enter")
                 expect(modal.locator(".vq-event-list")).to_be_visible()
+                # Кнопка журнала находится в подвале, положение фона задаём для обеих ревизий.
+                page.locator("#main").evaluate("main => { main.scrollTop = main.scrollHeight; }")
                 capture("journal", detailed=True)
                 page.keyboard.press("Escape")
                 expect(journal).to_be_focused()
 
                 page.locator('[data-action="finish"]').press("Enter")
                 expect(modal).to_be_visible()
+                page.locator("#main").evaluate("main => { main.scrollTop = 0; }")
                 capture("finish", detailed=True)
                 page.keyboard.press("Escape")
     except Exception:
