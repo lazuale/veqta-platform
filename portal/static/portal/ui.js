@@ -8,10 +8,18 @@ const ICONS = {
     alert: '<path d="m10.3 3.9-8.2 14a2 2 0 0 0 1.7 3h16.4a2 2 0 0 0 1.7-3l-8.2-14a2 2 0 0 0-3.4 0z"/><path d="M12 9v4m0 4h.01"/>',
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     people: '<path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 20v-2a4 4 0 0 0-3-3.87M16 2.13a4 4 0 0 1 0 7.75"/>',
-    shirt: '<path d="m8 3-6 4 3 5 3-2v11h8V10l3 2 3-5-6-4a4 4 0 0 1-8 0Z"/>'
+    shirt: '<path d="m8 3-6 4 3 5 3-2v11h8V10l3 2 3-5-6-4a4 4 0 0 1-8 0Z"/>',
+    'chevron-down': '<path d="m6 9 6 6 6-6"/>'
 };
 export function iconSvg(name) {
     return `<svg class="vq-icon" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+}
+export function installIconTokens(root=document) {
+    const element=root.documentElement;
+    if (!element) return;
+    const color=root.defaultView?.getComputedStyle(element).getPropertyValue('--vq-text-muted').trim() || '#626f7f';
+    const svg=iconSvg('chevron-down').replace('stroke="currentColor"', `stroke="${color}"`);
+    element.style.setProperty('--vq-icon-chevron-down', `url("data:image/svg+xml,${encodeURIComponent(svg)}")`);
 }
 export function decorateIcons(root=document) {
     for (const el of root.querySelectorAll('[data-vq-icon]')) {
@@ -59,6 +67,7 @@ export function enhanceShell(root=document) {
     });
 }
 if (typeof document!=='undefined') {
-    if (document.readyState==='loading') document.addEventListener('DOMContentLoaded',()=>{enhanceShell();decorateIcons();});
-    else {enhanceShell();decorateIcons();}
+    const initialize=()=>{installIconTokens();enhanceShell();decorateIcons();};
+    if (document.readyState==='loading') document.addEventListener('DOMContentLoaded',initialize);
+    else initialize();
 }
