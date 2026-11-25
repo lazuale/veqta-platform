@@ -9,7 +9,7 @@
 .vq-auth-panel>.vq-help {margin-top:24px}
 .vq-account-panel {width:100%;max-width:600px;margin:12px auto}
 .vq-account-panel>.vq-sub {margin:12px 0 28px}
-@media(max-width:680px) {.vq-auth-brand{padding:20px 16px}.vq-auth-brand>.vq-caption{display:none}.vq-auth-main{padding:32px 20px}.vq-portal-home{margin-top:0}}
+@media(max-width:680px) {.vq-auth-brand{padding:20px 16px}.vq-auth-brand>.vq-caption{display:none}.vq-auth-main{padding:32px 20px}}
 .vq-profile {padding:24px;max-width:720px}
 .vq-profile dl {display:grid;grid-template-columns:minmax(120px,1fr) 2fr;gap:16px;margin:0 0 24px}
 .vq-profile dt {color:var(--vq-text-muted)}
@@ -17,8 +17,5 @@
 @media(max-width:480px){.vq-profile dl{grid-template-columns:1fr;gap:8px}.vq-profile dd{margin-bottom:12px}}
 
 .vq-welcome{display:flex;align-items:center;justify-content:space-between;padding:28px 32px;background:var(--vq-surface);border:1px solid var(--vq-border);border-radius:var(--vq-radius-panel);overflow:hidden}.vq-welcome h2{font-size:24px;margin:12px 0 8px}.vq-welcome p{color:var(--vq-text-muted);max-width:580px}.vq-welcome-mark{font-weight:800;font-size:100px;line-height:1;color:var(--vq-surface-muted);padding:0 30px}
-
-.vq-app-entry-content h2{font-size:16px}
-
 
 @media(max-width:680px){.vq-welcome{padding:22px}.vq-welcome-mark{display:none}}

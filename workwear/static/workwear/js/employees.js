@@ -1,7 +1,7 @@
 /* Подбор сотрудников не записывает данные в БД. Отмена поиска сохраняет уже сделанный выбор. */
 export function installEmployees(ctx) {
     const {
-        settings, overlays, api, notice, $, currentMembers, esc, refreshMemberRows,
+        settings, overlays, api, notice, $, currentMembers, esc, icon, refreshMemberRows,
     } = ctx;
     async function searchEmployees(q, append = false) {
         settings.singleAbort?.abort();
@@ -48,7 +48,7 @@ export function installEmployees(ctx) {
         const selected = $('#singleSelected');
         if (selected) {
             selected.hidden = picked.length === 0;
-            selected.innerHTML = picked.length ? `<div class="vq-picker-selected-head"><strong>К добавлению · ${picked.length}</strong><button type="button" class="vq-picker-text-btn" data-action="picker-clear">Очистить выбор</button></div><div class="vq-picker-chips">${picked.map(e => `<span class="vq-picker-chip"><span title="${esc(e.full_name)}">${esc(e.full_name)} <small>${esc(e.personnel_number)}</small></span><button type="button" data-action="picker-remove" data-id="${e.id}" aria-label="Убрать ${esc(e.full_name)} из выбранных">×</button></span>`).join('')}</div>` : '';
+            selected.innerHTML = picked.length ? `<div class="vq-picker-selected-head"><strong>К добавлению · ${picked.length}</strong><button type="button" class="vq-picker-text-btn" data-action="picker-clear">Очистить выбор</button></div><div class="vq-picker-chips">${picked.map(e => `<span class="vq-picker-chip"><span title="${esc(e.full_name)}">${esc(e.full_name)} <small>${esc(e.personnel_number)}</small></span><button type="button" data-action="picker-remove" data-id="${e.id}" aria-label="Убрать ${esc(e.full_name)} из выбранных">${icon('x')}</button></span>`).join('')}</div>` : '';
         }
         const status = $('#singleMatchCount');
         if (status) {

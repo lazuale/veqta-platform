@@ -3,7 +3,7 @@
         <a class="vq-brand" href="{% url 'home' %}" aria-label="VEQTA — приложения"><span class="vq-mark">V</span><span class="vq-logo">VEQTA</span></a>
         <span class="vq-sep" aria-hidden="true"></span>
         <details class="vq-menu">
-            <summary class="vq-menu-trigger">{% if platform_current_app %}{{ platform_current_app.label }}{% else %}Приложения{% endif %}</summary>
+            <summary class="vq-menu-trigger">{% if platform_current_app %}<span class="vq-menu-label">{{ platform_current_app.label }}</span><span class="vq-menu-short-label">Приложения</span>{% else %}Приложения{% endif %}</summary>
             <nav class="vq-menu-popover" aria-label="Приложения">
                 <div class="vq-menu-caption">Рабочее пространство</div>
                 <a href="{% url 'home' %}" {% if not platform_current_app %}aria-current="page"{% endif %}>Все приложения</a>

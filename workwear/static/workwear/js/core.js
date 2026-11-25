@@ -116,9 +116,9 @@ export function installCore(ctx) {
     }
     function notice(message, bad = false) {
         clearTimeout(settings.toastTimer);
-        feedback.className = 'vq-toast' + (bad ? ' error' : '');
+        feedback.classList.toggle('error', bad);
         feedback.textContent = message;
-        settings.toastTimer = setTimeout(() => { feedback.textContent = ''; feedback.className = ''; }, 4800);
+        settings.toastTimer = setTimeout(() => { feedback.textContent = ''; }, 4800);
     }
     async function api(path, { method = 'GET', data, signal } = {}) {
         const headers = { 'Accept': 'application/json' };

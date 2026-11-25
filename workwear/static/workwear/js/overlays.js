@@ -110,14 +110,15 @@ export function installOverlays(ctx) {
             size = 'sm';
             title = 'Новая заявка';
             subtitle = 'Выберите организацию для новой заявки.';
-            body = `<label class="vq-field-label" for="newOrg">Организация</label><select class="vq-select" id="newOrg" style="width:100%;max-width:none">${settings.meta.organizations.map(o => `<option value="${esc(o.value)}" ${o.value === settings.meta.organizations[0].value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select><p class="vq-caption">Дата и время создания фиксируются при создании черновика.</p>`;
+            body = `<label class="vq-field-label" for="newOrg">Организация</label><select class="vq-select vq-select-wide" id="newOrg">${settings.meta.organizations.map(o => `<option value="${esc(o.value)}" ${o.value === settings.meta.organizations[0].value ? 'selected' : ''}>${esc(o.label)}</option>`).join('')}</select><p class="vq-caption">Дата и время создания фиксируются при создании черновика.</p>`;
             footer = actions(btn('Отмена', 'cancel'), btn('Создать черновик', 'create-now', 'primary', settings.meta.organizations.length ? '' : 'disabled'));
             if (!settings.meta.organizations.length) body += '<p class="vq-caption">Нет организаций, для которых разрешены заявки. Обратитесь к администратору.</p>';
         }
         else if (m === 'add') {
             title = 'Добавить сотрудников';
             subtitle = 'Доступны сотрудники организации заявки из последней принятой выгрузки 1С.';
-            tabs = `<div class="vq-modal-tabs"><button type="button" data-tab="bulk" class="${settings.tab === 'bulk' ? 'active' : ''}">Массовый поиск</button><button type="button" data-tab="single" class="${settings.tab === 'single' ? 'active' : ''}">Поиск и выбор</button></div>`;
+            size = settings.tab === 'single' ? 'vq-employee-picker vq-single-picker' : 'vq-employee-picker';
+            tabs = `<div class="vq-modal-tabs" role="group" aria-label="Способ подбора"><button type="button" data-tab="bulk" aria-pressed="${settings.tab === 'bulk'}">Массовый поиск</button><button type="button" data-tab="single" aria-pressed="${settings.tab === 'single'}">Поиск и выбор</button></div>`;
             if (settings.tab === 'bulk') {
                 const rows = settings.bulkChecked ? settings.resolved : [];
                 const found = rows.filter(r => r.status === 'matched');
@@ -134,7 +135,7 @@ export function installOverlays(ctx) {
                     ${renderGroup('Уже включены и дубликаты', others)}</div>` : '';
                 body = rosterHint() +
                     `<label class="vq-field-label" for="bulkText">ФИО или табельный номер — по одной записи в строке</label>` +
-                    `<textarea class="vq-textarea" id="bulkText" placeholder="Вставьте список из любого источника">${esc(settings.bulkText)}</textarea>` +
+                    `<textarea class="vq-textarea monospace" id="bulkText" placeholder="Вставьте список из любого источника">${esc(settings.bulkText)}</textarea>` +
                     `<p id="bulkReadProgress" class="vq-caption" role="status"></p>` +
                     `<div class="vq-counts"><span>Строк <b id="bulkLineCount">${ctx.bulkLines().length}</b></span>${resultCounts}</div>${resultRows}`;
                 const ready = ctx.bulkCandidates().length;
@@ -222,7 +223,7 @@ export function installOverlays(ctx) {
             body = `<div class="vq-notice"><b>Локальные изменения не записаны</b>Загрузка серверной версии заменит их без автоматического слияния.</div>${remote ? `<div class="vq-conflict-section"><b>Состав сотрудников</b>${list(personDiff, 'Состав одинаковый')}</div><div class="vq-conflict-section"><b>Назначенные позиции</b>${list(itemDiff, 'Расхождений не найдено')}</div>` : '<p class="vq-caption">Сравнение с серверной версией загружается…</p>'}<label class="vq-confirm"><input type="checkbox" id="reloadAck" ${settings.reloadAck ? 'checked' : ''}><span>Понимаю, что несохранённые изменения будут потеряны.</span></label>`;
             footer = actions(btn('Вернуться', 'cancel'), btn('Загрузить серверную версию', 'reload', 'primary', !settings.reloadAck ? 'disabled' : ''));
         }
-        return `<div class="vq-scrim" data-backdrop="1"><div class="vq-modal ${size}" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="vq-modal-head"><h3 id="modalTitle">${title}</h3><p>${subtitle}</p></div>${tabs}<div class="vq-modal-body">${body}</div><div class="vq-modal-footer">${footer}</div></div></div>`;
+        return `<div class="vq-scrim" data-backdrop="1"><div class="vq-modal ${size}" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-describedby="modalDescription"><div class="vq-modal-head"><h2 id="modalTitle">${title}</h2><p id="modalDescription">${subtitle}</p></div>${tabs}<div class="vq-modal-body">${body}</div><div class="vq-modal-footer">${footer}</div></div></div>`;
     }
     async function loadHistory(employeeId) {
         if (!can('view_workwearevent')) return [];
@@ -243,7 +244,7 @@ export function installOverlays(ctx) {
             return '';
         if (settings.archive) {
             const record = settings.archive, row = record.items;
-            return `<div class="vq-drawer-back" data-drawerback="1"><div class="vq-drawer" role="dialog" tabindex="-1" aria-modal="true" aria-label="Просмотр предыдущей заявки"><div class="vq-drawer-head"><div><button type="button" class="vq-name-action vq-preview-back" data-action="history-back">${icon('back')} Назад к сотруднику</button><div class="label" style="margin-top:15px">Завершённая заявка · Только просмотр</div><h3>Заявка № ${record.request_id}</h3><div class="meta">${fmt(record.completed_at)} · ${esc(record.snapshot_organization_name)}</div></div>${btn(icon('x'), 'close-drawer', 'small iconbtn', 'aria-label="Закрыть просмотр"')}</div><div class="vq-drawer-body"><div class="vq-inline-hint">Просмотр не изменяет состав текущего черновика.</div><div class="vq-sectionline">Сотрудник в предыдущей заявке</div><div class="vq-preview-person"><strong>${esc(record.full_name)}</strong><div class="secondary">${esc(record.personnel_number)} · ${esc(record.department_name || '')}</div></div><div class="vq-divider"></div><div class="vq-sectionline"><span>Назначенные позиции</span><span>${row.length}</span></div>${row.map(it => `<div class="vq-item-row"><div class="center"><strong>${esc(it.name)}</strong><div class="detail">Срок действия: ${it.validity_days} ${plural(it.validity_days, ['день', 'дня', 'дней'])}</div></div></div>`).join('')}<div class="vq-divider"></div><div class="vq-sectionline">Сведения о заявке</div><div class="vq-preview-facts"><span>Завершена</span><strong>${fmt(record.completed_at)}</strong><span>Организация</span><strong>${esc(record.snapshot_organization_name)}</strong></div></div><div class="vq-drawer-foot"><a href="?request=${record.request_id}" target="_blank" rel="noopener noreferrer" class="vq-btn primary vq-archive-link">Полная заявка · новая вкладка ${icon('chev')}</a>${btn('Назад', 'history-back', 'small')}</div></div></div>`;
+            return `<div class="vq-drawer-back" data-drawerback="1"><div class="vq-drawer" role="dialog" tabindex="-1" aria-modal="true" aria-label="Просмотр предыдущей заявки"><div class="vq-drawer-head"><div><button type="button" class="vq-name-action vq-preview-back" data-action="history-back">${icon('back')} Назад к сотруднику</button><div class="label vq-preview-label">Завершённая заявка · Только просмотр</div><h2>Заявка № ${record.request_id}</h2><div class="meta">${fmt(record.completed_at)} · ${esc(record.snapshot_organization_name)}</div></div>${btn(icon('x'), 'close-drawer', 'small iconbtn', 'aria-label="Закрыть просмотр"')}</div><div class="vq-drawer-body"><div class="vq-inline-hint">Просмотр не изменяет состав текущего черновика.</div><div class="vq-sectionline">Сотрудник в предыдущей заявке</div><div class="vq-preview-person"><strong>${esc(record.full_name)}</strong><div class="secondary">${esc(record.personnel_number)} · ${esc(record.department_name || '')}</div></div><div class="vq-divider"></div><div class="vq-sectionline"><span>Назначенные позиции</span><span>${row.length}</span></div>${row.map(it => `<div class="vq-item-row"><div class="center"><strong>${esc(it.name)}</strong><div class="detail">Срок действия: ${it.validity_days} ${plural(it.validity_days, ['день', 'дня', 'дней'])}</div></div></div>`).join('')}<div class="vq-divider"></div><div class="vq-sectionline">Сведения о заявке</div><div class="vq-preview-facts"><span>Завершена</span><strong>${fmt(record.completed_at)}</strong><span>Организация</span><strong>${esc(record.snapshot_organization_name)}</strong></div></div><div class="vq-drawer-foot"><a href="?request=${record.request_id}" target="_blank" rel="noopener noreferrer" class="vq-btn primary vq-archive-link">Полная заявка · новая вкладка ${icon('chev')}</a>${btn('Назад', 'history-back', 'small')}</div></div></div>`;
         }
         const historic = settings.history.get(ctx.historyKey(member.employee_id)) || [];
         let rows = '';
@@ -253,18 +254,20 @@ export function installOverlays(ctx) {
                 const it = ctx.assignmentItem(member, catalogItem);
                 const on = member.assignments.some(a => a.item_id === it.id), w = warning(member.employee_id, it.id);
                 const prior = historic.filter(h => h.items.some(x => x.id === it.id));
-                rows += `<div class="vq-item-row"><input type="checkbox" id="drawer-item-${it.id}" data-item="${it.id}" ${on ? 'checked' : ''} ${editable() && (it.is_active || on) && !settings.saving && !settings.pendingAssignments.has(ctx.assignmentKey(member.employee_id, it.id)) ? '' : 'disabled'}><div class="center"><label class="label" for="drawer-item-${it.id}">${esc(it.name)}</label><div class="detail ${w ? 'warning' : ''}">${w ? `Повтор · осталось ${w.remaining_days} дн.` : esc(it.category || '') + ' · ' + it.validity_days + ' ' + plural(it.validity_days, ['день', 'дня', 'дней'])}</div></div>${can('view_workwearevent') ? `<button class="vq-history-action ${w ? 'warning' : ''}" type="button" data-history="${it.id}" aria-expanded="${settings.historyShown === it.id}" title="История назначений: ${esc(it.name)}">${icon('clock')} <span>${prior.length ? prior.length + ' зап.' : ''}</span></button>` : ''}</div>`;
+                rows += `<div class="vq-item-row"><input type="checkbox" id="drawer-item-${it.id}" data-item="${it.id}" ${on ? 'checked' : ''} ${editable() && (it.is_active || on) && !settings.saving && !settings.pendingAssignments.has(ctx.assignmentKey(member.employee_id, it.id)) ? '' : 'disabled'}><div class="center"><label class="label" for="drawer-item-${it.id}">${esc(it.name)}</label><div class="detail ${w ? 'warning' : ''}">${w ? `Повтор · осталось ${w.remaining_days} дн.` : esc(it.category || '') + ' · ' + it.validity_days + ' ' + plural(it.validity_days, ['день', 'дня', 'дней'])}</div></div>${can('view_workwearevent') ? `<button class="vq-history-action ${w ? 'warning' : ''}" type="button" data-history="${it.id}" aria-expanded="${settings.historyShown === it.id}" aria-label="История назначений: ${esc(it.name)}" title="История назначений: ${esc(it.name)}">${icon('clock')} <span>${prior.length ? prior.length + ' зап.' : ''}</span></button>` : ''}</div>`;
                 if (settings.historyShown === it.id)
-                    rows += `<div class="vq-item-history" role="region" aria-label="История выбранной позиции"><div class="vq-history-navigation">${btn('‹ Назад к позициям', 'close-history', 'small')}</div><b>История · ${esc(it.name)}</b>${prior.length ? prior.map(rec => `<div class="prior-row ${w ? 'within-period' : ''}"><button type="button" class="vq-name-action" data-prior="${rec.request_id}">Заявка № ${rec.request_id} ${icon('chev')}</button><div>Завершена: ${fmt(rec.completed_at)}</div><div>Срок действия: ${rec.items.find(item => item.id === it.id).validity_days} ${plural(rec.items.find(item => item.id === it.id).validity_days, ['день', 'дня', 'дней'])}</div></div>`).join('') : '<p class="vq-history-empty">Завершённых заявок по этой позиции не найдено.</p>'}</div>`;
+                    rows += `<div class="vq-item-history" role="region" aria-label="История выбранной позиции"><div class="vq-history-navigation">${btn(icon('back') + ' Назад к позициям', 'close-history', 'small')}</div><b>История · ${esc(it.name)}</b>${prior.length ? prior.map(rec => `<div class="prior-row ${w ? 'within-period' : ''}"><button type="button" class="vq-name-action" data-prior="${rec.request_id}">Заявка № ${rec.request_id} ${icon('chev')}</button><div>Завершена: ${fmt(rec.completed_at)}</div><div>Срок действия: ${rec.items.find(item => item.id === it.id).validity_days} ${plural(rec.items.find(item => item.id === it.id).validity_days, ['день', 'дня', 'дней'])}</div></div>`).join('') : '<p class="vq-history-empty">Завершённых заявок по этой позиции не найдено.</p>'}</div>`;
             }
         }
-        return `<div class="vq-drawer-back" data-drawerback="1"><div class="vq-drawer ${settings.historyShown !== null ? 'vq-history-mode' : ''}" role="dialog" tabindex="-1" aria-modal="true" aria-label="Карточка сотрудника"><div class="vq-drawer-head"><div><div class="label">Сотрудник · ${esc(member.personnel_number)}</div><h3>${esc(member.full_name)}</h3><div class="meta">${esc(member.department_name || '')}</div></div>${btn(icon('x'), 'close-drawer', 'small iconbtn', 'aria-label="Закрыть карточку"')}</div><div class="vq-drawer-body"><div class="vq-sectionline"><span>${can('view_workwearevent') ? 'Позиции · история и контроль повторов' : 'Назначенные позиции'}</span><span data-drawer-assigned>${byItem().length ? `Назначено позиций: ${member.assignments.length} из ${byItem().length}` : `Назначений: ${member.assignments.length}`}</span></div>${byItem().length ? rows : `<p class="vq-inline-hint">${can('view_workwearitem') ? 'Нет доступных позиций. Обратитесь к администратору для заполнения каталога.' : 'Для просмотра каталога необходимо соответствующее разрешение.'}</p>`}</div><div class="vq-drawer-foot">${editable() ? btn('Исключить из черновика', 'remove-one', 'small danger') : '<span class="secondary">Только просмотр</span>'}<div class="vq-drawer-actions"><div class="vq-drawer-save">${dirty() ? 'Есть изменения. Сохраните заявку после закрытия карточки.' : 'Изменения сохранены'}</div>${btn('Закрыть', 'close-drawer', 'primary')}</div></div></div></div>`;
+        return `<div class="vq-drawer-back" data-drawerback="1"><div class="vq-drawer ${settings.historyShown !== null ? 'vq-history-mode' : ''}" role="dialog" tabindex="-1" aria-modal="true" aria-label="Карточка сотрудника"><div class="vq-drawer-head"><div><div class="label">Сотрудник · ${esc(member.personnel_number)}</div><h2>${esc(member.full_name)}</h2><div class="meta">${esc(member.department_name || '')}</div></div>${btn(icon('x'), 'close-drawer', 'small iconbtn', 'aria-label="Закрыть карточку"')}</div><div class="vq-drawer-body"><div class="vq-sectionline"><span>${can('view_workwearevent') ? 'Позиции · история и контроль повторов' : 'Назначенные позиции'}</span><span data-drawer-assigned>${byItem().length ? `Назначено позиций: ${member.assignments.length} из ${byItem().length}` : `Назначений: ${member.assignments.length}`}</span></div>${byItem().length ? rows : `<p class="vq-inline-hint">${can('view_workwearitem') ? 'Нет доступных позиций. Обратитесь к администратору для заполнения каталога.' : 'Для просмотра каталога необходимо соответствующее разрешение.'}</p>`}</div><div class="vq-drawer-foot">${editable() ? btn('Исключить из черновика', 'remove-one', 'small danger') : '<span class="secondary">Только просмотр</span>'}<div class="vq-drawer-actions"><div class="vq-drawer-save">${dirty() ? 'Есть изменения. Сохраните заявку после закрытия карточки.' : 'Изменения сохранены'}</div>${btn('Закрыть', 'close-drawer', 'primary')}</div></div></div></div>`;
     }
     function renderOverlay() {
         const had = overlays.firstElementChild;
         const oldFocus = overlays.contains(document.activeElement) ? document.activeElement : null;
-        if (!had && (settings.modal || settings.drawer !== null))
-            settings.overlayReturn = document.activeElement;
+        if (!had && (settings.modal || settings.drawer !== null)) {
+            const element = document.activeElement;
+            settings.overlayReturn = { element, selector: ctx.controlSelector(element) };
+        }
         const scroll = overlays.querySelector('.vq-drawer-body,.vq-modal-body')?.scrollTop || 0;
         const key = ctx.controlSelector(oldFocus);
         overlays.innerHTML = settings.modal ? modalMarkup() : settings.drawer !== null ? drawerMarkup() : '';
@@ -277,13 +280,18 @@ export function installOverlays(ctx) {
         const target = overlays.querySelector('.vq-modal,.vq-drawer');
         if (target) {
             const restore = key && overlays.querySelector(key);
-            if (restore)
+            if (restore?.getClientRects().length && !restore.disabled)
                 restore.focus({ preventScroll: true });
             else
                 target.focus({ preventScroll: true });
         }
-        else if (had && settings.overlayReturn?.isConnected) {
-            settings.overlayReturn.focus({ preventScroll: true });
+        else if (had && settings.overlayReturn) {
+            const { element, selector } = settings.overlayReturn;
+            const restore = element.isConnected ? element : selector && root.querySelector(selector);
+            if (restore?.getClientRects().length && !restore.disabled)
+                restore.focus({ preventScroll: true });
+            else
+                ctx.main.querySelector('h1')?.focus({ preventScroll: true });
             settings.overlayReturn = null;
         }
         if (settings.busy) ctx.setBusy(true);

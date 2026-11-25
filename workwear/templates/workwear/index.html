@@ -4,5 +4,5 @@
 {% block extra_css %}<link rel="stylesheet" href="{% static 'workwear/app.css' %}">{% endblock %}
 {% block app_class %}vq-workwear{% endblock %}
 {% block app_attributes %}id="veq-app" data-api-base="/workwear/api/"{% endblock %}
-{% block overlays %}<div id="overlays"></div><div id="feedback" aria-live="polite" aria-atomic="true"></div>{% endblock %}
+{% block overlays %}<div id="overlays"></div><div id="feedback" class="vq-toast" role="status" aria-live="polite" aria-atomic="true"></div>{% endblock %}
 {% block extra_js %}<script type="module" src="{% static 'workwear/app.js' %}"></script>{% endblock %}

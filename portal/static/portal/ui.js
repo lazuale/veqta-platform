@@ -9,30 +9,36 @@ const ICONS = {
     x: '<path d="M18 6 6 18M6 6l12 12"/>',
     people: '<path d="M16 20v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 10a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 20v-2a4 4 0 0 0-3-3.87M16 2.13a4 4 0 0 1 0 7.75"/>',
     shirt: '<path d="m8 3-6 4 3 5 3-2v11h8V10l3 2 3-5-6-4a4 4 0 0 1-8 0Z"/>',
-    'chevron-down': '<path d="m6 9 6 6 6-6"/>'
+    'chevron-down': '<path d="m6 9 6 6 6-6"/>',
+    check: '<path d="m5 12 4 4L19 6"/>'
 };
 export function iconSvg(name) {
-    return `<svg class="vq-icon" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICONS[name] || ''}</svg>`;
+    if (!Object.hasOwn(ICONS, name)) return '';
+    return `<svg xmlns="http://www.w3.org/2000/svg" class="vq-icon" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${ICONS[name]}</svg>`;
 }
 export function installIconTokens(root=document) {
-    const element=root.documentElement;
+    const element = root.documentElement;
     if (!element) return;
-    const color=root.defaultView?.getComputedStyle(element).getPropertyValue('--vq-text-muted').trim() || '#626f7f';
-    const svg=iconSvg('chevron-down').replace('stroke="currentColor"', `stroke="${color}"`);
-    element.style.setProperty('--vq-icon-chevron-down', `url("data:image/svg+xml,${encodeURIComponent(svg)}")`);
+    const image = svg => `url("data:image/svg+xml,${encodeURIComponent(svg)}")`;
+    for (const name of ['chevron-down', 'check', 'alert']) {
+        element.style.setProperty(`--vq-icon-${name}`, image(iconSvg(name)));
+    }
+    // У нативного select нет отдельного элемента для маски стрелки.
+    const color = root.defaultView.getComputedStyle(element).getPropertyValue('--vq-text-muted').trim();
+    element.style.setProperty('--vq-select-chevron', image(iconSvg('chevron-down').replace('currentColor', color)));
 }
 export function decorateIcons(root=document) {
     for (const el of root.querySelectorAll('[data-vq-icon]')) {
-        const name=el.dataset.vqIcon;
-        if (!Object.hasOwn(ICONS,name)) continue;
-        el.innerHTML=iconSvg(name);
+        const svg = iconSvg(el.dataset.vqIcon);
+        if (svg) el.innerHTML = svg;
     }
 }
 /** Снимаем только inert, установленный этим модулем. */
 export function syncModalInert(root, overlay) {
     const active=!!overlay?.querySelector('[role="dialog"],[role="alertdialog"]');
-    for (const child of root.children) {
-        if (child===overlay || child.hasAttribute('aria-live')) continue;
+    const skip = root.ownerDocument.querySelector('.vq-skip');
+    for (const child of [skip, ...root.children]) {
+        if (!child || child===overlay || child.hasAttribute('aria-live')) continue;
         if (active && !child.inert) {child.inert=true;child.dataset.vqModalInert='1';}
         else if (!active && child.dataset.vqModalInert) {child.inert=false;delete child.dataset.vqModalInert;}
     }

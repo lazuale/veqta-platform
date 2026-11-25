@@ -39,7 +39,7 @@ export function installController(ctx) {
                 await openRegistry({ route: false });
         }
         catch (err) {
-            main.innerHTML = `<section class="vq-head"><h1>Не удалось загрузить заявки</h1></section><div class="vq-notice error">${esc(err.message)} <a href="/login/">Войти</a></div>`;
+            main.innerHTML = `<section class="vq-head"><h1>Не удалось загрузить заявки</h1></section><div class="vq-notice error" role="alert">${esc(err.message)} <a href="/login/">Войти</a></div>`;
         }
     }
     function rememberMatrixFocus(button) {
@@ -156,6 +156,7 @@ export function installController(ctx) {
                 case 'reset-filters':
                     settings.registry = { q: '', status: '', organization_id: '', date_basis: 'created', date_from: '', date_to: '', sort: 'newest', offset: 0, limit: 30 };
                     renderRegistry();
+                    $('[data-input="registry-search"]')?.focus();
                     await loadRegistry();
                     break;
                 case 'create':
@@ -357,10 +358,13 @@ export function installController(ctx) {
                     settings.archive = null;
                     renderOverlay();
                     break;
-                case 'close-history':
+                case 'close-history': {
+                    const item = settings.historyShown;
                     settings.historyShown = null;
                     renderOverlay();
+                    overlays.querySelector(`[data-history="${item}"]`)?.focus();
                     break;
+                }
                 case 'reset-period':
                     settings.registry.date_basis = 'created';
                     settings.registry.date_from = '';
@@ -368,6 +372,7 @@ export function installController(ctx) {
                     settings.registry.sort = 'newest';
                     settings.registry.offset = 0;
                     renderRegistry();
+                    $('[data-action="reset-period"]')?.focus();
                     await loadRegistry();
                     break;
                 case 'cancel':
