@@ -3,6 +3,7 @@ from collections import Counter
 from datetime import timedelta
 import json
 from pathlib import Path
+import re
 import secrets
 from time import perf_counter
 import traceback
@@ -250,6 +251,53 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             open_matrix()
             return {"keys":["Tab","Shift+Tab","arrows","Home","End","Ctrl+Home","Ctrl+End","PageUp","PageDown"],"horizontal_focus_visible":True}
 
+        def picker_keyboard():
+            request_id = data["request"]
+            original = database_call(lambda: persisted(request_id))
+            page.goto(base + f'/workwear/?request={request_id}')
+            page.locator('.vq-toolbar [data-action="add"]').press('Enter')
+            page.locator('[data-tab="single"]').press('Enter')
+            search = page.locator('#oneSearch')
+            name = 'Совпадающий Тестовый Сотрудник'
+            search.fill(name)
+            people = list(zip(data['people'][-2:], ('RC-0998', 'RC-0999'), strict=True))
+            for employee_id, number in people:
+                checkbox = page.locator(f'[data-pick="{employee_id}"]')
+                expect(checkbox).to_have_accessible_name(f'Выбрать {name}, табельный номер {number}')
+                checkbox.press('Space')
+                expect(checkbox).to_be_checked()
+            chips = page.locator('[data-action="picker-remove"]')
+            for index, (_, number) in enumerate(people):
+                expect(chips.nth(index)).to_have_accessible_name(f'Убрать из выбранных {name}, табельный номер {number}')
+
+            target = re.compile(r'/ui/employees/\?.*q=RC-0002')
+            with delayed_requests(page, target) as pending:
+                with page.expect_request(lambda request: target.search(request.url) is not None):
+                    search.fill('RC-0002')
+                expect(page.locator('#singleMatchCount')).to_have_text('Поиск…')
+                search.press('Tab')
+                expect(page.locator('[data-action="picker-clear"]')).to_be_focused()
+                page.keyboard.press('Tab')
+                expect(chips.first).to_be_focused()
+                page.keyboard.press('Tab')
+                expect(chips.last).to_be_focused()
+                assert pending
+            expect(page.locator('#singleMatchCount')).to_have_text('Найдено: 1')
+            expect(chips.last).to_be_focused()
+
+            page.locator('[data-action="apply-one"]').press('Enter')
+            page.locator('[data-input="member-search"]').fill(name)
+            for employee_id, number in people:
+                label = f'{name}, табельный номер {number}'
+                expect(page.locator(f'[data-check="{employee_id}"]')).to_have_accessible_name(f'Выбрать {label}')
+                expect(page.locator(f'[data-person="{employee_id}"]')).to_have_accessible_name(label)
+            page.locator('[data-mode="matrix"]').press('Enter')
+            for employee_id, number in people:
+                cell = page.locator(f'[data-cell="{employee_id}:{data["items"][0]["id"]}"]')
+                expect(cell).to_have_accessible_name(re.compile(f'табельный номер {number}$'))
+            assert database_call(lambda: persisted(request_id)) == original
+            return {"matching_names_disambiguated": len(people), "focus_preserved_after_search": True}
+
         def geometry():
             measurements = []
             for width, height in VIEWPORTS:
@@ -411,7 +459,9 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             for text in ('Дубликат ввода','Неоднозначно','Нет в актуальном справочнике','Другая организация','Не найден'):
                 expect(page.locator('.vq-modal-body')).to_contain_text(text)
             assert database_call(lambda: persisted(request_id)) == original
-            page.locator('select[data-resolve]').select_option(str(data['people'][998]))
+            ambiguous = page.locator('select[data-resolve]')
+            expect(ambiguous).to_have_accessible_name('Уточнить сотрудника по записи «Совпадающий Тестовый Сотрудник»')
+            ambiguous.select_option(str(data['people'][998]))
             expect(page.locator('#bulkReadyNote')).to_contain_text('2')
             page.locator('select[data-resolve]').select_option('')
             expect(page.locator('[data-action="apply-bulk"]')).to_contain_text('(1)')
@@ -616,12 +666,17 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
             initial=database_call(lambda:persisted(request_id))
             warning_cell=page.locator(f'[data-cell="{data["people"][0]}:{data["items"][0]["id"]}"]')
             expect(warning_cell).to_have_class(__import__('re').compile(r'warn'))
-            page.locator(f'[data-person="{data["people"][0]}"]').first.click()
-            page.locator(f'[data-history="{data["items"][0]["id"]}"]').click()
+            opener = page.locator(f'[data-person="{data["people"][0]}"]').first
+            opener.press('Enter')
+            page.locator(f'[data-history="{data["items"][0]["id"]}"]').press('Enter')
             expect(page.locator('.vq-item-history')).to_contain_text(f'Заявка № {data["previous_request"]}')
-            page.locator(f'[data-prior="{data["previous_request"]}"]').click()
+            prior = page.locator(f'[data-prior="{data["previous_request"]}"]')
+            prior.press('Enter')
             expect(page.locator('.vq-preview-facts')).to_be_visible()
+            page.locator('[data-action="history-back"]').last.press('Enter')
+            expect(prior).to_be_focused()
             page.keyboard.press('Escape')
+            expect(opener).to_be_focused()
             page.locator('[data-action="finish"]').click()
             expect(page.locator('.vq-modal-body')).to_contain_text('Автоматическое исключение')
             page.locator('#finishAck').check()
@@ -919,6 +974,7 @@ def check_matrix(actor, executable, artifacts, engine="chromium", axe_script=Non
         run("headers-and-data", headers)
         run("accessibility", accessibility)
         run("keyboard-navigation", keyboard)
+        run("picker-keyboard", picker_keyboard)
         run("responsive-geometry", geometry)
         run("cells-modes-save", cells_and_modes)
         run("pagination-and-batch", pagination_and_batch)

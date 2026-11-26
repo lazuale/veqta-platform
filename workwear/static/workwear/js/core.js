@@ -37,6 +37,8 @@ export function installCore(ctx) {
     const assignmentKey = (employeeId, itemId) => `${settings.request?.id}:${employeeId}:${itemId}`;
     const controlSelector = el => {
         if (!el) return null;
+        if (el.dataset?.action && el.dataset.id)
+            return `[data-action="${CSS.escape(el.dataset.action)}"][data-id="${CSS.escape(el.dataset.id)}"]`;
         for (const attr of ['data-cell', 'data-action', 'data-history', 'data-item', 'data-choice', 'data-pick', 'data-resolve', 'data-input', 'data-filter', 'data-check', 'data-person', 'data-mode', 'data-tab', 'id']) {
             const value = el.getAttribute?.(attr);
             if (value !== null && value !== undefined) return `[${attr}="${CSS.escape(value)}"]`;
@@ -85,6 +87,8 @@ export function installCore(ctx) {
         return snapshot?.name ? { ...item, ...snapshot, id: item.id } : item;
     };
     const itemDescription = item => `${item.name}${item.category ? ' · ' + item.category : ''}${item.validity_days ? ' · ' + item.validity_days + ' ' + plural(item.validity_days, ['день', 'дня', 'дней']) : ''}`;
+    const employeeLabel = ({ full_name, personnel_number }) => personnel_number
+        ? `${full_name}, табельный номер ${personnel_number}` : full_name;
     const currentMembers = () => settings.request?.members || [];
     const importSummary = () => {
         const data = settings.meta?.import;
@@ -160,7 +164,7 @@ export function installCore(ctx) {
     Object.assign(ctx, {
         root, main, overlays, $, $$, esc, copy, plural, fmt, fmtTime, norm, icon, btn, field,
         settings, can, historyKey, assignmentKey, controlSelector, setBusy, byItem, assignmentItem,
-        itemDescription, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable,
+        itemDescription, employeeLabel, currentMembers, importSummary, allOrgOptions, tone, isDraft, editable,
         newSelection, itemNames, assignments, assignedCount, emptyCount, normalizedDraft, dirty,
         notice, api, fail,
     });

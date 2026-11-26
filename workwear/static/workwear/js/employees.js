@@ -1,7 +1,7 @@
 /* Подбор сотрудников не записывает данные в БД. Отмена поиска сохраняет уже сделанный выбор. */
 export function installEmployees(ctx) {
     const {
-        settings, overlays, api, notice, $, currentMembers, esc, icon, refreshMemberRows,
+        settings, overlays, api, notice, $, currentMembers, employeeLabel, esc, icon, refreshMemberRows,
     } = ctx;
     async function searchEmployees(q, append = false) {
         settings.singleAbort?.abort();
@@ -47,8 +47,11 @@ export function installEmployees(ctx) {
             .filter(e => settings.picked.has(e.id) && !already.has(e.id));
         const selected = $('#singleSelected');
         if (selected) {
+            const active = document.activeElement;
+            const focus = selected.contains(active) && ctx.controlSelector(active);
             selected.hidden = picked.length === 0;
-            selected.innerHTML = picked.length ? `<div class="vq-picker-selected-head"><strong>К добавлению · ${picked.length}</strong><button type="button" class="vq-picker-text-btn" data-action="picker-clear">Очистить выбор</button></div><div class="vq-picker-chips">${picked.map(e => `<span class="vq-picker-chip"><span title="${esc(e.full_name)}">${esc(e.full_name)} <small>${esc(e.personnel_number)}</small></span><button type="button" data-action="picker-remove" data-id="${e.id}" aria-label="Убрать ${esc(e.full_name)} из выбранных">${icon('x')}</button></span>`).join('')}</div>` : '';
+            selected.innerHTML = picked.length ? `<div class="vq-picker-selected-head"><strong>К добавлению · ${picked.length}</strong><button type="button" class="vq-picker-text-btn" data-action="picker-clear">Очистить выбор</button></div><div class="vq-picker-chips">${picked.map(e => `<span class="vq-picker-chip"><span title="${esc(e.full_name)}">${esc(e.full_name)} <small>${esc(e.personnel_number)}</small></span><button type="button" data-action="picker-remove" data-id="${e.id}" aria-label="Убрать из выбранных ${esc(employeeLabel(e))}">${icon('x')}</button></span>`).join('')}</div>` : '';
+            if (focus) selected.querySelector(focus)?.focus({ preventScroll: true });
         }
         const status = $('#singleMatchCount');
         if (status) {
@@ -68,7 +71,7 @@ export function installEmployees(ctx) {
             const disabled = included || inactive;
             const checked = settings.picked.has(e.id);
             const detail = `${esc(e.personnel_number)}${e.position_name ? ' · ' + esc(e.position_name) : ''}`;
-            return `<label class="vq-picker-row${checked ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}"><input type="checkbox" data-pick="${e.id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} aria-label="Выбрать ${esc(e.full_name)}"><span class="vq-picker-person"><strong>${esc(e.full_name)}</strong><small>${detail}</small>${e.department_name ? `<small>${esc(e.department_name)}</small>` : ''}</span>${disabled ? `<span class="vq-picker-status">${included ? 'В заявке' : 'Недоступен'}</span>` : ''}</label>`;
+            return `<label class="vq-picker-row${checked ? ' is-selected' : ''}${disabled ? ' is-disabled' : ''}"><input type="checkbox" data-pick="${e.id}" ${checked ? 'checked' : ''} ${disabled ? 'disabled' : ''} aria-label="Выбрать ${esc(employeeLabel(e))}"><span class="vq-picker-person"><strong>${esc(e.full_name)}</strong><small>${detail}</small>${e.department_name ? `<small>${esc(e.department_name)}</small>` : ''}</span>${disabled ? `<span class="vq-picker-status">${included ? 'В заявке' : 'Недоступен'}</span>` : ''}</label>`;
         }).join('')}</div>`;
         const more = valid && options.length && !settings.singleLoading && settings.singleHasMore &&
             options.length < settings.singleTotal ?

@@ -354,10 +354,13 @@ export function installController(ctx) {
                     settings.historyShown = null;
                     renderOverlay();
                     break;
-                case 'history-back':
+                case 'history-back': {
+                    const prior = settings.archive?.request_id;
                     settings.archive = null;
                     renderOverlay();
+                    if (prior) overlays.querySelector(`[data-prior="${prior}"]`)?.focus();
                     break;
+                }
                 case 'close-history': {
                     const item = settings.historyShown;
                     settings.historyShown = null;
